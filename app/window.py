@@ -11,7 +11,7 @@ from pathlib import Path
 from PySide6.QtCore import QObject, QThread, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QDockWidget, QFileDialog, QHBoxLayout, QLabel,
+    QCheckBox, QComboBox, QDockWidget, QFileDialog, QHBoxLayout, QLabel, QSizePolicy,
     QMainWindow, QMessageBox, QPlainTextEdit, QProgressBar, QPushButton,
     QSplitter, QTableView, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 
@@ -96,33 +96,52 @@ class MainWindow(QMainWindow):
     # --- 화면 ---------------------------------------------------------
     def _build(self) -> None:
         self.video_area = QWidget()
-        self.video_area.setMinimumSize(480, 270)
+        # **작게 줄일 수 있어야 한다.** 최소 크기를 크게 잡으면 파형이나 표를 아무리
+        # 늘리려 해도 영상이 자리를 내주지 않는다(사용자 지적 2026-08-12).
+        # 타임코드만 잡을 때는 영상이 손바닥만 해도 된다.
+        self.video_area.setMinimumSize(120, 68)
         self.video_area.setStyleSheet("background: #111;")
         self.video_area.setAttribute(Qt.WA_DontCreateNativeAncestors)
         self.video_area.setAttribute(Qt.WA_NativeWindow)
 
         self.position_label = QLabel("00:00:00,000 / 00:00:00,000")
-        self.play_button = QPushButton("재생/멈춤 (Space)")
+        self.position_label.setMinimumWidth(0)
+        self.position_label.setToolTip("재생 위치 / 전체 길이")
+        self.play_button = QPushButton("▶ ‖")
+        self.play_button.setToolTip("재생 / 일시정지 (Esc, Space)")
         self.play_button.clicked.connect(self.toggle_play)
-        back = QPushButton("◀ 1프레임")
+        back = QPushButton("◀|")
+        back.setToolTip("1프레임 뒤로 (Ctrl+Shift+←)")
         back.clicked.connect(lambda: self.step(-1))
-        forward = QPushButton("1프레임 ▶")
+        forward = QPushButton("|▶")
+        forward.setToolTip("1프레임 앞으로 (Ctrl+Shift+→)")
         forward.clicked.connect(lambda: self.step(1))
 
         controls = QHBoxLayout()
+        controls.setContentsMargins(2, 0, 2, 0)
+        controls.setSpacing(2)
         controls.addWidget(back)
         controls.addWidget(self.play_button)
         controls.addWidget(forward)
-        zoom_in = QPushButton("파형 ＋")
+        zoom_in = QPushButton("＋")
         zoom_in.setToolTip("파형 확대 (Alt+=, Ctrl+휠)")
         zoom_in.clicked.connect(lambda: self.waveform.zoom(0.7))
-        zoom_out = QPushButton("파형 －")
+        zoom_out = QPushButton("－")
         zoom_out.setToolTip("파형 축소 (Alt+-)")
         zoom_out.clicked.connect(lambda: self.waveform.zoom(1.4))
         controls.addWidget(zoom_in)
         controls.addWidget(zoom_out)
         controls.addStretch(1)
         controls.addWidget(self.position_label)
+
+        # **단추와 글자가 폭을 잡아먹으면 영상을 줄일 수 없다.** 줄어들 수 있게
+        # 해 둔다 — 좁아지면 잘려도 된다. 조작은 단축키로도 되고, 설명은 툴팁에 있다.
+        for button in (self.play_button, back, forward, zoom_in, zoom_out):
+            button.setMaximumWidth(42)
+            button.setMinimumWidth(20)
+            button.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+            button.setFlat(True)
+        self.position_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
 
         self.waveform = Waveform()
         self.waveform.seek_requested.connect(self._seek_to)
@@ -133,10 +152,13 @@ class MainWindow(QMainWindow):
         # 번역을 다듬을 때는 표를 크게 쓴다(사용자 지적 2026-08-12).
         control_bar = QWidget()
         control_bar.setLayout(controls)
+        control_bar.setMinimumWidth(0)
 
         video_panel = QWidget()
+        video_panel.setMinimumWidth(0)
         video_box = QVBoxLayout(video_panel)
         video_box.setContentsMargins(0, 0, 0, 0)
+        video_box.setSpacing(2)
         video_box.addWidget(self.video_area, 1)
         video_box.addWidget(control_bar)
 
@@ -158,6 +180,9 @@ class MainWindow(QMainWindow):
         self.table.setColumnWidth(3, 60)
         self.table.setColumnWidth(4, 240)      # 원어
         self.table.horizontalHeader().setStretchLastSection(True)
+        self.table.setMinimumWidth(0)
+        self.table.setMinimumHeight(0)
+        self.table.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
 
         self.top_splitter.addWidget(self.table)
         self.top_splitter.setSizes([620, 660])
