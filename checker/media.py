@@ -21,6 +21,43 @@ class MediaToolUnavailable(Exception):
     """ffmpeg/ffprobe를 찾지 못했다."""
 
 
+def _windows_users() -> list[Path]:
+    """WSL에서 본 Windows 사용자 폴더들. 리눅스 계정 이름과 다를 수 있다."""
+    users = Path("/mnt/c/Users")
+    if not users.is_dir():
+        return []
+    try:
+        return [u for u in users.iterdir() if u.is_dir()]
+    except OSError:
+        return []
+
+
+def _known_places(name: str):
+    """도구가 흔히 놓이는 자리. Windows에서도 WSL에서도 같은 자리를 본다."""
+    places = []
+    appdata = os.environ.get("APPDATA")
+    if appdata:
+        places.append(Path(appdata) / "Subtitle Edit" / "ffmpeg")
+    home = Path.home()
+    # winget으로 받은 것을 먼저 본다. Subtitle Edit이 딸려 보내는 ffmpeg은 8.0이라
+    # whisper 필터가 없다 — 있는 쪽을 먼저 집어야 전사가 된다.
+    places += [
+        home / "AppData/Local/Microsoft/WinGet/Links",
+        Path("/mnt/c/Program Files/ffmpeg/bin"),
+        home / "AppData/Roaming/Subtitle Edit/ffmpeg",
+    ]
+    # winget은 실행 파일을 Links가 아니라 Packages 밑에 풀어 놓고 PATH에만 넣는다.
+    # WSL에서 부르면 그 PATH가 없으므로 직접 찾아 준다.
+    for root in {home / "AppData/Local/Microsoft/WinGet/Packages"} | {
+            u / "AppData/Local/Microsoft/WinGet/Packages" for u in _windows_users()}:
+        if root.is_dir():
+            places += sorted(root.glob("Gyan.FFmpeg*/ffmpeg-*/bin"), reverse=True)
+
+    # WSL에서 Windows 쪽 사용자 폴더를 볼 때는 리눅스 계정 이름이 다를 수 있다.
+    places += [u / "AppData/Roaming/Subtitle Edit/ffmpeg" for u in _windows_users()]
+    return [folder / f"{name}{suffix}" for folder in places for suffix in (".exe", "")]
+
+
 def _find(name: str) -> str:
     """환경변수 > PATH > 흔한 자리 순으로 찾는다."""
     env = os.environ.get(f"{name.upper()}_PATH") or os.environ.get("FFMPEG_DIR")
@@ -34,6 +71,13 @@ def _find(name: str) -> str:
     found = shutil.which(name) or shutil.which(f"{name}.exe")
     if found:
         return found
+
+    # **Subtitle Edit이 자기 ffmpeg을 가지고 있다.** SE 안에서 플러그인으로 돌 때
+    # PATH가 비어 있어도 그것을 쓰면 된다 — 사용자에게 ffmpeg을 따로 깔라고 하지
+    # 않아도 되고, SE가 쓰는 것과 같은 것을 써서 결과가 어긋나지 않는다.
+    for candidate in _known_places(name):
+        if candidate.is_file():
+            return str(candidate)
 
     raise MediaToolUnavailable(
         f"{name}을(를) 찾지 못했습니다. PATH에 넣거나 {name.upper()}_PATH 환경변수로 "
@@ -69,6 +113,7 @@ def probe(video: Path) -> MediaInfo:
          "-show_entries", "format=duration",
          "-of", "default=noprint_wrappers=1", str(video)],
         capture_output=True, text=True, check=False,
+        encoding="utf-8", errors="replace",
     )
     if out.returncode != 0:
         raise MediaToolUnavailable(f"영상을 읽지 못했습니다: {out.stderr.strip()[:200]}")
@@ -107,6 +152,7 @@ def detect_speech(video: Path, noise_db: int = -30, min_silence_s: float = 0.25,
          "-af", f"silencedetect=noise={noise_db}dB:d={min_silence_s}",
          "-f", "null", "-"],
         capture_output=True, text=True, check=False,
+        encoding="utf-8", errors="replace",
     )
     log = out.stderr
 
@@ -151,6 +197,7 @@ def detect_shot_changes(video: Path, sensitivity: float = 0.2) -> list[int]:
          "-vf", f"select='gt(scene,{sensitivity})',showinfo",
          "-f", "null", "-"],
         capture_output=True, text=True, check=False,
+        encoding="utf-8", errors="replace",
     )
     times = [int(float(m.group(1)) * 1000) for m in SCENE_TIME.finditer(out.stderr)]
     return sorted(set(times))

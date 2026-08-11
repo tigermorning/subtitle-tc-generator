@@ -24,7 +24,7 @@ import subprocess
 from pathlib import Path
 
 from .align import Segment
-from .media import MediaToolUnavailable, _find
+from .media import MediaToolUnavailable, _find, _known_places
 
 TIMECODE = re.compile(
     r"(\d{2}):(\d{2}):(\d{2})[,.](\d{3})\s*-->\s*(\d{2}):(\d{2}):(\d{2})[,.](\d{3})")
@@ -73,6 +73,44 @@ def _parse_srt(text: str) -> list[Segment]:
     return segments
 
 
+_WHISPER_FFMPEG: list = []
+
+
+def ffmpeg_with_whisper() -> str:
+    """whisper 필터가 **들어 있는** ffmpeg을 찾는다.
+
+    `whisper` 필터는 ffmpeg 9.0부터, 그것도 `--enable-whisper`로 빌드한 것에만
+    있다. Subtitle Edit이 딸려 보내는 ffmpeg은 8.0이라 없다(실측). 아무 ffmpeg이나
+    잡아 쓰면 "전사 실패"라는 말만 나오고 왜인지 알 수 없다.
+    """
+    if _WHISPER_FFMPEG:
+        return _WHISPER_FFMPEG[0]
+
+    candidates = []
+    try:
+        candidates.append(_find("ffmpeg"))
+    except MediaToolUnavailable:
+        pass
+    candidates += [str(p) for p in _known_places("ffmpeg") if p.is_file()]
+
+    for exe in dict.fromkeys(candidates):
+        try:
+            out = subprocess.run([exe, "-hide_banner", "-filters"],
+                                 capture_output=True, text=True, timeout=30,
+                                 encoding="utf-8", errors="replace").stdout or ""
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if re.search(r"^\s*\S+\s+whisper\s", out, re.MULTILINE):
+            _WHISPER_FFMPEG.append(exe)
+            return exe
+
+    raise MediaToolUnavailable(
+        "whisper 필터가 있는 ffmpeg을 찾지 못했습니다. 9.0 이상이 필요합니다"
+        "(Subtitle Edit이 딸려 보내는 8.0에는 없습니다).\n"
+        "  winget install Gyan.FFmpeg\n"
+        "설치 뒤에도 못 찾으면 FFMPEG_PATH로 경로를 알려 주세요.")
+
+
 def _drive_root(path: Path) -> str:
     """WSL에서 이 경로가 어느 드라이브에 있는지. 드라이브가 다르면 상대 경로가 깨진다."""
     parts = path.resolve().parts
@@ -119,17 +157,19 @@ def transcribe(video: Path, language: str = "auto", model: str | None = None,
         say(f"전사 중입니다 — 모델 {model_path.name}"
             f"{'(GPU)' if use_gpu else '(CPU)'}. 영상 길이에 비례해 걸립니다...")
         result = subprocess.run(
-            [_find("ffmpeg"), "-hide_banner", "-nostats",
+            [ffmpeg_with_whisper(), "-hide_banner", "-nostats",
              "-i", _filter_path(video, work), "-vn",
              "-af", (f"whisper=model={_filter_path(model_path, work)}"
                      f":language={language}:format=srt:destination={out_name}"
                      f":queue=10:use_gpu={'true' if use_gpu else 'false'}"),
              "-f", "null", "-"],
             cwd=work, capture_output=True, text=True, check=False,
+            encoding="utf-8", errors="replace",
         )
         srt_path = work / out_name
         if not srt_path.is_file():
-            tail = (result.stderr.strip().splitlines() or ["원인 불명"])[-1]
+            noise = ((result.stderr or "") + (result.stdout or "")).strip()
+            tail = (noise.splitlines() or ["원인 불명"])[-1]
             raise MediaToolUnavailable(f"전사에 실패했습니다: {tail[:200]}")
         raw = srt_path.read_text(encoding="utf-8", errors="replace")
         if keep:
