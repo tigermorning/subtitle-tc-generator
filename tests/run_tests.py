@@ -399,6 +399,31 @@ except ProfileError:
     ok("common 파일은 직접 검사에 못 쓴다", True)
 
 
+# --- SE 대응 검사 -----------------------------------------------------------
+
+agency2 = load_profile_file(AGENCY)
+
+r = check_events([ev("가나다라마바", end=1500)], agency2)   # 6자 / 1.5초 = 4 CPS
+ok("권장 속도 이하는 조용하다", "A03" not in ids(r))
+
+r = check_events([ev("가나다라마바사아자차카", end=1000)], agency2)  # 11 CPS: 권장 10 초과, 상한 12 이내
+ok("권장 속도 초과를 알린다", "A03" in ids(r))
+
+r = check_events([ev("가나다라마바사아자차카타파하가나", end=1000)], agency2)  # 16 CPS: 상한 초과
+ok("상한을 넘으면 권장 규칙은 중복해 말하지 않는다",
+   "T02" in ids(r) and "A03" not in ids(r))
+
+r = check_events([ev("짧다", end=900)], agency2)
+ok("병합 후보를 알린다", "A04" in ids(r))
+r = check_events([ev("길다", end=2000)], agency2)
+ok("기준 이상은 병합 후보가 아니다", "A04" not in ids(r))
+
+r = check_events([ev("한 둘 셋 넷 다섯 여섯", end=1000)], agency2)  # 6어절/1초 = 360 wpm
+ok("분당 어절 수를 잰다", "A05" in ids(r))
+r = check_events([ev("한 둘", end=10000)], agency2)
+ok("느리면 조용하다", "A05" not in ids(r))
+
+
 # --- 결과 ---------------------------------------------------------------
 
 print(f"통과 {PASSED}건")

@@ -28,6 +28,10 @@ source:
 limits:
   chars_per_line: 14       # 넷플릭스는 16자지만 이 발주처는 14자로 조인다
                            # (덮어쓰지 않은 CPS·표시 시간 등은 넷플릭스 값 그대로)
+  optimal_cps: 10          # 상한(12)과 별개로 "가능하면 이 이하"
+  min_gap_ms: 84           # 자막 간 최소 간격(넷플릭스는 이 규정을 삭제했다)
+  merge_shorter_than_ms: 1000   # 이보다 짧은 자막은 병합 검토
+  words_per_minute: 160
 
 text:
   ellipsis_char: "..."     # 이 발주처는 점 세 개를 쓴다
@@ -45,3 +49,23 @@ rules:
     check: line_end_period_or_comma
     auto: true
     message: "줄 끝에는 마침표·쉼표를 쓰지 않습니다(에이전시 지침)."
+  - id: A02
+    clause: "○○ 에이전시 지침 4.1"
+    check: gap_too_short
+    auto: false
+    message: "자막 사이 간격이 부족합니다."
+  - id: A03
+    clause: "○○ 에이전시 지침 4.2"
+    check: optimal_cps_exceeded
+    auto: false
+    message: "권장 읽기 속도를 넘습니다(상한은 아닙니다)."
+  - id: A04
+    clause: "○○ 에이전시 지침 4.3"
+    check: too_short_to_stand_alone
+    auto: false
+    message: "너무 짧은 자막입니다. 앞뒤와 병합을 검토하세요."
+  - id: A05
+    clause: "○○ 에이전시 지침 4.4"
+    check: words_per_minute_exceeded
+    auto: false
+    message: "분당 어절 수가 많습니다."

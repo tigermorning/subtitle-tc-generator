@@ -76,6 +76,52 @@ def _cps(ev: Event, ctx: dict):
     return []
 
 
+@check("optimal_cps_exceeded")
+def _optimal_cps(ev: Event, ctx: dict):
+    """권장 읽기 속도. 상한(`reading_speed_cps`)과 달리 넘어도 규정 위반은 아니다.
+
+    발주처가 "가능하면 이 속도 이하"를 요구할 때 쓴다. 상한을 이미 넘긴 자막은
+    그쪽에서 잡히므로 여기서 두 번 말하지 않는다.
+    """
+    optimal = (ctx["limits"] or {}).get("optimal_cps")
+    if not optimal:
+        return []
+    weights = ctx["limits"].get("char_weights")
+    speeds = ctx["limits"].get("reading_speed_cps") or {}
+    hard = speeds.get("children" if ctx.get("children") else "adult")
+    cps = chars_per_second(ev.text, ev.duration_ms, weights)
+    if cps > optimal and not (hard and cps > hard):
+        return [(None, f"{cps:.1f} CPS — 권장 {optimal} CPS")]
+    return []
+
+
+@check("words_per_minute_exceeded")
+def _wpm(ev: Event, ctx: dict):
+    """분당 어절 수. 한국어는 공백으로 어절이 갈리므로 공백 기준으로 센다."""
+    limit = (ctx["limits"] or {}).get("words_per_minute")
+    if not limit or ev.duration_ms <= 0:
+        return []
+    words = len([w for w in strip_tags(ev.text).split() if w])
+    wpm = words / (ev.duration_ms / 60000.0)
+    if wpm > limit:
+        return [(None, f"{wpm:.0f} 어절/분 — 최대 {limit}")]
+    return []
+
+
+@check("too_short_to_stand_alone")
+def _too_short(ev: Event, ctx: dict):
+    """이 길이보다 짧은 자막은 앞뒤와 붙이는 것을 검토하라는 뜻이다.
+
+    최소 표시 시간(`duration_ms.min`)과 다르다. 그쪽은 위반이고 이쪽은 병합 후보다.
+    """
+    threshold = (ctx["limits"] or {}).get("merge_shorter_than_ms")
+    if not threshold:
+        return []
+    if ev.duration_ms < threshold:
+        return [(None, f"{ev.duration_ms}ms — {threshold}ms 미만은 병합을 검토합니다")]
+    return []
+
+
 # --- 문장부호·표기 -------------------------------------------------------
 
 

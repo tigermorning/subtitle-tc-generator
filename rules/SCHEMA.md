@@ -77,12 +77,12 @@ source:
 | Min duration (ms) | `limits.duration_ms.min` | 있음 |
 | Max duration (ms) | `limits.duration_ms.max` | 있음 |
 | Max chars/sec | `limits.reading_speed_cps.adult` | 있음 |
-| Optimal chars/sec | `limits.optimal_cps` | 있음(검사는 미구현) |
+| Optimal chars/sec | `limits.optimal_cps` | 있음 |
 | CPS line length strategy | `limits.char_weights` | 있음 |
 | Min gap between lines (ms) | `limits.min_gap_ms` | 있음 |
-| Max words per minute | `limits.words_per_minute` | 있음(검사는 미구현) |
+| Max words per minute | `limits.words_per_minute` | 있음 |
 | Single line max pixel width | `limits.pixel_width` | 있음(검사는 미구현 — 폰트 정보가 필요하다) |
-| Merge lines shorter than (ms) | `limits.merge_shorter_than_ms` | 있음(검사는 미구현) |
+| Merge lines shorter than (ms) | `limits.merge_shorter_than_ms` | 있음 |
 | Dialog style | `dual_speaker.marker` | 있음 |
 | Continuation style | `continuity.*` | 있음(부분) |
 
