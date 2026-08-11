@@ -75,11 +75,10 @@ try:
 except ProfileError:
     ok("번역에 speaker_id가 있으면 실패", True)
 
-try:
-    _validate({"schema_version": 1, "kind": "sdh", "forced_narrative": {}}, Path("x.yaml"))
-    ok("SDH에 forced_narrative가 있으면 실패", False, "예외가 나지 않았다")
-except ProfileError:
-    ok("SDH에 forced_narrative가 있으면 실패", True)
+# 화면 자막은 SDH도 다룬다(대사와 겹칠 때 지울지 병기할지가 플랫폼마다 다르다).
+# 막아야 할 것은 SDH 규정이 번역 프로파일에 새는 것이지 그 반대가 아니다.
+_validate({"schema_version": 1, "kind": "sdh", "forced_narrative": {}}, Path("x.yaml"))
+ok("SDH에도 화면 자막 규정을 적을 수 있다", True)
 
 merged = _merge({"kind": "common", "limits": {"a": 1, "b": 2}, "rules": [{"id": "C01"}]},
                 {"kind": "sdh", "limits": {"b": 3}, "rules": [{"id": "S01"}]})

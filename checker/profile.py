@@ -14,9 +14,19 @@ RULES_ROOT = Path(__file__).resolve().parent.parent / "rules"
 
 KINDS = ("sdh", "translation", "common")
 
-# 종류 전용 키. 반대쪽에 나타나면 프로파일이 섞인 것이다.
+# SDH 전용 키. 번역 자막 프로파일에 나타나면 두 규정이 섞인 것이다.
 SDH_ONLY_KEYS = ("speaker_id", "sound_effect")
-TRANSLATION_ONLY_KEYS = ("forced_narrative",)
+
+# 번역 전용 키는 두지 않는다.
+#
+# 처음에는 `forced_narrative`를 번역 전용으로 막았다. 넷플릭스 공식 가이드에서
+# 화면 자막(On-screen Text)이 Section I(번역)에만 있었기 때문이다. 그런데 실무
+# 자료를 반영하다 SDH 프로파일이 로드 실패했다 — **SDH 작업도 화면 자막을 다룬다.**
+# 대사와 겹칠 때 지울지 병기할지가 플랫폼마다 다르고, 그것을 적을 자리가 필요하다.
+#
+# 막아야 할 것은 "SDH 규정이 번역 프로파일에 새는 것"이지 그 반대가 아니다.
+# 화자 표시·효과음이 번역 자막에 있으면 확실히 잘못이지만, 화면 자막은 양쪽 다 쓴다.
+TRANSLATION_ONLY_KEYS = ()
 
 
 class ProfileError(Exception):
@@ -43,7 +53,7 @@ def _validate(data: dict, path: Path) -> None:
         bad = [k for k in SDH_ONLY_KEYS if k in data]
         if bad:
             raise ProfileError(f"{path.name}: 번역 프로파일에 SDH 전용 키가 있습니다: {bad}")
-    if kind == "sdh":
+    if kind == "sdh" and TRANSLATION_ONLY_KEYS:
         bad = [k for k in TRANSLATION_ONLY_KEYS if k in data]
         if bad:
             raise ProfileError(f"{path.name}: SDH 프로파일에 번역 전용 키가 있습니다: {bad}")
