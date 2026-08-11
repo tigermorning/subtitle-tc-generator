@@ -1432,6 +1432,25 @@ with _tf3.TemporaryDirectory() as _d:
     ok("0-기준 파일을 알아본다", [n.index for n in _zero] == [1, 3])
 
 
+# --- WSL에서 Windows 도구 부르기 -------------------------------------------
+# `/mnt/c/...`는 Windows에 없는 이름이라 ffmpeg이 "Illegal byte sequence"로 죽는다.
+# 한글이 섞이면 더 빨리 죽는다(2026-08-11 실측). 상대 경로로 바꾸면 통한다.
+
+import os as _os  # noqa: E402
+from checker.media import _as_tool_path  # noqa: E402
+
+if _os.name != "nt":
+    _here = Path.cwd()
+    ok("Windows 경로가 아니면 그대로 둔다", _as_tool_path("relative/x.mp4") == "relative/x.mp4")
+    if str(_here).startswith("/mnt/"):
+        _abs = _here / "examples" / "x.mp4"
+        ok("작업 폴더 밑은 상대 경로로 바꾼다",
+           _as_tool_path(_abs) == "examples/x.mp4")
+        # 드라이브를 건너가면 Windows가 못 푼다. 그때는 손대지 않는다.
+        ok("드라이브를 건너가면 그대로 둔다",
+           _as_tool_path("/mnt/d/영상/x.mp4") == "/mnt/d/영상/x.mp4")
+
+
 # --- 결과 ---------------------------------------------------------------
 
 print(f"통과 {PASSED}건")

@@ -58,6 +58,28 @@ def _known_places(name: str):
     return [folder / f"{name}{suffix}" for folder in places for suffix in (".exe", "")]
 
 
+def _as_tool_path(path) -> str:
+    """도구에 넘길 수 있는 경로로 바꾼다.
+
+    **WSL에서 Windows 쪽 ffmpeg을 부를 때 `/mnt/c/...`는 통하지 않는다.** 그 경로는
+    Windows에 존재하지 않는 이름이라 "Illegal byte sequence"나 "No such file"로
+    죽는다(2026-08-11 실측). 한글이 섞이면 더 빨리 죽는다.
+
+    작업 폴더 기준 **상대 경로**로 바꾸면 통한다 — WSL이 작업 폴더를 옮겨 주기
+    때문이다. 드라이브가 달라 상대 경로를 만들 수 없으면 원래 경로를 그대로 넘긴다
+    (그 경우는 부르는 쪽이 파일을 옮겨야 한다).
+    """
+    path = Path(path)
+    if os.name == "nt" or not str(path).startswith("/mnt/"):
+        return str(path)
+    try:
+        relative = os.path.relpath(path.resolve(), Path.cwd())
+    except ValueError:
+        return str(path)
+    # `../../mnt/d/...`처럼 드라이브를 건너가면 Windows가 못 푼다.
+    return str(path) if relative.startswith("../../mnt/") else relative
+
+
 def _find(name: str) -> str:
     """환경변수 > PATH > 흔한 자리 순으로 찾는다."""
     env = os.environ.get(f"{name.upper()}_PATH") or os.environ.get("FFMPEG_DIR")
@@ -111,7 +133,7 @@ def probe(video: Path) -> MediaInfo:
         [_find("ffprobe"), "-v", "error", "-select_streams", "v:0",
          "-show_entries", "stream=r_frame_rate,avg_frame_rate,width,height",
          "-show_entries", "format=duration",
-         "-of", "default=noprint_wrappers=1", str(video)],
+         "-of", "default=noprint_wrappers=1", _as_tool_path(video)],
         capture_output=True, text=True, check=False,
         encoding="utf-8", errors="replace",
     )
@@ -160,7 +182,7 @@ def detect_speech(video: Path, noise_db: int = -20, min_silence_s: float = 0.25,
     쓰지 않기 위해**, 이 값은 자동 교정이 아니라 제안에만 쓴다.
     """
     out = subprocess.run(
-        [_find("ffmpeg"), "-hide_banner", "-nostats", "-i", str(video),
+        [_find("ffmpeg"), "-hide_banner", "-nostats", "-i", _as_tool_path(video),
          "-af", f"silencedetect=noise={noise_db}dB:d={min_silence_s}",
          "-f", "null", "-"],
         capture_output=True, text=True, check=False,
@@ -205,7 +227,7 @@ def detect_shot_changes(video: Path, sensitivity: float = 0.2) -> list[int]:
     SubtitleEdit의 장면 전환 검출도 같은 ffmpeg 필터를 쓴다.
     """
     out = subprocess.run(
-        [_find("ffmpeg"), "-hide_banner", "-nostats", "-i", str(video),
+        [_find("ffmpeg"), "-hide_banner", "-nostats", "-i", _as_tool_path(video),
          "-vf", f"select='gt(scene,{sensitivity})',showinfo",
          "-f", "null", "-"],
         capture_output=True, text=True, check=False,
@@ -235,7 +257,7 @@ def detect_bottom_text(video: Path, sample_fps: float = 2.0,
     장면 몇 개에 기준이 끌려간다.
     """
     out = subprocess.run(
-        [_find("ffmpeg"), "-hide_banner", "-nostats", "-i", str(video),
+        [_find("ffmpeg"), "-hide_banner", "-nostats", "-i", _as_tool_path(video),
          "-vf", (f"fps={sample_fps},scale=320:-2,"
                  f"crop=iw:ih*{band}:0:ih*{1 - band},"
                  "edgedetect=low=0.1:high=0.3,signalstats,"
