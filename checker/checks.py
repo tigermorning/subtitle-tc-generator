@@ -810,3 +810,43 @@ def _first_at_zero(events: list[Event], ctx: dict):
     if first.start_ms <= 0:
         return [(first.index, None, "첫 자막 인점을 00:00:00:00으로 두지 않습니다")]
     return []
+
+
+# `6만 ~ 8만`처럼 단위가 사이에 끼면 숫자만 보는 패턴으로는 안 잡힌다
+# (`만` 때문에 앞쪽이 \d가 아니다). 단위 글자까지 포함해서 본다.
+RANGE_BAD_SPACE = re.compile(r"(?:\d|[만천억백])\s+[~\-–—]\s*\d|\d\s*[~\-–—]\s+\d")
+RANGE_UNIT_DROPPED = re.compile(r"(?<![\d,])(\d+)\s*[~\-–—]\s*(\d+)\s*(만|천|억|백)")
+CONJUNCTIVE_ADVERB = re.compile(r"^(그러나|또한|사실|하지만|그런데|그리고|따라서|그래서|즉|물론),")
+
+
+@check("range_notation")
+def _range_notation(ev: Event, ctx: dict):
+    """범위 표기. `6만~8만 명`(o) / `6~8만 명`·`6만 ~ 8만 명`(x).
+
+    물결표·붙임표 앞뒤를 띄우지 않고, 앞쪽 수에도 단위를 붙인다.
+    """
+    if not (ctx["profile"].get("numbers") or {}).get("range_notation_strict"):
+        return []
+    s = strip_tags(ev.text)
+    out = []
+    m = RANGE_BAD_SPACE.search(s)
+    if m:
+        out.append((None, f"{m.group(0).strip()} — 범위 부호 앞뒤를 띄우지 않습니다"))
+    m = RANGE_UNIT_DROPPED.search(s)
+    if m:
+        out.append((None, f"{m.group(0)} — 앞쪽 수에도 단위를 붙입니다"
+                          f"({m.group(1)}{m.group(3)}~{m.group(2)}{m.group(3)})"))
+    return out
+
+
+@check("conjunctive_adverb_comma")
+def _conjunctive_comma(ev: Event, ctx: dict):
+    """접속부사 뒤 쉼표. `그러나,`·`또한,`·`사실,`은 쓰지 않는다."""
+    if not (ctx["profile"].get("text") or {}).get("no_comma_after_conjunctive_adverb"):
+        return []
+    out = []
+    for i, line in enumerate(ev.lines, 1):
+        m = CONJUNCTIVE_ADVERB.match(strip_tags(line).strip())
+        if m:
+            out.append((i, f"{m.group(1)}, — 접속부사 뒤에는 쉼표를 쓰지 않습니다"))
+    return out

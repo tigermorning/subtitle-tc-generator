@@ -702,6 +702,28 @@ r = check_events([{"index": 1, "start_ms": 1000, "end_ms": 4000, "text": "첫 �
 ok("인점을 띄우면 정상", "CP20" not in ids(r))
 
 
+# --- 범위·쉼표 (표기 자료 이미지) --------------------------------------------
+
+pr7 = load_profile_file(Path("rules/netflix/ko-sdh-practice.yaml"))
+
+for text, should in (("6만~8만 명", False), ("6만-8만 명", False),
+                     ("6~8만 명", True), ("6만 ~ 8만 명", True), ("6만 - 8만 명", True)):
+    r = check_events([ev(text, end=9000)], pr7)
+    ok(f"범위 표기: {text}", ("S33" in ids(r)) == should, str(ids(r)))
+
+r = check_events([ev("2019-2020년 사이", end=9000)], pr7)
+ok("연도 범위는 단위가 없어 걸리지 않는다", "S33" not in ids(r))
+r = check_events([ev("전화 010-1234", end=9000)], pr7)
+ok("전화번호는 범위가 아니다", "S33" not in ids(r))
+
+r = check_events([ev("그러나, 아니야")], pr7)
+ok("접속부사 뒤 쉼표를 잡는다", "S34" in ids(r))
+r = check_events([ev("그러나 아니야")], pr7)
+ok("쉼표가 없으면 정상", "S34" not in ids(r))
+r = check_events([ev("엄마, 사랑해요")], pr7)
+ok("호명 뒤 쉼표는 정상", "S34" not in ids(r))
+
+
 # --- 결과 ---------------------------------------------------------------
 
 print(f"통과 {PASSED}건")
