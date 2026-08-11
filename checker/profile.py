@@ -6,11 +6,16 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import yaml
 
-RULES_ROOT = Path(__file__).resolve().parent.parent / "rules"
+# 실행 파일로 묶이면 규정 파일이 임시 폴더에 풀린다. 저장소에서 돌 때와 자리가
+# 다르므로 둘 다 본다 — 못 찾으면 검사가 통째로 안 돈다.
+_BUNDLED = Path(getattr(sys, "_MEIPASS", "")) / "rules" if getattr(sys, "_MEIPASS", "") else None
+RULES_ROOT = (_BUNDLED if _BUNDLED and _BUNDLED.is_dir()
+              else Path(__file__).resolve().parent.parent / "rules")
 
 KINDS = ("sdh", "translation", "common")
 

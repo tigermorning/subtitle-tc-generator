@@ -10,13 +10,20 @@ import os
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+# 실행 파일로 묶이면 자료가 임시 폴더에 풀린다. 그 자리를 먼저 본다.
+FROZEN = getattr(sys, "frozen", False)
+ROOT = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent))
 
 
 def add_engine_to_path() -> None:
     """`checker` 패키지를 불러올 수 있게 한다."""
     if str(ROOT) not in sys.path:
         sys.path.insert(0, str(ROOT))
+
+
+def data_root() -> Path:
+    """규정 파일·모델이 있는 자리. 묶였으면 풀린 자리, 아니면 저장소."""
+    return ROOT
 
 
 def find_libmpv() -> Path | None:
@@ -27,7 +34,9 @@ def find_libmpv() -> Path | None:
     Subtitle Edit을 지우면 우리 프로그램이 멈춘다.
     """
     names = ("libmpv-2.dll", "mpv-2.dll", "mpv-1.dll")
-    places = [ROOT / "bin", ROOT / ".tmp"]
+    # 묶인 프로그램은 자기 폴더에 dll을 들고 다닌다.
+    places = [ROOT, ROOT / "bin", ROOT / ".tmp",
+              Path(sys.executable).resolve().parent]
     appdata = os.environ.get("APPDATA")
     if appdata:
         places.append(Path(appdata) / "Subtitle Edit")     # 개발 중 임시
