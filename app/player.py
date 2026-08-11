@@ -45,6 +45,7 @@ class Player:
     """mpv 창을 특정 위젯 안에 띄운다."""
 
     def __init__(self, window_id: int):
+        self.closed = False
         try:
             import mpv
         except OSError as exc:                   # libmpv를 못 찾음
@@ -170,6 +171,9 @@ class Player:
             pass
 
     def close(self) -> None:
+        # **닫혔다는 사실을 남긴다.** 창의 따라가기 시계가 이걸 보고 멈춘다.
+        # 남기지 않으면 죽은 mpv에 계속 위치를 물어 ShutdownError로 터진다.
+        self.closed = True
         try:
             self._mpv.terminate()
         except Exception:

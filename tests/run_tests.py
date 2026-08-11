@@ -988,6 +988,29 @@ ok("전사 SRT를 읽는다", len(segs) == 2)
 ok("타임코드를 밀리초로 읽는다", segs[0].start_ms == 0 and segs[0].end_ms == 4560)
 ok("여러 줄 자막을 붙여 읽는다", segs[1].text == "그 기본강의에서\n살짝 들으셨을텐데")
 
+# **모델 경로에 한글이 있으면 whisper가 못 연다**(2026-08-12 재현). 사용자 자료
+# 폴더 이름이 `자막편집기`라 기본 설치 상태에서 바로 걸렸고, "자막 만들기를 눌러도
+# 아무 일이 없다"는 신고의 원인이었다. 시험이 못 잡은 자리라 여기에 박아 둔다.
+from checker.transcribe import _ascii_model_path  # noqa: E402
+
+import tempfile as _tf_model  # noqa: E402
+with _tf_model.TemporaryDirectory() as _d:
+    _work = Path(_d) / "work"
+    _work.mkdir()
+    _plain = Path(_d) / "ggml-tiny.bin"
+    _plain.write_bytes(b"model")
+    ok("아스키 경로는 그대로 쓴다", _ascii_model_path(_plain, _work).isascii())
+
+    _hangul = Path(_d) / "자막편집기"
+    _hangul.mkdir()
+    _model = _hangul / "ggml-tiny.bin"
+    _model.write_bytes(b"model")
+    _called = _ascii_model_path(_model, _work)
+    ok("한글 경로 모델은 아스키 이름으로 바꿔 부른다", _called.isascii())
+    ok("바꿔 부른 모델이 실제로 있고 내용이 같다",
+       (_work / _called).is_file() and (_work / _called).read_bytes() == b"model")
+    ok("두 번 불러도 다시 만들지 않는다", _ascii_model_path(_model, _work) == _called)
+
 dotted = _parse_srt("1\n00:00:01.500 --> 00:00:02.250\n네\n")
 ok("점으로 찍힌 타임코드도 읽는다", dotted and dotted[0].start_ms == 1500)
 ok("쓰레기 줄은 건너뛴다", _parse_srt("\n\n쓰레기\n\n1\n잘못된 타임코드\n말\n\n") == [])

@@ -381,9 +381,26 @@ class MainWindow(QMainWindow):
         self.elapsed_label.setText(f"{seconds // 60}:{seconds % 60:02d} 경과")
 
     def _note(self, text: str) -> None:
-        """진행 한 줄. 상태줄과 기록 창에 함께 남긴다."""
+        """진행 한 줄. 상태줄·기록 창·로그 파일에 함께 남긴다.
+
+        **로그 파일에도 남기는 이유**: 화면 기록은 프로그램을 닫으면 사라진다.
+        "눌렀는데 아무 일도 안 일어난다"는 신고가 왔을 때(2026-08-12) 로그에는
+        시작 줄밖에 없어 무엇이 막았는지 알 수 없었다.
+        """
+        from .log import write as log
+
+        log(text)
         self.statusBar().showMessage(text)
         self.progress_log.appendPlainText(text)
+
+    def _refuse(self, title: str, why: str) -> None:
+        """일을 시작하지 않고 돌아설 때. **말없이 돌아서지 않는다.**
+
+        조용히 `return`하면 사용자에게는 버튼이 죽은 것으로 보이고, 로그에도
+        아무것도 없어 다음 사람이 원인을 찾지 못한다.
+        """
+        self._note(f"{title}: {why}")
+        QMessageBox.information(self, title, why)
 
     # --- 파이프라인 ---------------------------------------------------
     def _profile(self):
@@ -431,15 +448,24 @@ class MainWindow(QMainWindow):
         self._threads.append(thread)
 
     def run_generate(self) -> None:
-        if not self.player or not getattr(self, "_video_path", None):
-            QMessageBox.information(self, "영상이 필요합니다", "먼저 영상을 여세요.")
+        self._note("[영상에서 자막 만들기] 눌림")
+        if not getattr(self, "_video_path", None):
+            self._refuse("영상이 필요합니다", "먼저 [영상 열기]로 영상을 여세요.")
             return
+        if not self.player:
+            # **재생기가 없어도 자막은 만들 수 있다.** 전사는 ffmpeg가 하지 mpv가
+            # 하지 않는다. 재생기가 없다고 막으면, libmpv를 못 찾은 컴퓨터에서는
+            # 이 프로그램의 본래 기능을 통째로 못 쓴다.
+            self._note("재생기가 없지만 전사는 ffmpeg가 하므로 그대로 진행합니다")
+
         script = None
         if self.kind_box.currentText() == "translation":
             from checker.script import file_filter
+            self._note("원어 대본을 고르는 창을 엽니다 (없으면 취소)")
             path, _ = QFileDialog.getOpenFileName(
                 self, "원어 대본 (없으면 취소)", "", file_filter())
             script = Path(path) if path else None
+            self._note(f"대본: {script.name if script else '없음'}")
 
         job = jobs.GenerateJob(Path(self._video_path), self._profile(), script,
                                self.language_box.currentText(),
@@ -447,7 +473,7 @@ class MainWindow(QMainWindow):
 
         # **얼마나 걸릴지 미리 말해 준다.** 모르면 멈춘 줄 안다. 전사는 실측
         # 20배속쯤이고, 번역은 자막 수에 비례해 그보다 훨씬 느리다.
-        minutes = (self.player.duration_ms or 0) / 60000
+        minutes = ((self.player.duration_ms if self.player else 0) or 0) / 60000
         guess = f"전사에 {max(1, round(minutes * 3))}초쯤" if minutes else ""
         if self.translate_check.isChecked():
             guess += ", 번역까지 하면 몇 분 더" if guess else "몇 분"
@@ -470,7 +496,10 @@ class MainWindow(QMainWindow):
         self._start(job, done, "영상에서 자막을 만드는 중입니다...")
 
     def run_check(self) -> None:
+        self._note("[검사·교정] 눌림")
         if not self.model.events:
+            self._refuse("검사할 자막이 없습니다",
+                         "[영상에서 자막 만들기]로 만들거나 [자막 열기]로 여세요.")
             return
         job = jobs.CheckJob(self.model.events, self._profile(), fix=True,
                             korean=self.korean_check.isChecked(),
@@ -487,7 +516,10 @@ class MainWindow(QMainWindow):
         self._start(job, done, "검사·교정 중입니다...")
 
     def run_translate(self) -> None:
+        self._note("[번역] 눌림")
         if not self.model.events:
+            self._refuse("번역할 자막이 없습니다",
+                         "[영상에서 자막 만들기]로 만들거나 [자막 열기]로 여세요.")
             return
         from checker.knp import find_for
         knp = find_for(self.subtitle_path) if self.subtitle_path else None
@@ -507,7 +539,10 @@ class MainWindow(QMainWindow):
         self._start(job, done, "한국어로 옮기는 중입니다...")
 
     def run_terms(self) -> None:
+        self._note("[용어표] 눌림")
         if not self.model.events:
+            self._refuse("용어를 뽑을 자막이 없습니다",
+                         "[영상에서 자막 만들기]로 만들거나 [자막 열기]로 여세요.")
             return
         from checker.knp import find_for
         base = self.subtitle_path or Path("용어표.srt")
@@ -929,6 +964,12 @@ class MainWindow(QMainWindow):
 
     def _sync_position(self) -> None:
         if not self.player:
+            return
+        # **창을 닫는 순간 mpv가 먼저 죽는다.** 그런데 이 시계는 계속 울려서
+        # 죽은 mpv에 위치를 묻는다(2026-08-12 로그: ShutdownError). 사용자에게는
+        # 프로그램이 마지막에 터지는 것으로 보인다.
+        if getattr(self.player, "closed", False):
+            self._follow.stop()
             return
         # 창 크기가 바뀌면 영상이 차지하는 비율도 바뀐다. 자막 크기를 따라 맞춘다.
         self.player.fit_subtitle_scale()

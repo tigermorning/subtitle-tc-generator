@@ -138,6 +138,38 @@ def _filter_path(target: Path, work: Path) -> str:
     return os.path.relpath(target.resolve(), work.resolve()).replace(os.sep, "/")
 
 
+def _ascii_model_path(model_path: Path, work: Path) -> str:
+    """모델을 **아스키 이름으로** 부를 수 있게 만든다.
+
+    **whisper는 한글이 든 경로의 모델을 못 연다**(2026-08-12 재현). ffmpeg 자체는
+    유니코드 경로를 잘 다루지만, 필터 안의 whisper.cpp는 모델을 옛 `fopen`으로
+    열어서 Windows 코드페이지에 없는 글자가 있으면 실패한다:
+
+        whisper_init_from_file_with_params_no_state: failed to open
+        '../../../../AppData/Roaming/자막편집기/models/ggml-large-v3-turbo.bin'
+        Error opening output files: I/O error
+
+    사용자 자료 폴더 이름이 `자막편집기`라서 **기본 설치 상태에서 바로 걸린다.**
+    "영상에서 자막 만들기를 눌러도 아무 일이 없다"는 신고의 원인이 이것이다.
+
+    고치는 방법은 **하드링크**다. 같은 드라이브면 자료를 복사하지 않으므로 1.6GB
+    모델도 즉시 끝난다. 드라이브가 다르거나 파일 체계가 하드링크를 막으면 그때만
+    복사한다 — 느리다는 것을 말해 주고 한다.
+    """
+    relative = _filter_path(model_path, work)
+    if relative.isascii():
+        return relative
+
+    link = work / "model.bin"
+    if link.exists():
+        return link.name
+    try:
+        os.link(model_path, link)
+    except OSError:
+        shutil.copy2(model_path, link)
+    return link.name
+
+
 def transcribe(video: Path, language: str = "auto", model: str | None = None,
                use_gpu: bool = True, progress=None,
                keep: Path | None = None) -> list[Segment]:
@@ -162,7 +194,7 @@ def transcribe(video: Path, language: str = "auto", model: str | None = None,
         result = subprocess.run(
             [ffmpeg_with_whisper(), "-hide_banner", "-nostats",
              "-i", _filter_path(video, work), "-vn",
-             "-af", (f"whisper=model={_filter_path(model_path, work)}"
+             "-af", (f"whisper=model={_ascii_model_path(model_path, work)}"
                      f":language={language}:format=srt:destination={out_name}"
                      f":queue=10:use_gpu={'true' if use_gpu else 'false'}"),
              "-f", "null", "-"],
