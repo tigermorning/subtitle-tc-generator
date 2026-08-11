@@ -876,6 +876,78 @@ ok("근거가 약하면 말하지 않는다",
                     load_profile_file(Path("rules/coupang/ko-sdh.yaml"))) is None)
 
 
+# --- 스크립트 대조 -----------------------------------------------------------
+
+from checker.align import Segment, align, similarity, summary  # noqa: E402
+
+segs = [Segment(0, 2000, "안녕하세요 반갑습니다"),
+        Segment(2500, 4500, "오늘 날씨가 좋네요"),
+        Segment(5000, 7000, "어 그래 뭐 그러네")]
+script = ["안녕하세요, 반갑습니다.", "오늘 날씨가 좋네요."]
+
+cues = align(segs, script)
+ok("스크립트와 맞으면 스크립트 문장을 쓴다",
+   cues[0].text == "안녕하세요, 반갑습니다." and cues[0].source == "script")
+ok("스크립트에 없는 대사는 전사로 채우고 표시한다",
+   cues[-1].source == "transcript" and cues[-1].needs_review, str(cues[-1]))
+ok("즉흥 대사일 수 있다고 알린다", "즉흥" in cues[-1].note)
+
+cues = align([Segment(0, 2000, "안녕하세요")], ["안녕하세요", "이 대사는 잘렸다"])
+ok("소리를 못 찾은 스크립트 줄을 알린다",
+   any("소리를 찾지 못했" in c.note for c in cues), str(cues))
+ok("소리 없는 줄은 길이가 0이다", any(c.start_ms == c.end_ms for c in cues))
+
+# 대사가 조금 바뀐 경우 — 스크립트를 쓰되 표시한다
+cues = align([Segment(0, 2000, "밥은 먹었니 오늘 고생이 많다")],
+             ["밥은 먹었니 오늘 수고가 많으십니다 정말로 그래"])
+ok("조금 다르면 스크립트를 쓰고 표시한다",
+   cues[0].source == "script" and cues[0].needs_review, str(cues[0]))
+
+# 통째로 바뀐 경우 — 짝이 없는 것과 구분할 수 없으므로 전사를 쓰되 후보를 함께 보여 준다
+cues = align([Segment(0, 2000, "밥은 먹었니")], ["식사는 하셨습니까"])
+ok("통째로 다르면 전사를 쓴다", cues[0].source == "transcript")
+ok("그 자리 스크립트를 함께 보여 준다", "이 자리 스크립트" in cues[0].note, cues[0].note)
+
+ok("유사도를 잰다", similarity("안녕하세요 반갑습니다", "안녕하세요, 반갑습니다!") > 0.9)
+ok("빈 문자열은 0", similarity("", "무엇") == 0.0)
+
+st = summary(align(segs, script))
+ok("어디서 왔는지 집계한다", st["from_script"] == 2 and st["from_transcript"] == 1)
+ok("봐야 할 자리를 센다", st["needs_review"] >= 1)
+
+
+# --- 의미 단위 재분할 ---------------------------------------------------------
+
+from checker.resplit import resplit, resplit_all, split_text  # noqa: E402
+
+W2 = {"cjk": 1.0, "other": 0.5}
+
+pieces = split_text("안녕하세요. 오늘 날씨가 참 좋습니다.", 12, W2)
+ok("문장 끝에서 먼저 끊는다", pieces[0] == "안녕하세요.", str(pieces))
+
+pieces = split_text("그러니까 내 말은 지금 여기서 할 수 있는 게 없다는 거야", 14, W2)
+ok("여러 조각으로 나눈다", len(pieces) > 1)
+ok("각 조각이 한계 안이다", all(count_chars(p, W2) <= 14 for p in pieces), str(pieces))
+
+ok("짧으면 그대로 둔다", split_text("짧다", 16, W2) == ["짧다"])
+ok("끊을 자리가 없으면 자르지 않는다", len(split_text("가" * 40, 16, W2)) == 1)
+
+ev = Event(1, 0, 6000, "안녕하세요. 오늘 날씨가 참 좋습니다. 산책이나 갈까요?")
+out = resplit(ev, 12, W2)
+ok("나눈 만큼 자막이 늘어난다", len(out) > 1)
+ok("시간이 이어진다", out[0].end_ms == out[1].start_ms)
+ok("전체 구간을 유지한다", out[0].start_ms == 0 and out[-1].end_ms == 6000)
+
+speech = [(0, 1800), (2600, 6000)]
+out = resplit(Event(1, 0, 6000, "안녕하세요. 오늘 날씨가 참 좋습니다."), 12, W2, speech)
+ok("침묵 자리로 경계를 당긴다", 1800 <= out[0].end_ms <= 2600,
+   str([(e.start_ms, e.end_ms) for e in out]))
+
+out = resplit_all([Event(1, 0, 6000, "안녕하세요. 오늘 날씨가 좋습니다."),
+                   Event(2, 7000, 9000, "짧은 줄")], ko_sdh)
+ok("번호를 다시 매긴다", [e.index for e in out] == list(range(1, len(out) + 1)))
+
+
 # --- 결과 ---------------------------------------------------------------
 
 print(f"통과 {PASSED}건")

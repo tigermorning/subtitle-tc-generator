@@ -16,3 +16,6 @@ tools/*.vtt
 *.mp4
 *.mkv
 *.mov
+
+# 영상·모델 실험용 임시 폴더
+.tmp/

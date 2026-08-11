@@ -18,7 +18,7 @@ from .profile import load_profile_file
 from .fixes import apply_fixes
 from .korean import CorrectorUnavailable, load_backend, run_korean_pass
 from .parsers import parse
-from .writers import write_srt
+from .writers import write_review_srt, write_srt
 
 SUBTITLE_SUFFIXES = (".srt", ".vtt")
 
@@ -75,6 +75,11 @@ def _format_text(report: dict, path: Path) -> str:
         for u in report.get("timing_unresolved", []):
             # 못 맞춘 것을 맞췄다고 하지 않는다.
             out.append(f"    [남음] #{u['event_index']} {u['message']}")
+
+    if report.get("review_file"):
+        out.append(f"  검토용 자막: {report['review_file']}")
+        out.append("    SE에서 원본을 열고 '파일 - 원본 자막 열기'로 이 파일을 얹으면"
+                   " 그리드에 나란히 보입니다")
 
     if report.get("fixed_file"):
         out.append(f"  교정본: {report['fixed_file']}")
@@ -171,6 +176,11 @@ def _run_one(path: Path, profile: dict, args, backend) -> dict | None:
                  "current": s.current, "suggested": s.suggested, "reason": s.reason}
                 for s in suggestions]
 
+    if getattr(args, "review_srt", False):
+        review_path = path.with_suffix(".review.srt")
+        write_review_srt(events, report["violations"], review_path)
+        report["review_file"] = str(review_path)
+
     if timing is not None:
         report["timing_changes"] = [
             {"event_index": c.event_index, "field": c.field_name,
@@ -233,6 +243,9 @@ def main(argv: list[str] | None = None) -> int:
                     help="자동 교정 가능한 것을 고쳐 새 파일로 쓴다(원본은 그대로)")
     ap.add_argument("-o", "--out", type=Path,
                     help="교정 결과 경로(기본: <원본>.fixed.srt). 파일 하나일 때만 쓴다")
+    ap.add_argument("--review-srt", action="store_true",
+                    help="지적을 자막 파일로도 낸다(<원본>.review.srt). SE 번역 모드로 "
+                         "원본 옆에 띄워 영상을 보며 확인할 수 있다")
     ap.add_argument("--report", type=Path,
                     help="리포트를 파일로도 남긴다(화면 출력은 그대로 나온다)")
     args = ap.parse_args(argv)
