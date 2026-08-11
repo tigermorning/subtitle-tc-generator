@@ -143,7 +143,7 @@ class MainWindow(QMainWindow):
         bar.setMovable(False)
 
         self.platform_box = QComboBox()
-        self.platform_box.addItems(["netflix", "disney", "coupang"])
+        self._reload_platforms()
         self.kind_box = QComboBox()
         self.kind_box.addItems(["translation", "sdh"])
         self.language_box = QComboBox()
@@ -160,6 +160,12 @@ class MainWindow(QMainWindow):
         bar.addWidget(self.korean_check)
         bar.addSeparator()
 
+        bar.addSeparator()
+        settings_action = QAction("작업 기준...", self)
+        settings_action.triggered.connect(self.open_settings)
+        bar.addAction(settings_action)
+        bar.addSeparator()
+
         self.pipeline_buttons = []
         for title, slot in (("영상에서 자막 만들기", self.run_generate),
                             ("검사·교정", self.run_check),
@@ -169,6 +175,36 @@ class MainWindow(QMainWindow):
             action.triggered.connect(slot)
             bar.addAction(action)
             self.pipeline_buttons.append(action)
+
+    def _reload_platforms(self) -> None:
+        """쓸 수 있는 작업 기준을 목록에 채운다.
+
+        **사용자가 만든 발주처 기준도 함께 나온다.** 딸려 온 셋만 쓸 수 있으면
+        다른 회사 일을 못 받는다.
+        """
+        from checker.profile import available_profiles
+
+        current = self.platform_box.currentText()
+        platforms = []
+        for profile in available_profiles():
+            if profile["language"] == "ko" and profile["platform"] not in platforms:
+                platforms.append(profile["platform"])
+        self.platform_box.clear()
+        self.platform_box.addItems(platforms or ["netflix"])
+        if current in platforms:
+            self.platform_box.setCurrentText(current)
+
+    def open_settings(self) -> None:
+        """지금 걸려 있는 기준을 보여 주고, 발주처 기준으로 새로 저장하게 한다."""
+        from .settings import SettingsDialog
+
+        dialog = SettingsDialog(self.platform_box.currentText(),
+                                self.kind_box.currentText(), self)
+        dialog.exec()
+        if dialog.saved_as:
+            self._reload_platforms()
+            self.platform_box.setCurrentText(dialog.saved_as)
+            self.statusBar().showMessage(f"작업 기준을 '{dialog.saved_as}'로 바꿨습니다")
 
     def _build_results(self) -> None:
         """지적 목록. **두 번 누르면 그 자막으로 간다** — 목록과 영상이 이어져야

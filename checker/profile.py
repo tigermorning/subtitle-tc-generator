@@ -90,7 +90,13 @@ def _resolve(path: Path, seen: list[Path] | None = None) -> dict:
     parent_path = (path.parent / parent_ref).resolve()
     if not parent_path.is_file():
         # 다른 디렉터리의 공식 프로파일을 가리킬 수 있게 rules/ 기준으로도 찾는다.
-        parent_path = (RULES_ROOT / parent_ref).resolve()
+        parent_path = None
+        for root in _roots():
+            candidate = (root / parent_ref).resolve()
+            if candidate.is_file():
+                parent_path = candidate
+                break
+        parent_path = parent_path or (RULES_ROOT / parent_ref).resolve()
     parent = _resolve(parent_path, seen + [path])
 
     # 계약 4: 상속은 kind: common 이거나 **같은 종류**여야 한다.
@@ -116,7 +122,8 @@ def load_profile(platform: str, language: str, kind: str) -> dict:
     if kind not in ("sdh", "translation"):
         raise ProfileError("kind는 sdh 또는 translation이어야 합니다")
 
-    path = RULES_ROOT / platform / f"{language}-{kind}.yaml"
+    path = find_profile_file(f"{platform}/{language}-{kind}") or (
+        RULES_ROOT / platform / f"{language}-{kind}.yaml")
     if not path.is_file():
         raise ProfileError(
             f"{platform}/{language} {kind} 프로파일이 없습니다. "
@@ -172,6 +179,42 @@ def _merge(parent: dict, child: dict) -> dict:
     return merged
 
 
+def user_root() -> Path:
+    """사용자가 만든 프로파일이 놓이는 자리.
+
+    **발주처마다 기준이 다르고 규정은 바뀐다.** 넷플릭스·디즈니·쿠팡 것만 넣어 두면
+    다른 회사 일을 못 받는다. 프로그램에 딸려 오는 프로파일은 읽기만 하고, 사람이
+    만든 것은 여기에 둔다 — 프로그램을 새로 깔아도 남는다.
+    """
+    import os
+
+    override = os.environ.get("SUBTITLE_EDITOR_PROFILES")
+    if override:
+        return Path(override)
+    appdata = os.environ.get("APPDATA")
+    base = Path(appdata) if appdata else Path.home() / ".config"
+    return base / "자막편집기" / "profiles"
+
+
+def _roots() -> list[Path]:
+    """프로파일을 찾을 자리들. **사용자 것이 먼저다** — 같은 이름이면 사람이 이긴다."""
+    roots = []
+    user = user_root()
+    if user.is_dir():
+        roots.append(user)
+    roots.append(RULES_ROOT)
+    return roots
+
+
+def find_profile_file(reference: str) -> Path | None:
+    """`netflix/ko-sdh` 또는 `우리회사/ko-translation` 꼴로 찾는다."""
+    for root in _roots():
+        candidate = (root / reference).with_suffix(".yaml")
+        if candidate.is_file():
+            return candidate
+    return None
+
+
 def available_profiles() -> list[dict]:
     """쓸 수 있는 프로파일 목록. 미확보 플랫폼은 나오지 않는다.
 
@@ -179,12 +222,20 @@ def available_profiles() -> list[dict]:
     같아서 그 셋만으로는 구분되지 않는다(실제로 목록에 같은 줄이 두 번 나왔다).
     """
     found = []
-    for path in sorted(RULES_ROOT.glob("*/*.yaml")):
+    seen: set[str] = set()
+    paths = []
+    for root in _roots():
+        paths.extend(sorted(root.glob("*/*.yaml")))
+    for path in paths:
         try:
             data = _read(path)
         except ProfileError:
             continue
         if data.get("kind") in ("sdh", "translation") and data.get("status") == "complete":
+            key = f"{path.parent.name}/{path.stem}"
+            if key in seen:      # 사용자 것이 먼저 들어왔으면 딸려 온 것은 건너뛴다
+                continue
+            seen.add(key)
             src = data.get("source") or {}
             found.append({
                 "name": path.stem,

@@ -1640,6 +1640,42 @@ else:
     ok("너무 작게는 못 줄인다", _wave.ms_per_pixel >= 1.0)
 
 
+# --- 발주처 기준(사용자 프로파일) ------------------------------------------
+# 규정은 바뀌고, 발주처마다 다르고, 다른 회사 일도 받는다. 딸려 온 셋만 쓸 수
+# 있으면 도구가 일을 막는다.
+
+import os as _os3  # noqa: E402
+from checker.profile import (available_profiles, find_profile_file,  # noqa: E402
+                             user_root)
+
+with _tf3.TemporaryDirectory() as _d:
+    _os3.environ["SUBTITLE_EDITOR_PROFILES"] = _d
+    _client = Path(_d) / "우리에이전시"
+    _client.mkdir()
+    (_client / "ko-translation.yaml").write_text(
+        "schema_version: 1\nplatform: 우리에이전시\nlanguage: ko\n"
+        "kind: translation\nstatus: complete\n"
+        "extends: netflix/ko-translation.yaml\n"
+        "limits:\n  chars_per_line: 14\n"
+        "disable_rules: [T05]\n", encoding="utf-8")
+
+    ok("사용자 자리에서 프로파일을 찾는다",
+       find_profile_file("우리에이전시/ko-translation") is not None)
+
+    _mine = load_profile("우리에이전시", "ko", "translation")
+    # **바꾼 값만 적고 나머지는 상속한다.** 통째로 베끼면 공식 기준이 개정돼도 못 따라간다.
+    ok("덮어쓴 값이 이긴다", _mine["limits"]["chars_per_line"] == 14)
+    ok("나머지는 상속한다", _mine["limits"]["duration_ms"]["min"] == 833)
+    # 발주처가 안 보는 규칙을 계속 띄우면 진짜 지적이 묻힌다.
+    ok("끈 규칙은 빠진다", "T05" not in [r["id"] for r in _mine["rules"]])
+    ok("나머지 규칙은 남는다", len(_mine["rules"]) > 10)
+
+    _names = [p["platform"] for p in available_profiles()]
+    ok("목록에 발주처 기준이 나온다", "우리에이전시" in _names)
+    ok("딸려 온 기준도 그대로 나온다", "netflix" in _names)
+    _os3.environ.pop("SUBTITLE_EDITOR_PROFILES", None)
+
+
 # --- 결과 ---------------------------------------------------------------
 
 print(f"통과 {PASSED}건")
