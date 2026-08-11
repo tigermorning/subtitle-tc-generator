@@ -1224,7 +1224,8 @@ ok("자막을 나눈 것도 잡는다", _problem is not None and "개수" in _pr
 import subprocess as _sp  # noqa: E402
 _res = _sp.run([sys.executable, "-m", "checker", "examples/ko-sdh-sample.srt",
                 "--lock-timecodes", "--fix-timing"],
-               capture_output=True, text=True, cwd=str(Path(__file__).resolve().parent.parent))
+               capture_output=True, text=True, encoding="utf-8", errors="replace",
+               cwd=str(Path(__file__).resolve().parent.parent))
 ok("--lock-timecodes와 --fix-timing을 함께 쓰면 막는다",
    _res.returncode != 0 and "함께 쓸 수 없습니다" in _res.stderr)
 
@@ -1277,6 +1278,41 @@ ok("한국어 화자명도 옮긴다", _fixed[2].text == "[화자1] 왜 이래")
 _cp = apply_fixes([Event(1, 0, 2000, "화자1: 왜 이래")],
                   load_profile("coupang", "ko", "translation"))[0]
 ok("쿠팡은 소괄호로 옮긴다", _cp[0].text == "(화자1) 왜 이래")
+
+
+# --- 교정기에 넘기는 표기 --------------------------------------------------
+# OTT마다 화자명·어조 부호가 갈린다. 교정기는 이미 받을 줄 아는데 우리가 안
+# 넘기고 있었다(사용자 지적 2026-08-11). 어조가 화자명과 같다고 가정하면 안 된다.
+
+from checker.korean import _corrector_options  # noqa: E402
+
+
+def _markers(platform, kind="sdh"):
+    options = _corrector_options(None, load_profile(platform, "ko", kind))
+    return options.get("markers")
+
+
+if _markers("netflix") is None:
+    # 교정기가 없는 환경에서는 조용히 빈 값을 돌려준다 — 그것도 계약이다.
+    ok("교정기가 없으면 아무것도 넘기지 않는다", _corrector_options(None, {}) == {})
+else:
+    ok("넷플릭스는 둘 다 대괄호", _markers("netflix").speaker == "[]"
+       and _markers("netflix").tone == "[]")
+    ok("디즈니도 둘 다 대괄호", _markers("disney").speaker == "[]"
+       and _markers("disney").tone == "[]")
+    # (철수) [작게] — 화자명은 소괄호, 어조는 대괄호다.
+    ok("쿠팡은 화자명만 소괄호", _markers("coupang").speaker == "()")
+    ok("쿠팡 어조는 대괄호", _markers("coupang").tone == "[]")
+    ok("번역 자막도 같은 표기를 쓴다",
+       _markers("coupang", "translation").speaker == "()")
+
+    _style = _corrector_options(None, load_profile("netflix", "ko", "sdh")).get("style")
+    ok("넷플릭스 말줄임표를 교정기 용어로 넘긴다", _style and _style.ellipsis == "char")
+    _cp = _corrector_options(None, load_profile("coupang", "ko", "sdh")).get("style")
+    ok("쿠팡은 점 셋", _cp and _cp.ellipsis == "dots")
+    # 디즈니는 둘 다 되므로 강제하지 않는다(작업물 내 통일만 검사한다).
+    ok("디즈니는 말줄임표를 강제하지 않는다",
+       "style" not in _corrector_options(None, load_profile("disney", "ko", "sdh")))
 
 
 # --- 결과 ---------------------------------------------------------------
