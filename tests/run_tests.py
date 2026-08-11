@@ -1840,6 +1840,34 @@ with _tf3.TemporaryDirectory() as _d:
     _os3.environ.pop("SUBTITLE_EDITOR_HOME", None)
 
 
+# --- 사용자 설정 -----------------------------------------------------------
+# 규정(프로파일)과 취향(설정)을 섞지 않는다. 자막이 규정을 어겼는지와 무관한 것들이다.
+
+from app import prefs as _prefs  # noqa: E402
+
+ok("설정마다 설명이 있다", all(len(o.what) > 15 for o in _prefs.OPTIONS))
+ok("설정마다 묶음이 있다", all(o.group in _prefs.GROUPS for o in _prefs.OPTIONS))
+ok("모든 항목에 기본값이 있다",
+   all(o.key in _prefs.DEFAULTS for o in _prefs.OPTIONS))
+
+with _tf3.TemporaryDirectory() as _d:
+    _os3.environ["SUBTITLE_EDITOR_HOME"] = _d
+    _values = _prefs.load()
+    ok("바꾸지 않으면 기본값", _values["waveform_ms_per_pixel"] == 20)
+
+    _values["waveform_ms_per_pixel"] = 8
+    _prefs.save(_values)
+    ok("바꾼 값이 남는다", _prefs.load()["waveform_ms_per_pixel"] == 8)
+    # **바꾼 것만 적는다.** 기본값이 나중에 바뀌면 따라가야 한다.
+    _kept = _json.loads((Path(_d) / "settings.json").read_text(encoding="utf-8"))
+    ok("바꾼 것만 파일에 적는다", list(_kept) == ["waveform_ms_per_pixel"])
+    # 엉뚱한 자료형이 들어오면 무시한다 — 손으로 고치다 깨뜨릴 수 있다.
+    (Path(_d) / "settings.json").write_text('{"waveform_ms_per_pixel": "여덟"}',
+                                            encoding="utf-8")
+    ok("자료형이 다르면 기본값을 지킨다", _prefs.load()["waveform_ms_per_pixel"] == 20)
+    _os3.environ.pop("SUBTITLE_EDITOR_HOME", None)
+
+
 # --- 결과 ---------------------------------------------------------------
 
 print(f"통과 {PASSED}건")

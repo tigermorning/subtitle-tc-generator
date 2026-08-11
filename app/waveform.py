@@ -44,7 +44,8 @@ class Waveform(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setMinimumHeight(140)
+        # 파형도 얇게 눌릴 수 있어야 한다. 번역을 다듬을 때는 표가 주인이다.
+        self.setMinimumHeight(60)
         self.setMouseTracking(True)
 
         self.peaks: list[tuple[float, float]] = []   # 8kHz 기준 (최소, 최대)
@@ -60,6 +61,9 @@ class Waveform(QWidget):
         self.ms_per_pixel = 20.0         # 20ms/px면 화면 하나에 약 20초
         self.position_ms = 0
         self.follow = True
+        # 무엇을 그릴지는 설정이 정한다. 화면이 복잡하면 오히려 못 본다.
+        self.show_speech = True
+        self.show_shots = True
 
         self._drag: tuple[int, str] | None = None    # (자막 번호, 'start'|'end')
 
@@ -117,7 +121,7 @@ class Waveform(QWidget):
         view_end_ms = self.ms_at(width)
 
         # 말소리 구간을 바닥에 깐다 — 기준이지 결과가 아니다.
-        for start, end in self.speech:
+        for start, end in (self.speech if self.show_speech else []):
             if end < self.view_start_ms or start > view_end_ms:
                 continue
             painter.fillRect(QRect(self.x_at(start), 0,
@@ -143,7 +147,7 @@ class Waveform(QWidget):
 
         # 장면 전환 — 자막이 걸치면 안 되는 자리
         painter.setPen(QPen(SHOT_LINE, 1, Qt.DashLine))
-        for shot in self.shots:
+        for shot in (self.shots if self.show_shots else []):
             if self.view_start_ms <= shot <= view_end_ms:
                 painter.drawLine(self.x_at(shot), 0, self.x_at(shot), height)
 

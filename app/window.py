@@ -76,6 +76,7 @@ class MainWindow(QMainWindow):
         self._build_results()
         self._build_progress()
         self._build_shortcuts()
+        self.apply_prefs()
 
         # 재생 위치를 따라 표가 움직인다. 자막 작업은 "지금 무엇이 보이나"를
         # 계속 확인하는 일이라 이것이 없으면 눈이 두 곳을 오간다.
@@ -284,6 +285,7 @@ class MainWindow(QMainWindow):
                                 self.kind_box.currentText(), self)
         dialog.exec()
         self.reload_shortcuts()
+        self.apply_prefs()
         if dialog.saved_as:
             self._reload_platforms()
             self.platform_box.setCurrentText(dialog.saved_as)
@@ -326,6 +328,19 @@ class MainWindow(QMainWindow):
                 if self.player:
                     self.player.seek(event.start_ms)
                 break
+
+    def apply_prefs(self) -> None:
+        """설정을 화면에 반영한다. 저장하자마자 보이게 — 다시 켜게 하지 않는다."""
+        from . import prefs
+
+        values = prefs.load()
+        self.waveform.ms_per_pixel = float(values["waveform_ms_per_pixel"])
+        self.waveform.follow = bool(values["waveform_follow"])
+        self.waveform.show_speech = bool(values["waveform_show_speech"])
+        self.waveform.show_shots = bool(values["waveform_show_shots"])
+        self.waveform.update()
+        self.language_box.setCurrentText(values["whisper_language"])
+        self._prefs = values
 
     def _build_progress(self) -> None:
         """**돌고 있는지 눈에 보여야 한다.**
@@ -638,7 +653,8 @@ class MainWindow(QMainWindow):
         if not self.model.events:
             return
         # **원본을 덮어쓰지 않는다.** 어디에 저장할지 사람이 정한다.
-        suggested = str(self.subtitle_path.with_suffix(".edited.srt")) \
+        suffix = getattr(self, "_prefs", {}).get("save_suffix", ".edited")
+        suggested = str(self.subtitle_path.with_suffix(f"{suffix}.srt")) \
             if self.subtitle_path else "자막.srt"
         path, _ = QFileDialog.getSaveFileName(self, "자막 저장", suggested, SUBTITLE_FILTER)
         if not path:
@@ -647,7 +663,7 @@ class MainWindow(QMainWindow):
         message = f"저장했습니다: {path}"
 
         # **원어가 있으면 함께 낸다.** 자막은 두 벌이고, 검수자가 원어를 본다.
-        if self.model.sources:
+        if self.model.sources and getattr(self, "_prefs", {}).get("save_source_too", True):
             from checker.model import Event
             source_path = Path(path).with_suffix(".원어.srt")
             write_srt([Event(e.index, e.start_ms, e.end_ms,

@@ -70,12 +70,20 @@ class SettingsDialog(QDialog):
             f"<b>{platform} / {kind}</b> — {source.get('section', '')} "
             f"({official}{', ' + source.get('revision', '') if source.get('revision') else ''})"))
 
+        # **SE처럼 갈래로 나눈다.** 자주 쓰지 않는 기능도 있어야 하고, 그러려면
+        # 한 화면에 다 못 담는다(사용자 지적 2026-08-12). 갈래마다 무엇을 정하는
+        # 자리인지 한 줄로 적어 둔다 — 이름만으로는 무엇을 하는 자리인지 모른다.
         tabs = QTabWidget()
-        tabs.addTab(self._numbers_tab(), "수치")
-        tabs.addTab(self._job_tab(), "이 작업에서 정할 것")
-        tabs.addTab(self._rules_tab(), f"검사 규칙 ({len(self.profile.get('rules') or [])})")
-        tabs.addTab(self._shortcut_tab(), "단축키와 기능")
-        tabs.addTab(self._raw_tab(), "적용 중인 값 전부")
+        tabs.setTabPosition(QTabWidget.West)
+        for title, page in (
+                ("작업 기준\n(수치)", self._numbers_tab()),
+                ("이 작업에서\n정할 것", self._job_tab()),
+                (f"검사 규칙\n({len(self.profile.get('rules') or [])}개)", self._rules_tab()),
+                ("단축키와\n기능", self._shortcut_tab()),
+                ("저장·파형\n·도구", self._prefs_tab()),
+                ("적용 중인\n값 전부", self._raw_tab()),
+        ):
+            tabs.addTab(page, title)
         layout.addWidget(tabs, 1)
 
         naming = QHBoxLayout()
@@ -229,6 +237,75 @@ class SettingsDialog(QDialog):
         shortcuts.save(keys)
         return True
 
+    def _prefs_tab(self) -> QWidget:
+        """규정이 아니라 **취향**에 속하는 것들. 사람마다 다른 선택이다.
+
+        자주 쓰지 않는 것도 여기 둔다 — 필요할 때 찾을 수 있어야 한다. 그래서 항목마다
+        무엇을 하는 설정인지 적었다. 모르면 건드리지 못하고, 못 건드리면 없는 것과 같다.
+        """
+        from . import prefs
+
+        page = QWidget()
+        outer = QVBoxLayout(page)
+        values = prefs.load()
+        self.pref_widgets = {}
+
+        table = QTableWidget(len(prefs.OPTIONS), 4)
+        table.setHorizontalHeaderLabels(["묶음", "항목", "값", "무엇을 하는가"])
+        table.setColumnWidth(0, 60)
+        table.setColumnWidth(1, 160)
+        table.setColumnWidth(2, 150)
+        table.horizontalHeader().setStretchLastSection(True)
+        table.verticalHeader().setDefaultSectionSize(46)
+        table.setWordWrap(True)
+
+        for row, option in enumerate(prefs.OPTIONS):
+            table.setItem(row, 0, QTableWidgetItem(option.group))
+            table.setItem(row, 1, QTableWidgetItem(option.title))
+            widget = self._pref_widget(option, values.get(option.key))
+            table.setCellWidget(row, 2, widget)
+            self.pref_widgets[option.key] = (option, widget)
+            table.setItem(row, 3, QTableWidgetItem(option.what))
+        outer.addWidget(table, 1)
+        outer.addWidget(QLabel(
+            "<small>비워 두면 스스로 찾습니다. [도움말 - 진단]에서 지금 무엇을 쓰고 "
+            "있는지 볼 수 있습니다.</small>"))
+        return page
+
+    def _pref_widget(self, option, value):
+        if option.kind == "bool":
+            box = QCheckBox()
+            box.setChecked(bool(value))
+            return box
+        if option.kind == "int":
+            spin = QSpinBox()
+            spin.setRange(1, 10000)
+            spin.setValue(int(value or 1))
+            return spin
+        if option.kind == "choice":
+            combo = QComboBox()
+            combo.addItems(list(option.choices))
+            combo.setCurrentText(str(value))
+            return combo
+        line = QLineEdit(str(value or ""))
+        line.setPlaceholderText("비우면 스스로 찾습니다")
+        return line
+
+    def _save_prefs(self) -> None:
+        from . import prefs
+
+        values = prefs.load()
+        for key, (option, widget) in self.pref_widgets.items():
+            if option.kind == "bool":
+                values[key] = widget.isChecked()
+            elif option.kind == "int":
+                values[key] = int(widget.value())
+            elif option.kind == "choice":
+                values[key] = widget.currentText()
+            else:
+                values[key] = widget.text().strip()
+        prefs.save(values)
+
     def _raw_tab(self) -> QWidget:
         """상속까지 끝난 **최종 값**을 보여 준다. 무엇이 걸려 있는지 숨기지 않는다."""
         page = QWidget()
@@ -260,14 +337,16 @@ class SettingsDialog(QDialog):
 
     # --- 저장 ---------------------------------------------------------
     def _save(self) -> None:
-        # 단축키는 발주처 기준과 무관하다. 이름이 없어도 저장한다.
+        # 단축키와 설정은 발주처 기준과 무관하다. 이름이 없어도 저장한다.
         if not self._save_shortcuts():
             return
+        self._save_prefs()
 
         name = self.name_edit.text().strip()
         if not name:
             QMessageBox.information(
-                self, "단축키를 저장했습니다",
+                self, "설정을 저장했습니다",
+                "단축키와 설정을 저장했습니다.\n"
                 "발주처 기준까지 만들려면 이름을 적어 주세요.")
             self.accept()
             return
