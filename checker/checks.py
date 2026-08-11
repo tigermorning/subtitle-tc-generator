@@ -753,3 +753,60 @@ def _speaker_alone(ev: Event, ctx: dict):
         if re.fullmatch(r"-?\s*[\[(][^\])]+[\])]", line) and not lines[i + 1].startswith(("[", "(", "-", "♪")):
             out.append((i + 1, f"{line} — 대사 첫마디와 같은 줄에 둡니다"))
     return out
+
+
+@check("lyrics_punctuation")
+def _lyrics_punct(ev: Event, ctx: dict):
+    """가사의 문장부호. 넷플릭스·디즈니는 쉼표를 허용하고 **쿠팡은 쉼표·따옴표를 금지**한다."""
+    songs = ctx["profile"].get("songs") or {}
+    banned = songs.get("forbidden_punctuation")
+    if not banned:
+        return []
+    note = (ctx["profile"].get("music") or {}).get("music_note") or "♪"
+    out = []
+    for i, line in enumerate(ev.lines, 1):
+        s = strip_tags(line).strip()
+        if note not in s:
+            continue
+        hits = [c for c in banned if c in s]
+        if hits:
+            out.append((i, f"가사에 {' '.join(hits)} — 쓰지 않습니다"))
+    return out
+
+
+@check("lyrics_with_dialogue")
+def _lyrics_with_dialogue(ev: Event, ctx: dict):
+    """가사와 대사를 한 자막에 넣은 것. 디즈니는 이것을 지양한다."""
+    songs = ctx["profile"].get("songs") or {}
+    if songs.get("lyrics_with_dialogue_in_one_event") != "forbidden":
+        return []
+    note = (ctx["profile"].get("music") or {}).get("music_note") or "♪"
+    lines = [strip_tags(l).strip() for l in ev.lines if strip_tags(l).strip()]
+    has_lyric = any(note in l for l in lines)
+    has_dialogue = any(note not in l and not re.fullmatch(r"-?\s*[\[(][^\])]*[\])]", l) for l in lines)
+    if has_lyric and has_dialogue:
+        return [(None, "가사와 대사를 한 자막에 넣지 않습니다 — 자막을 나눕니다")]
+    return []
+
+
+@check("translator_credit_present")
+def _translator_credit(ev: Event, ctx: dict):
+    """자막 제작자 크레딧. 쿠팡만 넣고 넷플릭스·디즈니는 넣지 않는다."""
+    if (ctx["profile"].get("credit") or {}).get("translator_credit") != "forbidden":
+        return []
+    if re.search(r"자막\s*[:：]", strip_tags(ev.text)):
+        return [(None, "이 플랫폼은 자막 제작자 크레딧을 넣지 않습니다")]
+    return []
+
+
+@doc_check("first_event_at_zero")
+def _first_at_zero(events: list[Event], ctx: dict):
+    """첫 자막 인점이 00:00:00:00이면 안 된다(쿠팡). 몇 프레임이라도 띄운다."""
+    if not (ctx["profile"].get("delivery") or {}).get("first_cue_not_at_zero"):
+        return []
+    if not events:
+        return []
+    first = min(events, key=lambda e: e.start_ms)
+    if first.start_ms <= 0:
+        return [(first.index, None, "첫 자막 인점을 00:00:00:00으로 두지 않습니다")]
+    return []

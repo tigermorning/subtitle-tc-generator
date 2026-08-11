@@ -667,6 +667,41 @@ ok("넷플릭스는 한국어 복귀 표시를 넣지 않는다",
    and cp5["speaker_id"]["foreign_return_marker"] is True)
 
 
+# --- 노래·크레딧 표(이미지) --------------------------------------------------
+
+cp6 = load_profile_file(Path("rules/coupang/ko-sdh.yaml"))
+dp6 = load_profile_file(Path("rules/disney/ko-sdh.yaml"))
+pr6 = load_profile_file(Path("rules/netflix/ko-sdh-practice.yaml"))
+
+r = check_events([ev("♪ 내 피, 땀, 눈물 ♪")], cp6)
+ok("쿠팡은 가사 쉼표를 잡는다", "CP19" in ids(r))
+r = check_events([ev("♪ 내 피 땀 눈물 ♪")], cp6)
+ok("쉼표를 빼면 정상", "CP19" not in ids(r))
+r = check_events([ev("♪ 내 피, 땀, 눈물 ♪")], pr6)
+ok("넷플릭스는 가사 쉼표를 허용한다",
+   not any(v["message"].startswith("쿠팡") for v in r["violations"]))
+r = check_events([ev("가사가 아니면, 쉼표는 상관없다", end=9000)], cp6)
+ok("가사가 아닌 줄은 대상이 아니다", "CP19" not in ids(r))
+
+r = check_events([ev("- ♪ 널 사랑해 ♪\n- 놀고 있네")], dp6)
+ok("디즈니는 가사+대사 한 셀을 잡는다", "DP18" in ids(r))
+r = check_events([ev("- ♪ 널 사랑해 ♪\n- 놀고 있네")], cp6)
+ok("쿠팡·넷플릭스는 허용한다", "CP19" not in ids(r) and "DP18" not in ids(r))
+r = check_events([ev("♪ 동해 물과 백두산이 ♪")], dp6)
+ok("가사만 있으면 정상", "DP18" not in ids(r))
+
+r = check_events([ev("자막: 홍길동")], pr6)
+ok("넷플릭스는 크레딧을 잡는다", "S32" in ids(r))
+r = check_events([ev("자막: 홍길동")], cp6)
+ok("쿠팡은 크레딧을 쓴다", not any(v["rule_id"] == "CP21" for v in r["violations"]))
+ok("쿠팡 크레딧 길이는 2초", cp6["credit"]["credit_duration_ms"] == 2000)
+
+r = check_events([{"index": 1, "start_ms": 0, "end_ms": 3000, "text": "첫 자막"}], cp6)
+ok("쿠팡은 첫 셀 인점 0을 잡는다", "CP20" in ids(r))
+r = check_events([{"index": 1, "start_ms": 1000, "end_ms": 4000, "text": "첫 자막"}], cp6)
+ok("인점을 띄우면 정상", "CP20" not in ids(r))
+
+
 # --- 결과 ---------------------------------------------------------------
 
 print(f"통과 {PASSED}건")
