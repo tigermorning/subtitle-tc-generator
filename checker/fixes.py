@@ -144,6 +144,31 @@ def _fix_colon_speaker(text: str, ctx: dict) -> str:
     return "\n".join(out)
 
 
+@fixer("space_between_markers")
+def _join_markers(text: str, ctx: dict) -> str:
+    """표시끼리 붙인다. 표시와 대사 사이 한 칸은 건드리지 않는다.
+
+    되돌릴 수 있는 변경이고 정답이 하나뿐이라 자동으로 고친다(교정기도 같은
+    판단을 한다 — `correct_subtitle_bracket_spacing`).
+    """
+    profile = ctx.get("profile") or {}
+    speaker = ((profile.get("speaker_id") or {}).get("enclosure") or "[]")
+    tone = ((profile.get("tone") or {}).get("enclosure")
+            or (profile.get("sound_effect") or {}).get("enclosure") or "[]")
+    pairs = {speaker, tone, "[]", "()"}
+    openers = "".join(re.escape(p[0]) for p in pairs if p)
+    closers = "".join(re.escape(p[-1]) for p in pairs if p)
+
+    out = []
+    for line in text.split("\n"):
+        # 표시만 있는 줄은 그대로 둔다.
+        if not re.sub(r"[\[(][^)\]]*[\])]|\{[^}]*\}", "", line).strip():
+            out.append(line)
+            continue
+        out.append(re.sub(rf"([{closers}}}])[ \t]+(?=[{openers}])", r"\1", line))
+    return "\n".join(out)
+
+
 # --- 문서 단위 교정 -------------------------------------------------------
 #
 # 글자만 봐서는 못 고치는 것들. 자막 위치는 **다른 자막과의 관계**로 정해지므로

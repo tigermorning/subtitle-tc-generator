@@ -479,10 +479,24 @@ ok("쿠팡은 대사 뒤 효과음을 잡는다", "CP01" in ids(r))
 r = check_events([ev("아, 저요? [웃음]")], practice)
 ok("넷플릭스는 대사 뒤 효과음을 잡지 않는다", "CP01" not in ids(r))
 
+# **표시끼리는 붙여 쓴다**(사용자 지정 2026-08-02 교정기 / 2026-08-11 재확인).
+# 예전에는 정반대로 검사했다 — 작업자 자료 206행을 그대로 옮긴 탓인데, 그러면
+# 교정기와 편집기가 서로 반대로 고친다.
 r = check_events([ev("[진수][웃으며] 저요?")], practice)
-ok("표시 사이 공백 없음을 잡는다", "S18" in ids(r))
+ok("붙여 쓴 것은 조용하다", "S18" not in ids(r))
 r = check_events([ev("[진수] [웃으며] 저요?")], practice)
-ok("띄어 쓰면 조용하다", "S18" not in ids(r))
+ok("표시 사이 공백을 잡는다", "S18" in ids(r))
+# 표시만 있는 줄(효과음)은 대사가 없으므로 보지 않는다.
+r = check_events([ev("[문이 쾅 닫힌다] [발소리]")], practice)
+ok("효과음만 있는 줄은 건드리지 않는다", "S18" not in ids(r))
+
+_join = apply_fixes([Event(1, 0, 1, "(철수) [작게] 왜 이래")],
+                    load_profile("coupang", "ko", "sdh"))[0]
+ok("표시 사이 공백을 지운다", _join[0].text == "(철수)[작게] 왜 이래")
+_keep = apply_fixes([Event(1, 0, 1, "(철수)[작게]왜 이래")],
+                    load_profile("coupang", "ko", "sdh"))[0]
+# 표시와 대사 사이 한 칸은 교정기 몫이다. 여기서 두 도구가 겹치면 왕복이 생긴다.
+ok("대사와의 간격은 건드리지 않는다", _keep[0].text == "(철수)[작게]왜 이래")
 
 r = check_events([ev("[정적]")], practice)
 ok("[정적]을 잡는다", "S19" in ids(r))

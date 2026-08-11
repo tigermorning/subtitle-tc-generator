@@ -579,18 +579,47 @@ def _speaker_consistency(events: list[Event], ctx: dict):
 UNIT_COMPOSED = "㎡㎥㎢㎠㎣㎝㎜㎞㎏㎎㎖㎗㎘℃℉㎈㎉㎐㎑㎒㎓㎧㎨㏄㏊㎀㎁㎂㎃㎄"
 
 
-@check("speaker_effect_no_space")
-def _speaker_effect_gap(ev: Event, ctx: dict):
-    """`][` — 화자명과 효과음 사이에 공백이 없다.
+@check("space_between_markers")
+def _space_between_markers(ev: Event, ctx: dict):
+    """`(철수) [작게]` — 표시와 표시 사이에 공백이 있다.
 
-    작업자가 "내 습관"이라고 지목한 자리다. SE에서 다중 바꾸기로 `][`를 찾아
-    잡아내던 것을 검사로 옮겼다.
+    **표시끼리는 붙여 쓴다.** 자막 위치·화자명·어조·효과음 표기가 연달아 오면 사이를
+    띄우지 않고, 마지막 표시와 **대사** 사이에만 한 칸을 둔다(사용자 지정
+    2026-08-02 교정기, 2026-08-11 재확인).
+
+        (철수)[작게] 왜 이래        (o)
+        (철수) [작게] 왜 이래       (x)
+
+    **처음에는 정반대로 검사하고 있었다.** 작업자 자료 206행에 "(화자명)과
+    [외국어/효과음]을 나란히 쓰는 경우에는 둘 사이 띄어쓰기"라고 적혀 있어 그대로
+    옮겼는데, 사용자가 바로잡았다. 한국어 교정기는 처음부터 붙여 쓰고 있었으므로
+    두 도구가 서로 반대로 고치고 있었던 셈이다 — 같은 규칙을 두 벌로 적으면
+    반드시 이렇게 어긋난다.
+
+    표시만 있고 대사가 없는 줄(효과음만 있는 줄)은 보지 않는다.
     """
+    from .position import POSITION_TAG
+
+    profile = ctx.get("profile") or {}
+    speaker = ((profile.get("speaker_id") or {}).get("enclosure") or "[]")
+    tone = ((profile.get("tone") or {}).get("enclosure")
+            or (profile.get("sound_effect") or {}).get("enclosure") or "[]")
+    pairs = {speaker, tone, "[]", "()"}
+    openers = "".join(re.escape(p[0]) for p in pairs if p)
+    closers = "".join(re.escape(p[-1]) for p in pairs if p)
+    gap = re.compile(rf"(?:[{closers}]|\}})[ \t]+[{openers}]")
+
     out = []
     for i, line in enumerate(ev.lines, 1):
-        if "][" in strip_tags(line) or ")[" in strip_tags(line) or "](" in strip_tags(line):
-            out.append((i, "표시와 표시 사이를 한 칸 띄웁니다"))
+        body = strip_tags(line)
+        if gap.search(POSITION_TAG.sub(lambda m: m.group(0), body)) and _has_dialogue(body):
+            out.append((i, "표시끼리는 붙여 씁니다"))
     return out
+
+
+def _has_dialogue(line: str) -> bool:
+    """표시를 걷어내고도 글자가 남는지. 남지 않으면 효과음만 있는 줄이다."""
+    return bool(re.sub(r"[\[(][^)\]]*[\])]|\{[^}]*\}", "", line).strip())
 
 
 @check("discouraged_silence_expression")
