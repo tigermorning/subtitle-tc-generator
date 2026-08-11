@@ -14,6 +14,7 @@ from . import check_events
 from .fixes import apply_fixes
 from .korean import CorrectorUnavailable, load_backend, run_korean_pass
 from .parsers import parse
+from .timing import TimingLimits, converge
 from .writers import write_srt
 
 SUBTITLE_SUFFIXES = (".srt", ".vtt")
@@ -27,7 +28,8 @@ class Options:
     ksc_path: str | None = None
     spacing: str = "principle"
     out: Path | None = None
-    fps: float = 23.976        # 프레임 단위 규정(자막 간격 2프레임)을 환산할 때 쓴다
+    fps: float = 23.976
+    fix_timing: bool = False   # 타임코드를 규정에 맞게 수렴시킨다(영상 없이 가능)        # 프레임 단위 규정(자막 간격 2프레임)을 환산할 때 쓴다
 
 
 @dataclass
@@ -91,9 +93,26 @@ def run_files(
             result.notes.append(f"자막을 읽지 못했습니다: {path.name}")
             continue
 
+        if options.fix_timing:
+            limits = TimingLimits.from_profile(profile, fps=options.fps,
+                                               children=options.children)
+            timing = converge(events, limits)
+            events = timing.events
+            say(f"    타임코드 {len(timing.changes)}곳 조정"
+                + (f", 남은 문제 {len(timing.unresolved)}건" if timing.unresolved else ""))
+
         report = check_events([e.__dict__ for e in events], profile,
                               children=options.children, fps=options.fps)
         report["file"] = str(path)
+        if options.fix_timing:
+            report["timing_changes"] = [
+                {"event_index": c.event_index, "field": c.field_name,
+                 "before": c.before, "after": c.after, "reason": c.reason}
+                for c in timing.changes
+            ]
+            report["timing_unresolved"] = [
+                {"event_index": i, "message": m} for i, m in timing.unresolved
+            ]
 
         ko_fixed = None
         if backend is not None and (profile.get("korean") or {}).get("orthography") == "as_spoken":

@@ -55,6 +55,17 @@ def _format_text(report: dict, path: Path) -> str:
             out.append(f"    {n:>4}건  {rule_id}  {message}")
         out.append("")
     out.append(f"  위반 {len(violations)}건")
+    if report.get("timing_changes") is not None:
+        out.append(f"  타임코드 {len(report['timing_changes'])}곳 조정")
+        for c in report["timing_changes"][:8]:
+            out.append(f"    #{c['event_index']} {c['field']} "
+                       f"{c['before']} -> {c['after']}ms  ({c['reason']})")
+        if len(report["timing_changes"]) > 8:
+            out.append(f"    … 외 {len(report['timing_changes']) - 8}곳")
+        for u in report.get("timing_unresolved", []):
+            # 못 맞춘 것을 맞췄다고 하지 않는다.
+            out.append(f"    [남음] #{u['event_index']} {u['message']}")
+
     if report.get("fixed_file"):
         out.append(f"  교정본: {report['fixed_file']}")
         if report["applied_fixes"]:
@@ -105,14 +116,29 @@ def collect_files(targets: list[Path]) -> list[Path]:
 
 
 def _run_one(path: Path, profile: dict, args, backend) -> dict | None:
+    from .timing import TimingLimits, converge
+
     events = parse(path)
     if not events:
         print(f"자막 이벤트를 읽지 못했습니다: {path}", file=sys.stderr)
         return None
 
+    timing = None
+    if getattr(args, "fix_timing", False):
+        limits = TimingLimits.from_profile(profile, fps=args.fps, children=args.children)
+        timing = converge(events, limits)
+        events = timing.events
+
     report = check_events([e.__dict__ for e in events], profile,
                           children=args.children, fps=args.fps)
     report["file"] = str(path)
+    if timing is not None:
+        report["timing_changes"] = [
+            {"event_index": c.event_index, "field": c.field_name,
+             "before": c.before, "after": c.after, "reason": c.reason}
+            for c in timing.changes]
+        report["timing_unresolved"] = [
+            {"event_index": i, "message": m} for i, m in timing.unresolved]
 
     ko_fixed = None
     if backend is not None:
@@ -157,6 +183,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--ksc-path", help="한국어 교정기 저장소 경로(기본: 환경변수 KSC_PATH)")
     ap.add_argument("--spacing", choices=["principle", "allowance"], default="principle",
                     help="보조 용언 띄어쓰기 기준(제47항). 교정기 레인에만 쓴다")
+    ap.add_argument("--fix-timing", action="store_true",
+                    help="타임코드를 규정에 맞게 수렴시킨다(영상 없이 됨). --fix와 함께 쓰면 "
+                         "교정본에 함께 반영된다")
     ap.add_argument("--fix", action="store_true",
                     help="자동 교정 가능한 것을 고쳐 새 파일로 쓴다(원본은 그대로)")
     ap.add_argument("-o", "--out", type=Path,

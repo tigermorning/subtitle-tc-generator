@@ -724,6 +724,54 @@ r = check_events([ev("엄마, 사랑해요")], pr7)
 ok("호명 뒤 쉼표는 정상", "S34" not in ids(r))
 
 
+# --- 타임코드 수렴 -----------------------------------------------------------
+
+from checker.timing import TimingLimits, converge  # noqa: E402
+
+lim = TimingLimits.from_profile(ko_sdh, fps=23.976)
+# 넷플릭스 공식은 5/6초를 833ms로 적었고 실무 스펙 표는 0.834초로 적었다.
+# 같은 값을 반올림만 다르게 쓴 것이라 프로파일마다 그대로 둔다.
+ok("프로파일에서 한계를 읽는다",
+   lim.min_duration_ms == 833 and lim.max_duration_ms == 7000 and lim.max_cps == 14)
+
+cp_lim = TimingLimits.from_profile(load_profile_file(Path("rules/coupang/ko-sdh.yaml")), fps=23.976)
+ok("쿠팡은 6초·2프레임", cp_lim.max_duration_ms == 6000 and cp_lim.min_gap_ms == 83)
+ok("프레임레이트가 바뀌면 간격도 바뀐다",
+   TimingLimits.from_profile(load_profile_file(Path("rules/coupang/ko-sdh.yaml")),
+                             fps=59.94).min_gap_ms == 33)
+
+r = converge([Event(1, 0, 400, "짧다"), Event(2, 5000, 6000, "다음")], lim)
+ok("최소 표시 시간을 늘린다", r.events[0].duration_ms >= lim.min_duration_ms, str(r.events[0]))
+ok("무엇을 왜 고쳤는지 남긴다", r.changes and "최소 표시 시간" in r.changes[0].reason)
+
+r = converge([Event(1, 0, 20000, "길다")], lim)
+ok("최대 표시 시간을 줄인다", r.events[0].duration_ms == 7000)
+
+r = converge([Event(1, 0, 3000, "앞"), Event(2, 2000, 5000, "뒤")], lim)
+ok("겹침을 푼다", r.events[0].end_ms <= r.events[1].start_ms,
+   f"{r.events[0].end_ms} vs {r.events[1].start_ms}")
+
+r = converge([Event(1, 0, 3000, "앞"), Event(2, 3010, 6000, "뒤")], cp_lim)
+ok("간격을 벌린다", r.events[1].start_ms - r.events[0].end_ms >= 83,
+   str(r.events[0].end_ms))
+
+r = converge([Event(1, 0, 1000, "가나다라마바사아자차카타파하가나다라마바사")], lim)
+ok("읽기 속도에 맞춰 늘린다", r.events[0].duration_ms > 1000)
+
+# 늘릴 자리가 없으면 고쳤다고 하지 않는다
+r = converge([Event(1, 0, 400, "짧다"), Event(2, 500, 3000, "바로 뒤")], lim)
+ok("못 맞춘 것은 남긴다", any("최소 표시 시간" in m for _i, m in r.unresolved), str(r.unresolved))
+ok("못 맞췄으면 병합을 권한다", any("병합" in m for _i, m in r.unresolved))
+
+r = converge([Event(1, 0, 2000, "가" * 200)], lim)
+ok("시간으로 못 줄이는 속도는 글자를 줄이라고 말한다",
+   any("글자를 줄이" in m for _i, m in r.unresolved), str(r.unresolved))
+
+original = [Event(1, 0, 400, "짧다")]
+converge(original, lim)
+ok("원본 이벤트를 건드리지 않는다", original[0].end_ms == 400)
+
+
 # --- 결과 ---------------------------------------------------------------
 
 print(f"통과 {PASSED}건")
