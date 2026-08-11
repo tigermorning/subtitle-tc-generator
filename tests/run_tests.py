@@ -1651,22 +1651,29 @@ else:
     # 면적 — 작업마다 크게 봐야 하는 곳이 다르다.
     from app.window import MainWindow  # noqa: E402
 
-    _win = MainWindow()
+    # 사람이 쓰던 배치를 되살리면 시험 결과가 기계마다 달라진다.
+    _win = MainWindow(restore=False)
     _win.resize(1600, 900)
     _win.show()
     _qt_app.processEvents()
 
+    # **두 배치를 견준다.** 절대 크기로 재면 화면이 작은 기계에서 창이 눌려
+    # 통과·실패가 갈린다(실제로 그랬다). 견주는 것이 원래 확인하려던 것이기도 하다.
     _win.apply_layout("spotting")
     _qt_app.processEvents()
-    _main = _win.main_splitter.sizes()
-    ok("타임코드 작업은 왼쪽(영상·파형)이 넓다", _main[0] > _main[1])
-    _left = _win.left_splitter.sizes()
-    ok("그때 파형이 영상보다 크다", _left[1] > _left[0])
+    _spotting_main = _win.main_splitter.sizes()
+    _spotting_left = _win.left_splitter.sizes()
 
     _win.apply_layout("translating")
     _qt_app.processEvents()
-    _main = _win.main_splitter.sizes()
-    ok("번역 작업은 표가 넓다", _main[1] > _main[0])
+    _translating_main = _win.main_splitter.sizes()
+
+    ok("번역 배치가 타임코드 배치보다 표를 넓게 준다",
+       _translating_main[1] > _spotting_main[1])
+    ok("타임코드 배치가 왼쪽(영상·파형)을 넓게 준다",
+       _spotting_main[0] > _translating_main[0])
+    ok("타임코드 배치에서는 파형이 영상보다 크다",
+       _spotting_left[1] > _spotting_left[0])
 
     # 잡이가 보여야 잡는다. 가는 선은 있는 줄도 모른다.
     ok("잡이가 잡을 만큼 두껍다", _win.main_splitter.handleWidth() >= 6)

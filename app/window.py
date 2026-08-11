@@ -50,8 +50,14 @@ class PeakWorker(QObject):
 
 
 class MainWindow(QMainWindow):
-    def __init__(self):
+    def __init__(self, restore: bool = True):
+        """`restore=False`면 지난번 배치를 되살리지 않는다.
+
+        시험에서 필요하다. 사람이 쓰던 설정이 시험 결과를 바꾸면 통과·실패가
+        기계마다 달라진다(실제로 그랬다).
+        """
         super().__init__()
+        self._restore = restore
         self.setWindowTitle("자막 편집기")
         self.resize(1280, 760)
 
@@ -164,7 +170,8 @@ class MainWindow(QMainWindow):
             "QSplitter::handle { background: #3a3f4b; }"
             "QSplitter::handle:hover { background: #5b8dd9; }")
         self.setCentralWidget(self.main_splitter)
-        self._restore_layout()
+        if self._restore:
+            self._restore_layout()
         self.statusBar().showMessage("영상과 자막을 여세요")
 
     def _build_pipeline(self) -> None:
@@ -910,6 +917,11 @@ class MainWindow(QMainWindow):
             self.restoreGeometry(geometry)
 
     def closeEvent(self, event) -> None:
+        if not self._restore:          # 시험용 창은 설정을 건드리지 않는다
+            if self.player:
+                self.player.close()
+            super().closeEvent(event)
+            return
         store = self._settings()
         store.setValue("splitter/main", self.main_splitter.saveState())
         store.setValue("splitter/left", self.left_splitter.saveState())
