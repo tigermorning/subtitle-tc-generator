@@ -1115,6 +1115,29 @@ ok("영상 근거만으로는 고치지 않는다", apply_positions(_evs2, _sug2
 ok("사람이 허락하면 고친다", apply_positions(_evs2, _sug2, only_certain=False) == 1)
 
 
+# --- SDH인가 번역 자막인가 -------------------------------------------------
+# 종류가 어긋나면 검사가 통째로 헛돈다. 번역 프로파일에는 효과음 규칙이 아예
+# 없어서 SDH 파일을 넣어도 **조용히 다 통과한다** — 플랫폼 불일치보다 위험하다.
+
+from checker.detect import detect_kind  # noqa: E402
+
+_sdh = [Event(1, 0, 1, "[문이 쾅 닫힌다]"),
+        Event(2, 0, 1, "[철수] 왔어?"),
+        Event(3, 0, 1, "♪ 노래가 흐른다 ♪")]
+ok("효과음·화자·음표를 보고 SDH로 본다", detect_kind(_sdh)[0] == "sdh")
+ok("무엇을 보고 그렇게 봤는지 남긴다", len(detect_kind(_sdh)[1]) == 3)
+
+_long = [Event(i, 0, 1, f"대사 {i}") for i in range(1, 35)]
+ok("표시가 하나도 없고 길면 번역 자막", detect_kind(_long)[0] == "translation")
+# "효과음이 없다"는 조용한 장면이라는 뜻일 수도 있다. 짧으면 말하지 않는다.
+ok("짧으면 아무 말도 하지 않는다", detect_kind(_long[:5])[0] is None)
+ok("근거가 약하면 근거도 비운다", detect_kind(_long[:5])[1] == [])
+
+_warn = mismatch_warning(_sdh, load_profile("netflix", "ko", "translation"))
+ok("종류가 어긋나면 경고한다", _warn is not None and "SDH" in _warn)
+ok("맞으면 조용하다", mismatch_warning(_sdh, load_profile("netflix", "ko", "sdh")) is None)
+
+
 # --- 결과 ---------------------------------------------------------------
 
 print(f"통과 {PASSED}건")

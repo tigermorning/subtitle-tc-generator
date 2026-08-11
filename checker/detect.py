@@ -84,12 +84,65 @@ def detect_platform(events: list[Event]) -> list[PlatformGuess]:
     return guesses
 
 
+def detect_kind(events: list[Event]) -> tuple[str | None, list[str]]:
+    """자막이 SDH인지 번역 자막인지 유추한다. (종류, 근거) — 모르면 (None, []).
+
+    **플랫폼보다 신호가 강하다.** SDH에는 소리를 글자로 옮긴 것들이 있고 번역
+    자막에는 없다. 대괄호 효과음, 화자 표시, 음표가 그것이다.
+
+    반대 방향은 증거가 없다 — "효과음이 없다"는 번역 자막이라는 뜻일 수도 있고
+    조용한 장면이라는 뜻일 수도 있다. 그래서 **자막이 충분히 많을 때만** 없음을
+    근거로 삼는다.
+    """
+    marks: list[str] = []
+    hits = 0
+    for ev in events:
+        text = strip_tags(ev.text)
+        for line in text.split("\n"):
+            stripped = line.strip().lstrip("-").strip()
+            # 대괄호·소괄호만으로 된 줄은 효과음이다(대사가 이어지면 화자 표시).
+            m = re.fullmatch(r"[\[(]([^\])]+)[\])]", stripped)
+            if m:
+                hits += 1
+                if len(marks) < 3:
+                    marks.append(f"효과음 {stripped[:20]}")
+                continue
+        if SPEAKER_HEAD.match(text.split("\n")[0]):
+            hits += 1
+            if len(marks) < 3:
+                marks.append("화자 표시가 붙은 대사")
+        if "♪" in text:
+            hits += 1
+            if len(marks) < 3:
+                marks.append("음표(가사)")
+
+    if hits >= 3:
+        return "sdh", marks
+    # 근거가 하나도 없고 자막이 충분히 많으면 번역 자막으로 본다. 짧은 파일에서는
+    # 아무 말도 하지 않는 것이 맞다.
+    if hits == 0 and len(events) >= 30:
+        return "translation", [f"자막 {len(events)}개에 효과음·화자 표시·음표가 없음"]
+    return None, []
+
+
 def mismatch_warning(events: list[Event], profile: dict, margin: int = 4) -> str | None:
     """고른 프로파일과 자막의 표기가 어긋나면 경고 문구를 돌려준다.
 
     `margin`보다 확실히 앞설 때만 말한다 — 애매한 근거로 사람을 흔들면 오히려
     프로파일을 잘못 바꾸게 된다.
     """
+    # 종류가 어긋나면 지적이 통째로 무의미해진다. 번역 프로파일로 SDH 파일을
+    # 돌리면 효과음 규칙이 아예 없어서 **조용히 다 통과한다** — 플랫폼 불일치보다
+    # 위험하므로 먼저 본다.
+    kind_guess, why = detect_kind(events)
+    chosen_kind = profile.get("kind")
+    if kind_guess and chosen_kind and kind_guess != chosen_kind:
+        label = {"sdh": "SDH", "translation": "번역"}
+        return (f"자막은 {label.get(kind_guess, kind_guess)} 자막으로 보이는데 "
+                f"{label.get(chosen_kind, chosen_kind)} 프로파일로 검사했습니다. "
+                f"근거: {', '.join(why[:3])}. 종류가 어긋나면 검사가 통째로 "
+                f"헛돕니다 — 프로파일을 확인하세요.")
+
     guesses = detect_platform(events)
     if not guesses:
         return None
