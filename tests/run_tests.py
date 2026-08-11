@@ -808,9 +808,13 @@ by_field = {s.field_name: s for s in sug if s.event_index == 1}
 ok("다음 자막 인점을 넘어서까지 늘리지 않는다",
    "end_ms" not in by_field or by_field["end_ms"].suggested <= 6500, str(sug))
 
-# 이미 규정 안이면 말하지 않는다
+# 이미 규정 안이면 말하지 않는다.
+# 아웃점 기준에는 검출 보정(SPEECH_TAIL_FRAMES)이 함께 들어간다 — 말소리 검출이
+# 말 끝을 일찍 자르는 만큼을 되돌리는 값이라, 규정(6~9프레임)과 다른 자리를 잰다.
+from checker.timing import SPEECH_TAIL_FRAMES  # noqa: E402
+
 good_start = int(3667 - 3 * frame)
-good_end = int(4594 + 6 * frame)
+good_end = int(4594 + (6 + SPEECH_TAIL_FRAMES) * frame)
 ok("규정 안이면 조용하다",
    not suggest_spotting([Event(1, good_start, good_end, "대사")], speech, fps),
    str(suggest_spotting([Event(1, good_start, good_end, "대사")], speech, fps)))

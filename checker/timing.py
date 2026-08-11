@@ -178,13 +178,21 @@ def converge(events: list[Event], limits: TimingLimits, rounds: int = 3) -> Timi
 LEAD_IN_FRAMES = (2, 3)
 LEAD_OUT_FRAMES = (6, 9)
 
-# 말소리 검출이 문장 끝의 잦아드는 소리를 일찍 자른다는 의심이 있어, 아웃점에
-# 상수 보정(+400ms)을 넣어 봤다가 **뺐다**(2026-08-11). 전문가 타임코드와 대조하니
-# 아웃점 중앙값이 -380ms에서 -354ms로 거의 그대로였다. 우리 자막이 빈틈없이 붙어
-# 있어 늘릴 자리가 없었기 때문이다.
+# **말소리 검출은 말이 끝나기 전에 끝났다고 말한다.** 음량이 기준이라 문장 끝의
+# 잦아드는 소리를 침묵으로 본다. 검출 기준을 -20dB로 올린 뒤로는 더 그렇다.
 #
-# 실제로 고친 것은 **전사 조각을 묶는 것**이었다(`regroup.py`). 자막이 줄어 사이가
-# 벌어지자 아웃점이 -226ms까지 따라왔다. 증상이 아니라 원인을 고쳐야 했다.
+# 처음에는 이 보정을 -30dB 기준에 얹어 봤다가 뺐다 — 아웃점이 -380ms에서 -354ms로
+# 거의 그대로였기 때문이다. 자막이 빈틈없이 붙어 있어 늘릴 자리가 없었다. 전사
+# 조각을 묶고(`regroup.py`) 검출 기준을 올린 뒤에야 이 보정이 값을 한다.
+#
+#     보정 없음(6프레임)   아웃점 중앙 -448ms, 100ms 안 10개
+#     +6프레임             아웃점 중앙 -323ms, 100ms 안 14개   <- 이 값
+#     +12프레임            아웃점 중앙 -236ms, 100ms 안 12개 (지나쳐 늘어난다)
+#
+# **규정을 바꾼 것이 아니다.** 작업자 기준(아웃점은 목소리가 끝난 뒤 6~9프레임)은
+# 사람이 듣는 말 끝을 기준으로 한 것이고, 이 값은 검출기가 일찍 자르는 만큼을
+# 되돌리는 보정이다. 둘은 다른 자리를 잰다.
+SPEECH_TAIL_FRAMES = 6
 
 
 @dataclass
@@ -286,7 +294,7 @@ def suggest_spotting(events: list[Event], speech: list[tuple[int, int]], fps: fl
                 ev.index, "start_ms", ev.start_ms, int(round(want_start)),
                 f"말소리 시작 {voice_start}ms의 {LEAD_IN_FRAMES[0]}~{LEAD_IN_FRAMES[1]}프레임 앞"))
 
-        want_end = voice_end + LEAD_OUT_FRAMES[0] * frame
+        want_end = voice_end + (SPEECH_TAIL_FRAMES + LEAD_OUT_FRAMES[0]) * frame
         if next_start is not None:
             # 여유 프레임을 더한 뒤에도 다음 인점을 넘지 않게 한다.
             # 간격 확보는 converge()가 따로 본다.

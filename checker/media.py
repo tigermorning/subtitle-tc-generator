@@ -139,9 +139,21 @@ SILENCE_START = re.compile(r"silence_start:\s*(-?[\d.]+)")
 SILENCE_END = re.compile(r"silence_end:\s*(-?[\d.]+)")
 
 
-def detect_speech(video: Path, noise_db: int = -30, min_silence_s: float = 0.25,
+def detect_speech(video: Path, noise_db: int = -20, min_silence_s: float = 0.25,
                   duration_ms: int | None = None) -> list[tuple[int, int]]:
     """말소리 구간 [(시작ms, 끝ms)]. 조용한 구간을 찾아 그 사이를 말소리로 본다.
+
+    **기준값은 전문가 타임코드와 대조해 골랐다**(2026-08-11, 6분 30초 영어 영상).
+    -30dB에서 -20dB로 올리니 인점이 제자리를 찾았다 — 낮은 기준은 숨소리·잡음까지
+    말소리로 보아 자막이 일찍 시작한다.
+
+        -30dB   인점 중앙 -147ms, 100ms 안 21개
+        -20dB   인점 중앙   +6ms, 100ms 안 28개   <- 이 값
+        -40dB   인점 중앙 -257ms, 100ms 안 13개
+
+    대신 말 끝의 잦아드는 소리를 일찍 자른다. 그 보정은 `timing.SPEECH_TAIL_FRAMES`가
+    맡는다(둘을 같이 봐야 한다).
+
 
     음량 기준이라 배경 음악이나 효과음이 크면 경계가 흐려진다. 그때는 VAD 모델을
     붙여야 한다 — 여기서는 붙이지 않는다. **정확하지 않을 수 있는 값을 정답처럼
