@@ -45,14 +45,15 @@ class Player:
         # 자막 자리로 쓴다(`sub-use-margins=yes`). 그러면 편집기에서 본 위치와 실제
         # 화면에서 보이는 위치가 달라져 작업자가 위치를 판단할 수 없다.
         #
-        # 자막 크기는 **영상 크기 기준**으로 잡는다. 창을 키우고 줄여도 화면 대비
-        # 비율이 그대로라, 지금 보는 모양이 최종 화면에서 보이는 모양이다.
+        # 자막 크기는 **창 크기에 비례하게** 둔다(`sub-scale-by-window`의 기본값
+        # `yes`). 한 번 `no`로 바꿨다가 자막이 화면 절반을 덮었다 — 그 값은 "창과
+        # 무관하게 고정 픽셀"이라는 뜻이라, 작은 미리 보기 창에서는 글자가 거대해진다.
+        # 이름만 보고 반대로 짐작했다.
         #
         # **빌드마다 있는 옵션이 다르다.** `sub-ass-use-margins`는 이 libmpv에 없다.
         # 없는 옵션 하나 때문에 재생기가 통째로 안 열리면 안 된다.
         for name, value in (("sub-use-margins", "no"),
-                            ("sub-ass-use-margins", "no"),
-                            ("sub-scale-by-window", "no")):
+                            ("sub-ass-use-margins", "no")):
             self._set_optional(name, value)
 
         self._duration_ms = 0
