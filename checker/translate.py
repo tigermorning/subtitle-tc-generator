@@ -48,6 +48,18 @@ class Glossary:
         consistency = profile.get("consistency") or {}
         return cls(dict(consistency.get("glossary") or {}))
 
+    def merge_terms(self, terms: dict) -> "Glossary":
+        self.terms.update({k: v for k, v in (terms or {}).items() if k and v})
+        return self
+
+    def merge_knp(self, path) -> int:
+        """KNP 시트를 먹는다. 작업자가 어차피 만드는 표다."""
+        from .knp import read_terms
+
+        before = len(self.terms)
+        self.merge_terms(read_terms(path))
+        return len(self.terms) - before
+
     def merge_file(self, path) -> "Glossary":
         """`원어<탭 또는 =>한국어` 한 줄에 하나. 주석은 #."""
         from pathlib import Path
@@ -235,13 +247,27 @@ def make_translator(model: str | None = None, prefer_cli: bool | None = None):
     raise TranslatorUnavailable(problems[0])
 
 
+# 작업자 자료(`작업 기본 원칙` [영상번역])에 적힌 규칙을 그대로 옮겼다. 번역기에게
+# "잘 번역해라"라고 하면 소설처럼 쓴다 — 자막 번역은 규칙이 있는 글쓰기다.
 SYSTEM = (
     "당신은 영상 번역가입니다. 영어 대사를 한국어 자막으로 옮깁니다.\n"
     "- 자막은 한 줄에 하나입니다. 번호를 합치거나 나누지 마세요.\n"
     "- 구어입니다. 문어체로 늘이지 말고 대사처럼 짧게 씁니다.\n"
+    "- **마침표를 쓰지 않습니다.** 문장 끝에 쉼표도 쓰지 않습니다.\n"
+    "- 문장 부호를 최소화합니다(쉼표·말줄임표·괄호).\n"
+    "- 문장 요소를 최소화합니다. '수', '있', '것', 보조 용언, 극존칭 '-시-'를 덜어냅니다.\n"
+    "- **인칭대명사를 쓰지 않습니다.** '그', '그녀', '그들'은 이름이나 호칭으로 바꾸거나 뺍니다.\n"
+    "- 원문의 단어에 매달리지 말고 **의미**를 옮깁니다. 불필요한 말은 과감히 뺍니다.\n"
     "- 인물 관계에 맞는 말투를 유지합니다(존댓말/반말을 자막마다 바꾸지 마세요).\n"
+    "  관계를 알 수 없으면 존댓말을 씁니다.\n"
+    "- 한국 문화로 과하게 옮기지 않습니다(미국인이 한국식으로 말하면 어색합니다).\n"
     "- 대괄호 안의 화자명·효과음, 음표, 태그는 그대로 둡니다.\n"
     "- 설명을 덧붙이지 말고 번역만 냅니다."
+)
+
+# 다큐·리얼리티에는 더 붙는다. 드라마와 규칙이 다르다(작업자 자료).
+DOCUMENTARY_RULES = (
+    "\n- 다큐·리얼리티입니다. 호칭 '~씨'와 극존칭을 쓰지 않습니다."
 )
 
 

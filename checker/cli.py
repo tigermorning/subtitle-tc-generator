@@ -302,6 +302,7 @@ def _run_one(path: Path, profile: dict, args, backend) -> dict | None:
         glossary = Glossary.from_profile(profile)
         if getattr(args, "glossary", None):
             glossary.merge_file(args.glossary)
+        _add_knp(glossary, args, path)
         print(f"    한국어로 옮깁니다 — 자막 {len(events)}개", file=sys.stderr)
         cues = translate_events(events, translator, glossary,
                                 progress=lambda m: print(f"    {m}", file=sys.stderr))
@@ -340,6 +341,95 @@ def _run_one(path: Path, profile: dict, args, backend) -> dict | None:
         report["auto_but_unfixable"] = unfixable
 
     return report
+
+
+def _add_knp(glossary, args, near) -> None:
+    """작업자가 만든 KNP 시트를 자동으로 먹인다.
+
+    **이미 있는 것을 다시 만들게 하지 않는다.** 용어집을 따로 입력하라고 하면
+    아무도 안 쓴다. 옆에 있으면 그냥 쓴다.
+    """
+    if getattr(args, "no_knp", False) or not near:
+        return
+    from .knp import find_for
+
+    found = find_for(near)
+    if not found:
+        return
+    added = glossary.merge_knp(found)
+    if added:
+        print(f"KNP 시트에서 용어 {added}개를 가져왔습니다: {found.name}")
+
+
+def _terms_mode(args, ap) -> int:
+    """용어를 뽑아 조사한다. **번역이 아니라 조사를 대신한다.**"""
+    from .terms import extract, research, summarize, to_tsv
+
+    files = collect_files(args.targets)
+    if not files:
+        ap.error("자막 파일이 필요합니다")
+
+    texts: list[str] = []
+    for path in files:
+        texts.extend(e.text for e in parse(path))
+    terms = extract(texts, min_count=1)
+    print(f"용어 후보 {len(terms)}개")
+
+    lookup = None
+    if args.korean:
+        try:
+            backend_root = _corrector_root(args)
+            lookup = _loanword_lookup(backend_root)
+        except CorrectorUnavailable as exc:
+            print(f"규범 용례 조회를 건너뜁니다: {exc}", file=sys.stderr)
+
+    glossary = {}
+    from .knp import find_for
+    knp = find_for(files[0])
+    if knp and not args.no_knp:
+        from .knp import read_terms
+        glossary = read_terms(knp)
+        if glossary:
+            print(f"KNP에서 이미 정한 용어 {len(glossary)}개를 씁니다: {knp.name}")
+
+    if args.web:
+        print("규범 용례에 없는 것은 위키백과에서도 찾습니다 — **낱말만 나갑니다**")
+    research(terms, lookup=lookup, glossary=glossary, web=args.web,
+             progress=lambda m: print(f"    {m}", file=sys.stderr))
+
+    stats = summarize(terms)
+    print(f"근거 있는 표기 {stats['confirmed']}개 / 확인 필요 {stats['unknown']}개")
+
+    out = args.out or files[0].with_suffix(".terms.tsv")
+    out.write_text(to_tsv(terms), encoding="utf-8-sig")
+    print(f"용어표를 저장했습니다: {out}")
+    print("  엑셀에서 열어 KNP 시트에 붙여 넣으세요. 빈칸은 사람이 채웁니다.")
+    return 0
+
+
+def _corrector_root(args):
+    """교정기 경로. 사전 조회는 거기 붙어 있다."""
+    import os
+    root = getattr(args, "ksc_path", None) or os.environ.get("KSC_PATH")
+    if not root:
+        raise CorrectorUnavailable("교정기 경로를 모릅니다(--ksc-path 또는 KSC_PATH)")
+    return Path(root)
+
+
+def _loanword_lookup(root: Path):
+    """국립국어원 외래어 표기 용례 조회를 빌려 온다."""
+    from .korean import _load_corrector_env
+
+    if not (root / "subtitle_corrector").is_dir():
+        raise CorrectorUnavailable(f"교정기가 없습니다: {root}")
+    _load_corrector_env(root)
+    if str(root) not in sys.path:
+        sys.path.insert(0, str(root))
+    try:
+        from subtitle_corrector.dictionary.terms import lookup_by_source
+    except ImportError as exc:
+        raise CorrectorUnavailable(f"사전을 불러오지 못했습니다: {exc}") from exc
+    return lookup_by_source
 
 
 def _bookmarks_mode(args, ap) -> int:
@@ -441,6 +531,8 @@ def _generate_mode(args, ap) -> int:
         glossary = Glossary.from_profile(profile)
         if args.glossary:
             glossary.merge_file(args.glossary)
+        _add_knp(glossary, args, args.video)
+        if glossary.terms:
             print(f"표기 통일표 {len(glossary.terms)}개를 적용합니다")
 
     out = args.out or args.video.with_suffix(".draft.srt")
@@ -556,6 +648,12 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--review-srt", action="store_true",
                     help="지적을 자막 파일로도 낸다(<원본>.review.srt). SE 번역 모드로 "
                          "원본 옆에 띄워 영상을 보며 확인할 수 있다")
+    ap.add_argument("--terms", action="store_true",
+                    help="작품에 나오는 고유명사·약어·용어를 뽑아 조사한다. "
+                         "KNP 시트에 붙일 수 있는 표로 낸다")
+    ap.add_argument("--web", action="store_true",
+                    help="규범 용례에 없는 것을 위키백과에서도 찾는다. "
+                         "**낱말만 보낸다** — 대사는 나가지 않는다. 기본은 끔")
     ap.add_argument("--bookmarks", type=Path,
                     help="SubtitleEdit 북마크(강사 첨삭)를 모아 갈래별로 낸다. "
                          "폴더를 주면 그 안의 것을 모두 읽는다")
@@ -607,6 +705,8 @@ def main(argv: list[str] | None = None) -> int:
     gen.add_argument("--translate-model",
                      help="번역에 쓸 로컬 모델(기본: exaone3.5:7.8b). "
                           "`ollama list`에 있는 이름")
+    gen.add_argument("--no-knp", action="store_true",
+                     help="옆에 있는 KNP 시트를 쓰지 않는다(기본은 찾으면 쓴다)")
     gen.add_argument("--glossary", type=Path,
                      help="표기 통일표. `원어=한국어` 한 줄에 하나. "
                           "발주처가 주는 표를 그대로 쓴다")
@@ -614,6 +714,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.generate:
         return _generate_mode(args, ap)
+
+    if args.terms:
+        return _terms_mode(args, ap)
 
     if args.bookmarks:
         return _bookmarks_mode(args, ap)

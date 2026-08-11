@@ -1476,6 +1476,51 @@ ok("여유를 앞뒤로 준다", _padded[0][0] == 60)
 ok("영상 밖으로 나가지 않는다", _padded[0][1] <= 480)
 
 
+# --- 용어 뽑기·조사 --------------------------------------------------------
+# 작업자가 작품마다 공부하던 자리다. 기계가 대신할 수 있는 것은 **번역이 아니라
+# 조사**다. 근거 없는 표기를 정답처럼 내면 검수에서 되돌아온다.
+
+from checker.terms import Term, extract, research, summarize, to_tsv  # noqa: E402
+
+_lines = ["Jason Bull: This trial is about banking.",
+          "Nice to meet you, Benny.",
+          "That is a nice hat.",
+          "He signed an NDA with Halberd Systems.",
+          "Halberd Systems is in Panama."]
+_terms = extract(_lines)
+_names = [t.source for t in _terms]
+ok("여러 낱말로 된 이름을 한 덩어리로 잡는다", "Halberd Systems" in _names)
+ok("약어를 잡는다", "NDA" in _names)
+# `Nice to meet you`의 Nice가 도시 니스로 조사되어 나온 적이 있다.
+ok("소문자로도 나오는 낱말은 이름이 아니다", "Nice" not in _names)
+ok("경칭만 남은 것은 버린다", "Mr" not in _names)
+ok("긴 이름 안의 조각은 버린다", "Halberd" not in _names)
+ok("몇 번 나오는지 센다",
+   next(t.count for t in _terms if t.source == "Halberd Systems") == 2)
+
+# 용어집에 이미 있으면 그것이 이긴다. 발주처가 정한 표기가 규범보다 앞선다.
+_researched = research([Term("Halberd Systems")], glossary={"Halberd Systems": "핼버드"})
+ok("용어집이 이긴다", _researched[0].korean == "핼버드")
+ok("어디서 왔는지 남긴다", _researched[0].origin == "KNP/용어집")
+ok("근거가 있으면 확정으로 본다", _researched[0].confirmed)
+
+_unknown = Term("Bastogne")
+ok("모르는 것은 비워 둔다", not _unknown.korean and not _unknown.confirmed)
+_tsv = to_tsv([_unknown])
+ok("확인이 필요하다고 적는다", "확인 필요" in _tsv)
+ok("KNP 칸 순서를 따른다", _tsv.splitlines()[0].startswith("Source Language\tTarget Language"))
+
+_stats = summarize([Term("A", korean="가", origin="KNP/용어집"), Term("B")])
+ok("근거 있는 것과 없는 것을 나눠 센다",
+   _stats["confirmed"] == 1 and _stats["unknown"] == 1)
+
+from checker.webterms import DISAMBIGUATED  # noqa: E402
+
+# `불 (드라마)`, `니스 (프랑스)` — 같은 이름의 문서가 여럿이면 사람이 정한다.
+ok("갈라 놓은 표제어를 알아본다", bool(DISAMBIGUATED.search("불 (드라마)")))
+ok("보통 표제어는 건드리지 않는다", not DISAMBIGUATED.search("바스토뉴"))
+
+
 # --- 결과 ---------------------------------------------------------------
 
 print(f"통과 {PASSED}건")
