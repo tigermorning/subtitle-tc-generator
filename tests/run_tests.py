@@ -980,7 +980,8 @@ with _tf3.TemporaryDirectory() as _d:
     _sp.write_text("Hello there,\nold friend.\n\nHow have you been?\n", encoding="utf-8")
     # 대본의 줄바꿈은 종이 폭 때문이지 대사가 끊긴 자리가 아니다.
     ok("스크립트는 문단을 한 대사로 읽는다",
-       read_script(_sp) == ["Hello there, old friend.", "How have you been?"])
+       [l.text for l in read_script(_sp)] == ["Hello there, old friend.",
+                                              "How have you been?"])
 
 _cues = align([Segment(0, 1000, "hello there")], ["Hello there.", "Where have you been?"])
 _notes: list = []
@@ -1226,6 +1227,48 @@ _res = _sp.run([sys.executable, "-m", "checker", "examples/ko-sdh-sample.srt",
                capture_output=True, text=True, cwd=str(Path(__file__).resolve().parent.parent))
 ok("--lock-timecodes와 --fix-timing을 함께 쓰면 막는다",
    _res.returncode != 0 and "함께 쓸 수 없습니다" in _res.stderr)
+
+
+# --- 대본에서 대사만 딴다 --------------------------------------------------
+# 작업자 자료 100행: "스크립트에 있다고 무조건 사용은 금물! 스크립트에서는 대사만
+# 딸 것!" 실제로 `SARAH:`가 콜론째 자막에 나갔다(2026-08-11).
+
+from checker.generate import read_script, speaker_prefix  # noqa: E402
+
+with _tf3.TemporaryDirectory() as _d:
+    _sp = Path(_d) / "s.txt"
+    _sp.write_text("SARAH: You can't be serious.\n\n(She steps inside.)\n\n"
+                   "Mrs. Kim: Come in.\n\nHe said 9:30, not 10.\n", encoding="utf-8")
+    _lines = read_script(_sp)
+    ok("화자 표시를 대사에서 뗀다", _lines[0].text == "You can't be serious.")
+    ok("화자명을 버리지 않는다", _lines[0].speaker == "Sarah")
+    ok("대문자 이름을 자막 표기로 고친다", _lines[0].speaker == "Sarah")
+    ok("지문은 대사가 아니다", all("steps inside" not in l.text for l in _lines))
+    ok("점이 든 이름도 잡는다", _lines[1].speaker == "Mrs. Kim")
+    # 대사 안의 콜론은 화자 표시가 아니다. 시각을 잘라 먹으면 안 된다.
+    ok("대사 안의 콜론은 건드리지 않는다", _lines[2].text == "He said 9:30, not 10.")
+    ok("그 줄에는 화자가 없다", _lines[2].speaker == "")
+
+_netflix = load_profile("netflix", "ko", "sdh")
+ok("플랫폼 표기로 화자명을 만든다", speaker_prefix("사라", _netflix) == "[사라] ")
+ok("쿠팡은 소괄호", speaker_prefix("사라", load_profile("coupang", "ko", "sdh")) == "(사라) ")
+ok("이름이 없으면 아무것도 붙이지 않는다", speaker_prefix("", _netflix) == "")
+
+# 금지된 문장부호. 부호는 작업자가 가장 민감하게 보는 자리다.
+_tr = load_profile("netflix", "ko", "translation")
+_evs = [{"index": 1, "start_ms": 0, "end_ms": 2000, "text": "Sarah: 진심이야?"},
+        {"index": 2, "start_ms": 0, "end_ms": 2000, "text": "9:30에 만나자"},
+        {"index": 3, "start_ms": 0, "end_ms": 2000, "text": "[사라] 진심이야?"}]
+_found = [v["event_index"] for v in check_events(_evs, _tr)["violations"]
+          if v["rule_id"] == "T19"]
+ok("대사에 든 콜론을 잡는다", 1 in _found)
+ok("시각의 콜론은 값이라 놔둔다", 2 not in _found)
+ok("화자 표시 안은 보지 않는다", 3 not in _found)
+
+_ev_objs = [Event(1, 0, 2000, "Sarah: 진심이야?"), Event(2, 0, 2000, "9:30에 만나자")]
+_fixed, _applied, _ = apply_fixes(_ev_objs, _tr)
+ok("화자 표시에서 새어 나온 콜론은 뗀다", _fixed[0].text == "진심이야?")
+ok("시각은 그대로 둔다", _fixed[1].text == "9:30에 만나자")
 
 
 # --- 결과 ---------------------------------------------------------------

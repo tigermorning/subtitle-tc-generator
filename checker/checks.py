@@ -436,6 +436,30 @@ def _base_label(label: str) -> str:
     return re.sub(r"\s*\d+$", "", label)
 
 
+@check("forbidden_punctuation")
+def _forbidden_punctuation(ev: Event, ctx: dict):
+    """프로파일이 금지한 문장부호가 대사에 들어갔는지.
+
+    **왜 따로 두는가**: 자막을 기계가 만들면 원문의 부호가 그대로 실려 나간다.
+    실제로 대본의 화자 표시(`SARAH:`)가 콜론째 자막에 나갔다(2026-08-11). 부호는
+    작업자가 가장 민감하게 보는 자리라, 한 글자라도 새면 납품물이 반려된다.
+
+    화자 표시·효과음 안(대괄호·소괄호)은 보지 않는다 — 거기 규칙은 따로 있다.
+    """
+    policy = (ctx.get("profile") or {}).get("text") or {}
+    forbidden = policy.get("forbidden_punctuation") or []
+    if not forbidden:
+        return
+
+    for line_no, line in enumerate(ev.lines, 1):
+        body = re.sub(r"[\[(][^)\]]*[\])]", " ", strip_tags(line))
+        # 숫자 사이의 콜론은 부호가 아니라 값이다(9:30, 2:1). 건드리지 않는다.
+        body = re.sub(r"(?<=\d)[:](?=\d)", " ", body)
+        for mark in forbidden:
+            if mark in body:
+                yield line_no, f"'{mark}' 발견"
+
+
 @doc_check("position_collides_with_forced_narrative")
 def _position(events: list[Event], ctx: dict):
     """화면자막과 겹치는데 말자막을 옮기지 않았다.

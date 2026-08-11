@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -32,21 +33,62 @@ class Draft:
     stats: dict = field(default_factory=dict)
 
 
-def read_script(path: Path) -> list[str]:
-    """원어 스크립트를 줄 단위로 읽는다.
+# 대본의 화자 표시. `SARAH:`, `Mrs. Kim:`, `철수:` 꼴을 잡는다. 대사 안의 콜론
+# (`9:30`, `이유는: 없다`)과 섞이지 않게 **줄 맨 앞**에서만, 짧은 이름만 본다.
+# 이름은 최대 세 낱말, 숫자로 끝나지 않고, 콜론 뒤가 숫자여도 안 된다.
+# `He said 9:30, not 10.`에서 "He said 9"를 이름으로 잘못 잡아 시각을 잘라 먹었다.
+SPEAKER_PREFIX = re.compile(
+    r"^\s*((?:[A-Z][A-Za-z.'\-]*)(?:\s+[A-Z][A-Za-z.'\-]*){0,2}|[가-힣]{1,8})\s*:\s*(?=[^\d\s])")
+# 지문·괄호 설명. 통째로 괄호인 줄은 대사가 아니다.
+STAGE_DIRECTION = re.compile(r"^[\(\[][^)\]]*[\)\]]$")
+
+
+@dataclass
+class ScriptLine:
+    speaker: str
+    text: str
+
+
+def read_script(path: Path) -> list[ScriptLine]:
+    """원어 스크립트를 대사 단위로 읽는다.
 
     대본은 형식이 제각각이라 한 줄이 곧 한 대사는 아니다. 빈 줄로 나뉜 덩어리를
     문단으로 보고, 문단 안의 줄바꿈은 이어 붙인다 — 대본의 줄바꿈은 종이 폭 때문에
     생긴 것이지 대사가 끊긴 자리가 아니다.
+
+    **화자 표시와 지문은 대사에서 떼어 낸다.** 작업자 자료 100행: "스크립트에
+    있다고 무조건 사용은 금물! 스크립트에서는 대사만 딸 것!" 떼지 않으면 `SARAH:`가
+    그대로 자막에 실려 나간다 — 실제로 그렇게 나갔다(2026-08-11).
+
+    떼되 **버리지는 않는다.** SDH에서는 화자명이 필요하고, 대본이 그것을 알고 있는
+    유일한 자리다.
     """
     text = path.read_text(encoding="utf-8", errors="replace").replace("\r\n", "\n")
-    blocks = [b.strip() for b in text.split("\n\n")]
-    lines: list[str] = []
-    for block in blocks:
-        joined = " ".join(l.strip() for l in block.split("\n") if l.strip())
+    lines: list[ScriptLine] = []
+    for block in text.split("\n\n"):
+        joined = " ".join(l.strip() for l in block.split("\n") if l.strip()).strip()
+        if not joined or STAGE_DIRECTION.match(joined):
+            continue           # 지문은 대사가 아니다
+        speaker = ""
+        found = SPEAKER_PREFIX.match(joined)
+        if found:
+            speaker = found.group(1).strip()
+            joined = joined[found.end():].strip()
+            # 대본은 화자명을 대문자로 적는다. 자막에 그대로 쓰지 않는다.
+            if speaker.isupper():
+                speaker = speaker.title()
         if joined:
-            lines.append(joined)
+            lines.append(ScriptLine(speaker, joined))
     return lines
+
+
+def speaker_prefix(name: str, profile: dict) -> str:
+    """플랫폼 표기로 화자명을 만든다. 번역 자막에서는 쓰지 않는다."""
+    if not name:
+        return ""
+    enclosure = ((profile.get("speaker_id") or {}).get("enclosure") or "[]")
+    left, right = (enclosure + "[]")[:2]
+    return f"{left}{name}{right} "
 
 
 def generate(video: Path, profile: dict, script: Path | None = None,
@@ -79,14 +121,30 @@ def generate(video: Path, profile: dict, script: Path | None = None,
     stats: dict = {"transcript": len(segments)}
 
     if script:
-        lines = read_script(Path(script))
-        say(f"스크립트 {len(lines)}줄과 대조합니다")
+        script_lines = read_script(Path(script))
+        say(f"스크립트 {len(script_lines)}줄과 대조합니다")
+
+        # **SDH에서만 화자명을 붙인다.** 번역 자막의 말자막에는 화자명을 쓰지 않는다
+        # (쓰는 경우는 화면 밖 목소리 같은 예외이고, 그건 사람이 판단한다).
+        with_speakers = profile.get("kind") == "sdh"
+        named = sum(1 for l in script_lines if l.speaker)
+        if named:
+            say(f"대본에서 화자명 {named}개를 찾았습니다"
+                + (" — SDH 표기로 붙입니다" if with_speakers
+                   else " — 번역 자막이라 대사만 씁니다"))
+        lines = [(speaker_prefix(l.speaker, profile) if with_speakers else "") + l.text
+                 for l in script_lines]
         cues = align(segments, lines)
         stats.update(summary(cues))
         events = _to_events(cues, notes)
     else:
         events = [Event(i, s.start_ms, s.end_ms, s.text)
                   for i, s in enumerate(segments, 1)]
+        if profile.get("kind") == "sdh":
+            # **화자명은 대본에서 온다.** whisper는 누가 말했는지 구분하지 못한다
+            # (화자 분리는 별도 모델이 필요하다). 못 넣은 것을 넣은 척하지 않는다.
+            say("화자명은 넣지 못했습니다 — 대본이 없으면 누가 말했는지 알 수 없습니다."
+                " 영상을 보며 사람이 넣어야 합니다(--script로 대본을 주면 붙입니다).")
 
     if translator is not None:
         from .translate import to_events, translate_events

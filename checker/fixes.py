@@ -104,6 +104,31 @@ def _fix_lyric_caps(text: str, ctx: dict) -> str:
     return "\n".join(out)
 
 
+@fixer("forbidden_punctuation")
+def _strip_forbidden_punctuation(text: str, ctx: dict) -> str:
+    """금지된 부호 중 **떼어도 뜻이 안 변하는 것만** 뗀다.
+
+    콜론이 대사 한가운데 있으면 사람이 판단할 일이다. 하지만 `이름: 대사` 꼴로
+    맨 앞에 붙어 있으면 대본의 화자 표시가 새어 나온 것이라 떼는 것이 정답이다
+    (작업자 자료 100행: "스크립트에서는 대사만 딸 것!").
+
+    시각(`9:30`)은 건드리지 않는다 — 앞뒤가 숫자면 부호가 아니라 값이다.
+    """
+    policy = (ctx.get("profile") or {}).get("text") or {}
+    if ":" not in (policy.get("forbidden_punctuation") or []):
+        return text
+
+    out = []
+    for line in text.split("\n"):
+        # 줄 맨 앞의 짧은 이름 + 콜론만 뗀다.
+        # `generate.SPEAKER_PREFIX`와 같은 기준으로 잡는다. 느슨하게 잡으면
+        # `He said 9:30`의 시각을 잘라 먹는다.
+        out.append(re.sub(
+            r"^\s*(?:-\s*)?((?:[A-Z][A-Za-z.'\-]*)(?:\s+[A-Z][A-Za-z.'\-]*){0,2}"
+            r"|[가-힣]{1,8})\s*:\s+(?=[^\d])", "", line))
+    return "\n".join(out)
+
+
 # --- 문서 단위 교정 -------------------------------------------------------
 #
 # 글자만 봐서는 못 고치는 것들. 자막 위치는 **다른 자막과의 관계**로 정해지므로
