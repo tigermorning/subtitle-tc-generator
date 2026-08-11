@@ -138,3 +138,26 @@ python -m checker ep01.srt ep02.srt -l ko -k translation --fix
 올리지 않고 **한 번만 적재한다** — 형태소 분석기가 무거워서 회차를 여러 개 돌릴 때
 그 비용이 그대로 곱해진다. 마지막에 합계가 나오고, 위반이 하나라도 있으면 종료
 코드는 1이다.
+
+### Windows에서 끌어다 놓기
+
+명령줄을 치지 않고 쓰는 방법이다. `tools/`의 .bat 파일 위로 **자막 파일이나
+폴더를 끌어다 놓으면** 된다.
+
+```
+tools/
+  check-ko-sdh.bat           넷플릭스 ko SDH — 검사만
+  check-ko-translation.bat   넷플릭스 ko 번역 — 검사만
+  check-en-translation.bat   넷플릭스 en 번역 — 검사만
+  fix-ko-sdh.bat             검사 + 자동 교정(.fixed.srt 로 나감)
+  fix-ko-translation.bat     검사 + 자동 교정
+```
+
+프로파일이 파일 이름으로 갈린다 — **SDH와 번역을 실수로 바꿔 쓸 일이 없다.**
+결과는 화면에 뜨고 자막 파일 옆에 `checker-report.txt`로도 남는다.
+
+파이썬은 `CHECKER_PYTHON` 환경변수 > 옆 폴더의 한국어 교정기 가상환경 > PATH 순으로
+찾는다. 교정기가 옆에 있으면 한국어 교정 레인도 자동으로 함께 돈다(못 불러오면
+건너뛰었다고 알리고 규정 검사는 계속한다).
+
+바탕화면에서 쓰려면 .bat 파일의 **바로 가기**를 만들어 두면 된다.

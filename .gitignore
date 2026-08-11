@@ -6,3 +6,4 @@ obj/
 node_modules/
 
 *.fixed.srt
+checker-report.txt
