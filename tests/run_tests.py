@@ -1072,47 +1072,80 @@ ok("통일표 위반은 표시만 한다",
 
 
 # --- 자막 위치 -------------------------------------------------------------
-# SDH든 번역이든 같이 적용된다. 화면에 이미 글자가 있으면 말자막을 위로 올린다.
+# SDH든 번역이든 겹침 규칙이 있다는 점은 같고 **다루는 방법이 다르다**.
+# 작업자 자료 [영상번역] 673·677행: 하단 자리로 옮기기도 하고, 말자막만 남기기도
+# 한다. 그래서 코드에 못박지 않고 작업 시작 전에 고른다.
 
 from checker.position import (  # noqa: E402
-    apply_positions, is_forced_narrative, is_top, position_of, set_top,
-    strip_position, suggest_positions)
+    JobRules, apply_positions, is_forced_narrative, is_placed, position_of,
+    set_place, strip_position, suggest_positions)
 
 ok("위치 태그를 읽는다", position_of("{\\an8}위에 있다") == "8")
-ok("태그가 없으면 하단", position_of("그냥 대사") is None)
-ok("상단인지 안다", is_top("{\\an8}가") and not is_top("{\\an2}가"))
+ok("태그가 없으면 기본 자리", position_of("그냥 대사") is None)
+ok("자리 지정 여부를 안다", is_placed("{\\an2}가") and not is_placed("가"))
 ok("태그를 뗀다", strip_position("{\\an8}가") == "가")
-ok("태그는 맨 앞에 하나만", set_top("{\\an2}가") == "{\\an8}가")
-ok("되돌리면 태그가 사라진다", set_top("{\\an8}가", False) == "가")
+ok("태그는 맨 앞에 하나만", set_place("{\\an2}가", "{\\an8}") == "{\\an8}가")
+ok("빈 태그면 기본 자리로", set_place("{\\an8}가", "") == "가")
 
-ok("큰따옴표는 화면자막으로 본다", is_forced_narrative('"공항 도착 30분 전"'))
-ok("통째로 기울인 것도 화면자막", is_forced_narrative("<i>3년 후</i>"))
-# 대사를 화면자막으로 잘못 보면 멀쩡한 자막을 위로 올려 버린다.
-ok("일부만 기울인 것은 강조", not is_forced_narrative("나는 <i>정말</i> 몰랐어"))
-ok("보통 대사는 아니다", not is_forced_narrative("늦으면 안 돼"))
+# 정해지기 전에는 아무것도 화면자막으로 보지 않는다. 추측해서 옮기면 납품물이 틀어진다.
+_undecided = JobRules()
+ok("정해지지 않으면 화면자막 판정을 안 한다",
+   not is_forced_narrative('"공항 도착 30분 전"', None, _undecided))
+ok("무엇을 정해야 하는지 말한다", "화면자막 표식" in _undecided.undecided_note())
+
+_quote = JobRules(marker="double_quote", policy="move_dialogue")
+ok("정한 표식만 인정한다", is_forced_narrative('"공항 도착 30분 전"', None, _quote))
+# 이탤릭을 강조로 쓰는 작업에서 멀쩡한 대사가 화면자막이 되면 안 된다.
+ok("정하지 않은 표식은 인정하지 않는다", not is_forced_narrative("<i>3년 후</i>", None, _quote))
+_italic = JobRules(marker="italic", policy="move_dialogue")
+ok("이탤릭 표식도 고를 수 있다", is_forced_narrative("<i>3년 후</i>", None, _italic))
+ok("일부만 기울인 것은 강조", not is_forced_narrative("나는 <i>정말</i> 몰랐어", None, _italic))
 
 _evs = [Event(1, 0, 3000, '"공항 도착 30분 전"'),
         Event(2, 500, 2500, "늦으면 안 돼"),
         Event(3, 5000, 7000, "{\\an8}겹치는 게 없다")]
-_sug = suggest_positions(_evs)
-_up = [s for s in _sug if s.to_top]
-_down = [s for s in _sug if not s.to_top]
-ok("겹치는 말자막을 올린다", len(_up) == 1 and _up[0].event_index == 2)
-# 앞 장면에서 올린 채로 두면 그다음부터 자막이 계속 화면 위에 뜬다.
-ok("겹칠 것이 없으면 되돌린다", len(_down) == 1 and _down[0].event_index == 3)
+ok("기준이 없으면 제안도 없다", suggest_positions(_evs, None, None, JobRules()) == [])
+
+_sug = suggest_positions(_evs, None, None, _quote)
+_move = [s for s in _sug if s.action == "move"]
+_reset = [s for s in _sug if s.action == "reset"]
+ok("겹치는 말자막을 옮긴다", len(_move) == 1 and _move[0].event_index == 2)
+ok("기본은 상단 중앙", _move[0].tag == "{\\an8}")
+# 앞 장면에서 옮긴 채로 두면 그다음부터 자막이 계속 그 자리에 뜬다.
+ok("겹칠 것이 없으면 되돌린다", len(_reset) == 1 and _reset[0].event_index == 3)
 ok("화면자막 자신은 건드리지 않는다", all(s.event_index != 1 for s in _sug))
 
-apply_positions(_evs, _sug)
-ok("올린 자막에 태그가 붙는다", _evs[1].text.startswith("{\\an8}"))
-ok("되돌린 자막은 태그가 없다", _evs[2].text == "겹치는 게 없다")
+# 673행: 하단 자리로 보내는 업체도 있다.
+_right = JobRules(marker="double_quote", policy="move_dialogue", move_to="bottom_right")
+ok("어디로 보낼지 고를 수 있다",
+   suggest_positions(_evs[:2], None, None, _right)[0].tag == "{\\an3}")
+
+# 677행: 영상번역에서는 말자막이 우선이라 화면자막을 넣지 않는다.
+_only = JobRules(marker="double_quote", policy="dialogue_only")
+_sug2 = suggest_positions(_evs[:2], None, None, _only)
+ok("말자막 우선 기준은 화면자막 쪽을 지적한다",
+   len(_sug2) == 1 and _sug2[0].event_index == 1)
+ok("자막을 지우는 일은 사람이 한다", _sug2[0].action == "review")
+
+_keep = JobRules(marker="double_quote", policy="keep_both")
+ok("둘 다 두는 기준에서는 옮기지 않는다",
+   [s for s in suggest_positions(_evs[:2], None, None, _keep) if s.action == "move"] == [])
+
+_apply = [Event(1, 0, 3000, '"공항 도착 30분 전"'), Event(2, 500, 2500, "늦으면 안 돼")]
+apply_positions(_apply, suggest_positions(_apply, None, None, _quote))
+ok("옮긴 자막에 태그가 붙는다", _apply[1].text.startswith("{\\an8}"))
+
+_review = [Event(1, 0, 3000, '"공항 도착 30분 전"'), Event(2, 500, 2500, "늦으면 안 돼")]
+ok("지우라는 제안은 기계가 실행하지 않는다",
+   apply_positions(_review, suggest_positions(_review, None, None, _only)) == 0)
 
 # 영상에서 추정한 근거는 고치지 않는다 — 무늬를 글자로 볼 수 있다.
-_evs2 = [Event(1, 0, 2000, "대사")]
-_sug2 = suggest_positions(_evs2, None, [(0, 2000)])
-ok("영상 근거로도 제안은 한다", len(_sug2) == 1 and _sug2[0].to_top)
-ok("영상 근거는 확실하지 않다고 표시한다", _sug2[0].certain is False)
-ok("영상 근거만으로는 고치지 않는다", apply_positions(_evs2, _sug2) == 0)
-ok("사람이 허락하면 고친다", apply_positions(_evs2, _sug2, only_certain=False) == 1)
+_evs3 = [Event(1, 0, 2000, "대사")]
+_guess = suggest_positions(_evs3, None, [(0, 2000)], _quote)
+ok("영상 근거로도 제안은 한다", len(_guess) == 1)
+ok("영상 근거는 확실하지 않다고 표시한다", _guess[0].certain is False)
+ok("영상 근거만으로는 고치지 않는다", apply_positions(_evs3, _guess) == 0)
+ok("사람이 허락하면 고친다", apply_positions(_evs3, _guess, only_certain=False) == 1)
 
 
 # --- SDH인가 번역 자막인가 -------------------------------------------------

@@ -22,11 +22,12 @@ __all__ = [
 
 def check_events(events: list[dict], profile: dict, children: bool = False,
                  fps: float | None = None,
-                 busy_spans: list[tuple[int, int]] | None = None) -> dict:
+                 busy_spans: list[tuple[int, int]] | None = None,
+                 job_rules=None) -> dict:
     """JSON in / JSON out. 편집기가 어떤 언어로 만들어지든 이 계약만 지키면 된다."""
     parsed = [Event.from_dict(e) for e in events]
     violations, unimplemented = run_checks(parsed, profile, children=children, fps=fps,
-                                          busy_spans=busy_spans)
+                                          busy_spans=busy_spans, job_rules=job_rules)
     report = Report(
         profile=f"{profile.get('platform')}/{profile.get('language')}",
         kind=profile.get("kind", ""),

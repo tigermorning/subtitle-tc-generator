@@ -65,6 +65,8 @@ def _format_text(report: dict, path: Path) -> str:
         if len(report["spot_suggestions"]) > 8:
             out.append(f"    … 외 {len(report['spot_suggestions']) - 8}건")
 
+    if report.get("job_note"):
+        out.append(f"  ⚠ {report['job_note']}")
     if report.get("position_suggestions"):
         found = report["position_suggestions"]
         out.append(f"  위치 제안 {len(found)}건 (영상 추정이라 자동 적용 안 함)")
@@ -165,15 +167,26 @@ def _run_one(path: Path, profile: dict, args, backend) -> dict | None:
             if busy_spans:
                 print(f"    화면 아래 글자로 보이는 구간 {len(busy_spans)}곳", file=sys.stderr)
 
+    from .position import JobRules
+    rules = JobRules.from_profile(profile, {
+        "marker": getattr(args, "fn_marker", None),
+        "policy": getattr(args, "collision", None),
+        "move_to": getattr(args, "collision_move_to", None),
+    })
+
     report = check_events([e.__dict__ for e in events], profile,
                           children=args.children, fps=args.fps,
-                          busy_spans=busy_spans)
+                          busy_spans=busy_spans, job_rules=rules)
     report["file"] = str(path)
+
+    note = rules.undecided_note()
+    if note:
+        report["job_note"] = note
 
     # 영상 근거는 자동 교정에 쓰지 않는다. 사람이 볼 수 있게 따로 낸다.
     if busy_spans:
         from .position import suggest_positions
-        guesses = [s for s in suggest_positions(events, profile, busy_spans)
+        guesses = [s for s in suggest_positions(events, profile, busy_spans, rules)
                    if not s.certain]
         if guesses:
             report["position_suggestions"] = [
@@ -227,11 +240,11 @@ def _run_one(path: Path, profile: dict, args, backend) -> dict | None:
         report["violations"].sort(key=lambda v: (v["event_index"], v["rule_id"]))
 
     if args.fix:
-        fixed, applied, unfixable = apply_fixes(events, profile)
+        fixed, applied, unfixable = apply_fixes(events, profile, rules)
         if ko_fixed is not None:
             # 교정기 결과를 규정 자동 교정 위에 얹는다. 순서를 바꾸면 교정기가
             # 넣은 문장부호를 규정 교정이 다시 걷어내는 왕복이 생긴다.
-            fixed, applied2, _ = apply_fixes(ko_fixed, profile)
+            fixed, applied2, _ = apply_fixes(ko_fixed, profile, rules)
             applied = sorted(set(applied) | set(applied2))
         out_path = args.out or path.with_suffix(".fixed.srt")
         write_srt(fixed, out_path)
@@ -337,6 +350,20 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--review-srt", action="store_true",
                     help="지적을 자막 파일로도 낸다(<원본>.review.srt). SE 번역 모드로 "
                          "원본 옆에 띄워 영상을 보며 확인할 수 있다")
+    job = ap.add_argument_group(
+        "작업 기준", "작업마다 달라지는 것들. **작업 시작 전에 정한다** — "
+                  "정하지 않으면 위치 검사는 하지 않는다(추측해서 옮기지 않는다)")
+    job.add_argument("--fn-marker",
+                     choices=["double_quote", "italic", "bracket", "none"],
+                     help="화면자막을 말자막과 구분하는 표식")
+    job.add_argument("--collision",
+                     choices=["move_dialogue", "dialogue_only", "keep_both"],
+                     help="말자막과 화면자막이 겹칠 때: 말자막을 옮긴다 / "
+                          "말자막만 남긴다(영상번역 기본) / 둘 다 둔다")
+    job.add_argument("--collision-move-to",
+                     choices=["top_left", "top_center", "top_right",
+                              "bottom_left", "bottom_center", "bottom_right"],
+                     help="--collision move_dialogue일 때 말자막을 보낼 자리")
     ap.add_argument("--report", type=Path,
                     help="리포트를 파일로도 남긴다(화면 출력은 그대로 나온다)")
     gen = ap.add_argument_group(

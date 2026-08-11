@@ -130,16 +130,17 @@ def _fix_position(events: list[Event], ctx: dict) -> int:
     """
     from .position import apply_positions, suggest_positions
 
-    suggestions = suggest_positions(events, ctx.get("profile"), ctx.get("busy_spans"))
+    suggestions = suggest_positions(events, ctx.get("profile"), ctx.get("busy_spans"),
+                                    ctx.get("job_rules"))
     return apply_positions(events, suggestions, only_certain=True)
 
 
-def apply_fixes(events: list[Event], profile: dict) -> tuple[list[Event], list[str], list[str]]:
+def apply_fixes(events: list[Event], profile: dict, job_rules=None) -> tuple[list[Event], list[str], list[str]]:
     """`auto: true` 규칙 중 고칠 수 있는 것을 적용한다.
 
     반환: (고친 이벤트, 적용한 검사 이름, 자동 표시지만 못 고친 검사 이름)
     """
-    ctx = {"profile": profile}
+    ctx = {"profile": profile, "job_rules": job_rules}
     applied: list[str] = []
     unfixable: list[str] = []
 

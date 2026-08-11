@@ -22,7 +22,7 @@ namespace Nikse.SubtitleEdit.PluginLogic
         private readonly string _videoFileName;
         private readonly Dictionary<string, string> _settings;
 
-        private ComboBox _platform, _kind;
+        private ComboBox _platform, _kind, _marker, _collision, _moveTo;
         private CheckBox _korean, _fixTiming, _translate;
         private TextBox _script, _video, _log;
         private Button _check, _fix, _generate, _apply, _close;
@@ -47,13 +47,13 @@ namespace Nikse.SubtitleEdit.PluginLogic
         {
             Text = "자막 규정 검사기";
             StartPosition = FormStartPosition.CenterParent;
-            ClientSize = new Size(760, 560);
-            MinimumSize = new Size(640, 460);
+            ClientSize = new Size(760, 620);
+            MinimumSize = new Size(660, 520);
             Font = new Font("Malgun Gothic", 9F);
 
             var top = new TableLayoutPanel
             {
-                Dock = DockStyle.Top, ColumnCount = 4, Height = 152, Padding = new Padding(8),
+                Dock = DockStyle.Top, ColumnCount = 4, Height = 210, Padding = new Padding(8),
                 AutoSize = false,
             };
             top.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 70));
@@ -93,6 +93,30 @@ namespace Nikse.SubtitleEdit.PluginLogic
             top.Controls.Add(new Label { Text = "원어 대본", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft }, 0, 2);
             top.SetColumnSpan(scriptRow, 3);
             top.Controls.Add(scriptRow, 1, 2);
+
+            // **작업마다 달라지는 것.** 화면자막을 무엇으로 표시하는지, 말자막과
+            // 겹칠 때 어떻게 하는지는 업체와 작업에 따라 다르다(작업자 자료
+            // [영상번역] 673·677·678행). 정하지 않으면 검사기가 위치를 건드리지
+            // 않는다 — 추측해서 옮기면 납품물이 틀어진다.
+            _marker = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Dock = DockStyle.Fill };
+            _marker.Items.AddRange(new object[] { "(작업 시작 전 선택)", "double_quote", "italic", "bracket", "none" });
+            _marker.SelectedItem = Get("marker", "(작업 시작 전 선택)");
+
+            _collision = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Dock = DockStyle.Fill };
+            _collision.Items.AddRange(new object[] { "(작업 시작 전 선택)", "move_dialogue", "dialogue_only", "keep_both" });
+            _collision.SelectedItem = Get("collision", "(작업 시작 전 선택)");
+
+            _moveTo = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Dock = DockStyle.Fill };
+            _moveTo.Items.AddRange(new object[] { "top_center", "top_left", "top_right",
+                                                  "bottom_center", "bottom_left", "bottom_right" });
+            _moveTo.SelectedItem = Get("moveTo", "top_center");
+
+            top.Controls.Add(new Label { Text = "화면자막", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft }, 0, 4);
+            top.Controls.Add(_marker, 1, 4);
+            top.Controls.Add(new Label { Text = "겹치면", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft }, 2, 4);
+            top.Controls.Add(_collision, 3, 4);
+            top.Controls.Add(new Label { Text = "옮길 자리", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft }, 0, 5);
+            top.Controls.Add(_moveTo, 1, 5);
 
             _korean = new CheckBox { Text = "한국어 교정기", Checked = Get("korean", "1") == "1", AutoSize = true };
             _fixTiming = new CheckBox { Text = "타임코드 수렴", Checked = Get("fixTiming", "0") == "1", AutoSize = true };
@@ -229,11 +253,37 @@ namespace Nikse.SubtitleEdit.PluginLogic
             _settings["fixTiming"] = _fixTiming.Checked ? "1" : "0";
             _settings["translate"] = _translate.Checked ? "1" : "0";
             _settings["script"] = _script.Text;
+            _settings["marker"] = (string)_marker.SelectedItem;
+            _settings["collision"] = (string)_collision.SelectedItem;
+            _settings["moveTo"] = (string)_moveTo.SelectedItem;
             if (_repo != null)
             {
                 _settings["repo"] = _repo;
             }
             Runner.SaveSettings(_settings);
+        }
+
+
+        private string JobArgs()
+        {
+            // "(작업 시작 전 선택)"은 아직 정하지 않았다는 뜻이다. 그대로 넘기지
+            // 않는다 — 검사기가 정해야 한다고 말해 준다.
+            var args = new StringBuilder();
+            var marker = (string)_marker.SelectedItem;
+            var collision = (string)_collision.SelectedItem;
+            if (marker != null && !marker.StartsWith("("))
+            {
+                args.Append(" --fn-marker ").Append(marker);
+            }
+            if (collision != null && !collision.StartsWith("("))
+            {
+                args.Append(" --collision ").Append(collision);
+                if (collision == "move_dialogue")
+                {
+                    args.Append(" --collision-move-to ").Append(_moveTo.SelectedItem);
+                }
+            }
+            return args.ToString();
         }
 
         private void Start(bool applyFixes)
@@ -259,6 +309,7 @@ namespace Nikse.SubtitleEdit.PluginLogic
             {
                 args.Append(" --fix-timing");
             }
+            args.Append(JobArgs());
             if (applyFixes)
             {
                 args.Append(" --fix -o ").Append(Runner.Quote(output));
@@ -289,6 +340,7 @@ namespace Nikse.SubtitleEdit.PluginLogic
             {
                 args.Append(" --script ").Append(Runner.Quote(_script.Text));
             }
+            args.Append(JobArgs());
             if (_translate.Checked)
             {
                 args.Append(" --translate");

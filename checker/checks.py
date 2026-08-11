@@ -313,7 +313,8 @@ def excerpt(event: Event, line_no: int | None, limit: int = 60) -> str:
 
 def run_checks(events: list[Event], profile: dict, children: bool = False,
                fps: float | None = None,
-               busy_spans: list[tuple[int, int]] | None = None):
+               busy_spans: list[tuple[int, int]] | None = None,
+               job_rules=None):
     """프로파일이 지정한 검사를 이벤트마다 돌린다.
 
     반환: (violations, unimplemented_check_names)
@@ -321,7 +322,8 @@ def run_checks(events: list[Event], profile: dict, children: bool = False,
     from .model import Violation
 
     ctx = {"profile": profile, "limits": profile.get("limits") or {},
-           "children": children, "fps": fps, "busy_spans": busy_spans}
+           "children": children, "fps": fps, "busy_spans": busy_spans,
+           "job_rules": job_rules}
 
     limits = ctx["limits"]
     speeds = limits.get("reading_speed_cps") or {}
@@ -447,7 +449,8 @@ def _position(events: list[Event], ctx: dict):
     from .position import suggest_positions
 
     found = []
-    for s in suggest_positions(events, ctx.get("profile"), ctx.get("busy_spans")):
+    for s in suggest_positions(events, ctx.get("profile"), ctx.get("busy_spans"),
+                               ctx.get("job_rules")):
         if s.certain:
             found.append((s.event_index, None, s.reason))
     return found
