@@ -104,28 +104,43 @@ def _fix_lyric_caps(text: str, ctx: dict) -> str:
     return "\n".join(out)
 
 
-@fixer("forbidden_punctuation")
-def _strip_forbidden_punctuation(text: str, ctx: dict) -> str:
-    """금지된 부호 중 **떼어도 뜻이 안 변하는 것만** 뗀다.
+# `generate.SPEAKER_PREFIX`와 같은 기준. 느슨하게 잡으면 `He said 9:30`의 시각을
+# 잘라 먹는다.
+COLON_SPEAKER = re.compile(
+    r"^(\s*)(-\s*)?((?:[A-Z][A-Za-z.'\-]*)(?:\s+[A-Z][A-Za-z.'\-]*){0,2}"
+    r"|[가-힣][가-힣0-9]{0,7})\s*:\s+(?=[^\d])")
 
-    콜론이 대사 한가운데 있으면 사람이 판단할 일이다. 하지만 `이름: 대사` 꼴로
-    맨 앞에 붙어 있으면 대본의 화자 표시가 새어 나온 것이라 떼는 것이 정답이다
-    (작업자 자료 100행: "스크립트에서는 대사만 딸 것!").
+
+@fixer("colon_speaker_prefix")
+def _fix_colon_speaker(text: str, ctx: dict) -> str:
+    """콜론으로 적힌 화자 표시를 **우리 표기로 옮긴다.**
+
+        화자1: 왜 이래     ->  [화자1] 왜 이래
+        SARAH: Come in     ->  [Sarah] Come in       (쿠팡이면 소괄호)
+
+    처음에는 콜론째 **떼어 버렸는데** 그건 반만 고친 것이었다(사용자 지적
+    2026-08-11). 원문이 무엇으로 적었든 자막 표기는 우리 것이어야 하고, 화자명은
+    버릴 정보가 아니라 옮길 정보다.
+
+    **원문 표기는 어떤 경우에도 그대로 실리지 않는다.** 원문은 번역 과정에서만
+    의미가 있고 납품물에는 남지 않는다.
 
     시각(`9:30`)은 건드리지 않는다 — 앞뒤가 숫자면 부호가 아니라 값이다.
     """
-    policy = (ctx.get("profile") or {}).get("text") or {}
-    if ":" not in (policy.get("forbidden_punctuation") or []):
-        return text
+    profile = ctx.get("profile") or {}
+    enclosure = ((profile.get("speaker_id") or {}).get("enclosure") or "[]")
+    left, right = (enclosure + "[]")[:2]
 
     out = []
     for line in text.split("\n"):
-        # 줄 맨 앞의 짧은 이름 + 콜론만 뗀다.
-        # `generate.SPEAKER_PREFIX`와 같은 기준으로 잡는다. 느슨하게 잡으면
-        # `He said 9:30`의 시각을 잘라 먹는다.
-        out.append(re.sub(
-            r"^\s*(?:-\s*)?((?:[A-Z][A-Za-z.'\-]*)(?:\s+[A-Z][A-Za-z.'\-]*){0,2}"
-            r"|[가-힣]{1,8})\s*:\s+(?=[^\d])", "", line))
+        found = COLON_SPEAKER.match(line)
+        if not found:
+            out.append(line)
+            continue
+        indent, dash, name = found.group(1), found.group(2) or "", found.group(3)
+        if name.isupper():
+            name = name.title()
+        out.append(f"{indent}{dash}{left}{name}{right} {line[found.end():]}")
     return "\n".join(out)
 
 

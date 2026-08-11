@@ -436,6 +436,24 @@ def _base_label(label: str) -> str:
     return re.sub(r"\s*\d+$", "", label)
 
 
+@check("colon_speaker_prefix")
+def _colon_speaker(ev: Event, ctx: dict):
+    """`이름: 대사` — 대본의 화자 표기가 그대로 실려 나온 자리.
+
+    **어느 플랫폼도, SDH도 번역도 이 표기를 쓰지 않는다.** 원문이 무엇으로 적었든
+    자막은 `[이름]`(쿠팡은 `(이름)`)이다. 원문은 번역 과정에서만 의미가 있고
+    납품물에 남지 않는다(사용자 지적 2026-08-11).
+
+    시각(`9:30`)은 값이라 건드리지 않는다.
+    """
+    from .fixes import COLON_SPEAKER
+
+    for line_no, line in enumerate(ev.lines, 1):
+        found = COLON_SPEAKER.match(strip_tags(line))
+        if found:
+            yield line_no, f"'{found.group(3)}:' — 대본 표기가 그대로 남았습니다"
+
+
 @check("forbidden_punctuation")
 def _forbidden_punctuation(ev: Event, ctx: dict):
     """프로파일이 금지한 문장부호가 대사에 들어갔는지.

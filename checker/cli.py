@@ -281,7 +281,7 @@ def _run_one(path: Path, profile: dict, args, backend) -> dict | None:
 
     ko_fixed = None
     if backend is not None:
-        ko_fixed, ko_violations = run_korean_pass(events, backend, spacing_mode=args.spacing)
+        ko_fixed, ko_violations = run_korean_pass(events, backend, spacing_mode=args.spacing, profile=profile)
         report["violations"].extend(v.to_dict() for v in ko_violations)
         report["violations"].sort(key=lambda v: (v["event_index"], v["rule_id"]))
 
@@ -406,7 +406,7 @@ def _generate_mode(args, ap) -> int:
             else:
                 print("한국어 교정기로 다듬는 중입니다...")
                 events, ko_violations = run_korean_pass(
-                    events, backend, spacing_mode=args.spacing)
+                    events, backend, spacing_mode=args.spacing, profile=profile)
 
         events, applied, unfixable = apply_fixes(events, profile, rules)
         if applied:

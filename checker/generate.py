@@ -124,16 +124,18 @@ def generate(video: Path, profile: dict, script: Path | None = None,
         script_lines = read_script(Path(script))
         say(f"스크립트 {len(script_lines)}줄과 대조합니다")
 
-        # **SDH에서만 화자명을 붙인다.** 번역 자막의 말자막에는 화자명을 쓰지 않는다
-        # (쓰는 경우는 화면 밖 목소리 같은 예외이고, 그건 사람이 판단한다).
-        with_speakers = profile.get("kind") == "sdh"
+        # **대본이 화자명을 주면 우리 표기로 남긴다.** 원문이 `화자1:`로 적었든
+        # `SARAH:`로 적었든 자막은 `[화자1]`이다(사용자 지적 2026-08-11).
+        # 원문 표기는 번역 과정에서만 쓰이고 납품물에 실리지 않는다.
+        #
+        # 번역 자막의 말자막에 화자명을 두는지는 작업마다 다르지만, 초벌에 남겨
+        # 두는 편이 안전하다 — 빼는 것은 한 번에 되고, 없는 것을 되살리려면
+        # 대본을 다시 봐야 한다.
         named = sum(1 for l in script_lines if l.speaker)
         if named:
-            say(f"대본에서 화자명 {named}개를 찾았습니다"
-                + (" — SDH 표기로 붙입니다" if with_speakers
-                   else " — 번역 자막이라 대사만 씁니다"))
-        lines = [(speaker_prefix(l.speaker, profile) if with_speakers else "") + l.text
-                 for l in script_lines]
+            say(f"대본에서 화자명 {named}개를 찾아 "
+                f"{profile.get('platform')} 표기로 붙입니다")
+        lines = [speaker_prefix(l.speaker, profile) + l.text for l in script_lines]
         cues = align(segments, lines)
         stats.update(summary(cues))
         events = _to_events(cues, notes)

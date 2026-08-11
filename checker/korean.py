@@ -88,6 +88,61 @@ def rebuild(events: list[Event], corrected: list[str], slots) -> list[Event]:
     return out
 
 
+def _corrector_options(root_path, profile: dict | None) -> dict:
+    """플랫폼 표기를 교정기에 넘길 값으로 옮긴다.
+
+    **교정기는 이미 이것들을 받을 줄 안다**(`markers`, `style`). 우리가 안 넘기고
+    있었을 뿐이다(사용자 지적 2026-08-11). 안 넘기면 교정기는 기본값 `[]`로 보고,
+    쿠팡처럼 `(화자명)`을 쓰는 작업에서 화자 표시를 대사로 읽는다 — 조사·어미
+    규칙이 화자명에 걸려 엉뚱한 교정이 나온다.
+
+    OTT마다 다른 것은 프로파일이 알고, 한국어 규범은 교정기가 안다. 각자 아는 것을
+    주고받는 자리가 여기다.
+    """
+    if not profile:
+        return {}
+    try:
+        from subtitle_corrector.engine.options import (  # type: ignore
+            SubtitleMarkers, normalize_punctuation_style)
+    except ImportError:
+        return {}
+
+    speaker = ((profile.get("speaker_id") or {}).get("enclosure") or "[]")
+    text_rules = profile.get("text") or {}
+    # 말줄임표: 프로파일이 정한 글자를 교정기 용어로 옮긴다. 정하지 않은 작업물
+    # (디즈니처럼 둘 다 되는 곳)은 건드리지 않는다.
+    ellipsis = {"…": "char", "...": "dots"}.get(text_rules.get("ellipsis_char"))
+
+    options = {"markers": SubtitleMarkers(speaker=speaker, tone=speaker)}
+    if ellipsis:
+        options["style"] = normalize_punctuation_style(ellipsis_style=ellipsis)
+    return options
+
+
+def _load_corrector_env(root_path: Path) -> None:
+    """교정기의 `.env`를 읽어 환경에 올린다.
+
+    **조용히 죽던 자리다.** 교정기는 `load_dotenv()`를 인자 없이 부르는데, 그러면
+    **현재 작업 폴더**에서 `.env`를 찾는다. 편집기에서 부르면 작업 폴더가 편집기
+    쪽이라 교정기의 키를 못 찾고, 사전 조회가 통째로 실패한다. 사전이 없으면
+    교정기 가드가 "근거 없음"으로 넘어가므로 **오류처럼 보이지도 않는다** — 검사가
+    조용히 헐거워진다(2026-08-11 발견).
+
+    이미 환경에 있는 값은 덮지 않는다. 사용자가 일부러 넣은 값이 이길 자리다.
+    """
+    env_file = root_path / ".env"
+    if not env_file.is_file():
+        return
+    for line in env_file.read_text(encoding="utf-8", errors="replace").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key, value = key.strip(), value.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
 def load_backend(corrector_path: str | None = None):
     """교정기를 불러온다.
 
@@ -108,6 +163,8 @@ def load_backend(corrector_path: str | None = None):
     if not (root_path / "subtitle_corrector").is_dir():
         raise CorrectorUnavailable(f"교정기가 없습니다: {root_path}")
 
+    _load_corrector_env(root_path)
+
     if str(root_path) not in sys.path:
         sys.path.insert(0, str(root_path))
     try:
@@ -116,13 +173,14 @@ def load_backend(corrector_path: str | None = None):
     except ImportError as e:  # kiwipiepy 등 의존성이 없을 때
         raise CorrectorUnavailable(f"교정기를 불러오지 못했습니다: {e}") from e
 
-    def backend(texts: list[str], spacing_mode: str = "principle"):
+    def backend(texts: list[str], spacing_mode: str = "principle", profile: dict | None = None):
         # 문서 전체를 한 번에 넘긴다 — 용어 일관성·존댓말 검사가 문서 단위이기 때문이다.
         entries = [
             SubtitleEntry(index=i + 1, start="", end="", text=t) for i, t in enumerate(texts)
         ]
         fixed, flags, _notes = correct_entries(
-            entries, doc_type="subtitle", spacing_mode=spacing_mode
+            entries, doc_type="subtitle", spacing_mode=spacing_mode,
+            **_corrector_options(root_path, profile)
         )
         return (
             [e.text for e in fixed],
@@ -144,6 +202,7 @@ def run_korean_pass(
     events: list[Event],
     backend,
     spacing_mode: str = "principle",
+    profile: dict | None = None,
 ) -> tuple[list[Event], list[Violation]]:
     """대사만 교정기에 넘기고, 바뀐 것과 플래그를 위반으로 돌려준다.
 
@@ -154,7 +213,11 @@ def run_korean_pass(
     if not texts:
         return events, []
 
-    corrected, flags = backend(texts, spacing_mode)
+    try:
+        corrected, flags = backend(texts, spacing_mode, profile)
+    except TypeError:
+        # 오래된 백엔드(프로파일을 모르는 것)와도 계속 돌아간다.
+        corrected, flags = backend(texts, spacing_mode)
     if len(corrected) != len(texts):
         raise CorrectorUnavailable("교정기가 돌려준 줄 수가 입력과 다릅니다")
 
