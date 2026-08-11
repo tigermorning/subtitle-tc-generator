@@ -135,6 +135,8 @@ class MainWindow(QMainWindow):
         video_box.addWidget(control_bar)
 
         self.left_splitter = QSplitter(Qt.Vertical)
+        self.left_splitter.setHandleWidth(8)
+        self.left_splitter.setChildrenCollapsible(False)
         self.left_splitter.addWidget(video_panel)
         self.left_splitter.addWidget(self.waveform)
         self.left_splitter.setSizes([420, 220])
@@ -152,9 +154,15 @@ class MainWindow(QMainWindow):
         self.table.horizontalHeader().setStretchLastSection(True)
 
         self.main_splitter = QSplitter()
+        self.main_splitter.setHandleWidth(8)
+        self.main_splitter.setChildrenCollapsible(False)
         self.main_splitter.addWidget(left_panel)
         self.main_splitter.addWidget(self.table)
         self.main_splitter.setSizes([620, 660])
+        # **잡이가 보여야 잡는다.** 가는 선은 있는 줄도 모른다.
+        self.setStyleSheet(
+            "QSplitter::handle { background: #3a3f4b; }"
+            "QSplitter::handle:hover { background: #5b8dd9; }")
         self.setCentralWidget(self.main_splitter)
         self._restore_layout()
         self.statusBar().showMessage("영상과 자막을 여세요")
@@ -487,6 +495,20 @@ class MainWindow(QMainWindow):
             action.setShortcut(QKeySequence(shortcut))
             action.triggered.connect(slot)
             file_menu.addAction(action)
+
+        view_menu = self.menuBar().addMenu("보기(&V)")
+        # **작업마다 크게 봐야 하는 곳이 다르다.** 타임코드를 잡을 때는 파형이,
+        # 번역을 다듬을 때는 표가 커야 한다. 매번 끌게 하지 않고 한 번에 바꾼다.
+        for title, shortcut, layout in (
+                ("타임코드 작업 (파형 크게)", "Ctrl+1", "spotting"),
+                ("번역 작업 (표 크게)", "Ctrl+2", "translating"),
+                ("영상 크게", "Ctrl+3", "video"),
+                ("고르게", "Ctrl+0", "balanced"),
+        ):
+            action = QAction(title, self)
+            action.setShortcut(QKeySequence(shortcut))
+            action.triggered.connect(lambda _=False, name=layout: self.apply_layout(name))
+            view_menu.addAction(action)
 
         help_menu = self.menuBar().addMenu("도움말(&H)")
         diagnosis = QAction("진단...", self)
@@ -852,6 +874,25 @@ class MainWindow(QMainWindow):
         row = self.model.row_for_time(position)
         if row >= 0 and row != self.table.currentIndex().row():
             self.table.selectRow(row)
+
+    LAYOUTS = {
+        # (왼쪽:표) , (영상:파형)
+        "spotting": ((7, 3), (3, 7)),
+        "translating": ((4, 6), (6, 4)),
+        "video": ((7, 3), (8, 2)),
+        "balanced": ((5, 5), (6, 4)),
+    }
+
+    def apply_layout(self, name: str) -> None:
+        """면적을 한 번에 바꾼다. 비율로 잡아 창 크기와 무관하게 같은 모양이 된다."""
+        main_ratio, left_ratio = self.LAYOUTS.get(name, self.LAYOUTS["balanced"])
+        width = max(self.main_splitter.width(), 800)
+        height = max(self.left_splitter.height(), 600)
+        self.main_splitter.setSizes([int(width * main_ratio[0] / 10),
+                                     int(width * main_ratio[1] / 10)])
+        self.left_splitter.setSizes([int(height * left_ratio[0] / 10),
+                                     int(height * left_ratio[1] / 10)])
+        self._note(f"배치: {name}")
 
     def _settings(self):
         from PySide6.QtCore import QSettings

@@ -1648,6 +1648,31 @@ else:
     ok("확대해도 보던 자리를 붙잡는다", abs(_wave.ms_at(_wave.x_at(15000)) - 15000) <= 1)
     ok("너무 작게는 못 줄인다", _wave.ms_per_pixel >= 1.0)
 
+    # 면적 — 작업마다 크게 봐야 하는 곳이 다르다.
+    from app.window import MainWindow  # noqa: E402
+
+    _win = MainWindow()
+    _win.resize(1600, 900)
+    _win.show()
+    _qt_app.processEvents()
+
+    _win.apply_layout("spotting")
+    _qt_app.processEvents()
+    _main = _win.main_splitter.sizes()
+    ok("타임코드 작업은 왼쪽(영상·파형)이 넓다", _main[0] > _main[1])
+    _left = _win.left_splitter.sizes()
+    ok("그때 파형이 영상보다 크다", _left[1] > _left[0])
+
+    _win.apply_layout("translating")
+    _qt_app.processEvents()
+    _main = _win.main_splitter.sizes()
+    ok("번역 작업은 표가 넓다", _main[1] > _main[0])
+
+    # 잡이가 보여야 잡는다. 가는 선은 있는 줄도 모른다.
+    ok("잡이가 잡을 만큼 두껍다", _win.main_splitter.handleWidth() >= 6)
+    ok("칸이 완전히 접히지는 않는다", not _win.main_splitter.childrenCollapsible())
+    _win.close()
+
 
 # --- 발주처 기준(사용자 프로파일) ------------------------------------------
 # 규정은 바뀌고, 발주처마다 다르고, 다른 회사 일도 받는다. 딸려 온 셋만 쓸 수
