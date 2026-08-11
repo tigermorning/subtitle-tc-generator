@@ -386,8 +386,48 @@ def _generate_mode(args, ap) -> int:
         print("말소리를 찾지 못했습니다.")
         return 1
 
-    write_srt(draft.events, out)
-    print(f"\n자막 초안을 저장했습니다: {out}  (자막 {len(draft.events)}개)")
+    # **여기서 끝내지 않는다.** 예전에는 초안만 쓰고 검사·교정은 사용자가 다시
+    # 돌려야 했는데, 그러면 버튼 이름만 보고는 어디까지 된 것인지 알 수 없다
+    # (사용자 지적). 만들었으면 검사까지 하고, 고칠 수 있는 것은 고쳐서 낸다.
+    events = draft.events
+    if not args.no_check:
+        from .fixes import apply_fixes
+        from .position import JobRules
+        rules = JobRules.from_profile(profile, {
+            "marker": args.fn_marker, "policy": args.collision,
+            "move_to": args.collision_move_to,
+        })
+
+        if args.korean and args.lang == "ko":
+            try:
+                backend = load_backend(args.ksc_path)
+            except CorrectorUnavailable as exc:
+                print(f"한국어 교정기를 쓰지 못합니다: {exc}", file=sys.stderr)
+            else:
+                print("한국어 교정기로 다듬는 중입니다...")
+                events, ko_violations = run_korean_pass(
+                    events, backend, spacing_mode=args.spacing)
+
+        events, applied, unfixable = apply_fixes(events, profile, rules)
+        if applied:
+            print(f"규정 자동 교정: {', '.join(applied)}")
+        report = check_events([e.__dict__ for e in events], profile,
+                              children=args.children, fps=None, job_rules=rules)
+        left = report["violations"]
+        print(f"검사 결과 남은 지적 {len(left)}건"
+              + (" — 사람이 봐야 하는 것들입니다" if left else ""))
+        if left:
+            counts: dict = {}
+            for v in left:
+                counts[(v["rule_id"], v["message"])] = counts.get(
+                    (v["rule_id"], v["message"]), 0) + 1
+            for (rule_id, message), n in sorted(counts.items(), key=lambda kv: -kv[1])[:6]:
+                print(f"    {n:>3}건  {rule_id}  {message}")
+        if unfixable:
+            print("  자동 표시지만 기계가 못 고치는 것: " + ", ".join(unfixable))
+
+    write_srt(events, out)
+    print(f"\n자막을 저장했습니다: {out}  (자막 {len(events)}개)")
 
     if draft.notes:
         notes_path = out.with_suffix(".notes.srt")
@@ -396,9 +436,7 @@ def _generate_mode(args, ap) -> int:
         print("  SE에서 초안을 연 뒤 [파일 - 원본 자막 열기]로 이 파일을 얹으면 "
               "나란히 보입니다.")
 
-    print("\n초안입니다. 사람이 보고 고치는 것을 전제로 만들었습니다. "
-          "이어서 검사를 돌리려면:")
-    print(f"  checker \"{out}\" -p {args.platform} -k {args.kind} --korean")
+    print("\n초안입니다. 사람이 보고 고치는 것을 전제로 만들었습니다.")
     return 0
 
 
@@ -475,6 +513,9 @@ def main(argv: list[str] | None = None) -> int:
                      help="말소리 언어(ko, en, auto…). 아는 값을 주면 정확해진다")
     gen.add_argument("--cpu", action="store_true",
                      help="GPU를 쓰지 않는다(느리다). 기본은 GPU")
+    gen.add_argument("--no-check", action="store_true",
+                     help="만들기만 하고 검사·교정은 건너뛴다. 기본은 만든 뒤 "
+                          "검사까지 하고 고칠 수 있는 것을 고친다")
     gen.add_argument("--translate", action="store_true",
                      help="원어를 한국어 초벌로 옮긴다. 모델은 이 컴퓨터에서 돈다"
                           "(원고가 밖으로 나가지 않는다)")

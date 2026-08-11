@@ -146,11 +146,11 @@ namespace Nikse.SubtitleEdit.PluginLogic
                 Padding = new Padding(6),
             };
             _close = new Button { Text = "닫기", Width = 80, DialogResult = DialogResult.Cancel };
-            _apply = new Button { Text = "SE에 반영", Width = 110, Enabled = false };
-            _generate = new Button { Text = "영상에서 자막 만들기", Width = 160 };
-            _translateOnly = new Button { Text = "받은 TC에 번역만", Width = 130 };
-            _fix = new Button { Text = "검사 + 교정", Width = 110 };
-            _check = new Button { Text = "검사만", Width = 90 };
+            _apply = new Button { Text = "★ 결과를 SE로", Width = 120, Enabled = false };
+            _generate = new Button { Text = "① 영상만 있다 → 자막 만들기", Width = 190 };
+            _translateOnly = new Button { Text = "② 받은 TC에 번역만", Width = 150 };
+            _fix = new Button { Text = "③ 자막 검사 + 교정", Width = 150 };
+            _check = new Button { Text = "③ 자막 검사만", Width = 120 };
             buttons.Controls.AddRange(new Control[] { _close, _apply, _generate, _translateOnly, _fix, _check });
 
             _check.Click += (s, e) => Start(false);
@@ -176,10 +176,18 @@ namespace Nikse.SubtitleEdit.PluginLogic
             else
             {
                 Say("검사기: " + _repo);
+                Say("");
+                Say("무엇을 가지고 있는지에 따라 고르세요:");
+                Say("  ① 영상만 있다        -> 전사·스포팅·재분할·검사·교정까지 한 번에");
+                Say("  ② 타임코드를 받았다  -> 번역만. 받은 타임코드는 건드리지 않습니다");
+                Say("  ③ 자막이 이미 있다   -> 규정·한국어 검사(교정)");
+                Say("");
+                Say("어느 것이든 끝나면 [★ 결과를 SE로]를 눌러야 SE 자막이 바뀝니다.");
+                Say("");
                 if (string.IsNullOrEmpty(_subtitle))
                 {
-                    Say("자막이 열려 있지 않습니다. 영상만 있으면 [영상에서 자막 만들기]로 시작하세요.");
-                    _check.Enabled = _fix.Enabled = false;
+                    Say("자막이 열려 있지 않습니다 — ①로 시작하세요(②③은 자막이 필요합니다).");
+                    _check.Enabled = _fix.Enabled = _translateOnly.Enabled = false;
                 }
             }
         }
@@ -224,7 +232,7 @@ namespace Nikse.SubtitleEdit.PluginLogic
                 _settings["repo"] = _repo;
                 Runner.SaveSettings(_settings);
                 Say("검사기: " + _repo);
-                _check.Enabled = _fix.Enabled = _subtitle.Length > 0;
+                _check.Enabled = _fix.Enabled = _translateOnly.Enabled = _subtitle.Length > 0;
                 _generate.Enabled = true;
             }
         }
@@ -418,7 +426,7 @@ namespace Nikse.SubtitleEdit.PluginLogic
                         _apply.Enabled = true;
                         _apply.Focus();
                         Say("");
-                        Say("결과가 준비됐습니다. [SE에 반영]을 누르면 SE의 자막이 바뀝니다"
+                        Say("결과가 준비됐습니다. [★ 결과를 SE로]를 누르면 SE의 자막이 바뀝니다"
                             + "(SE에서 Ctrl+Z로 되돌릴 수 있습니다).");
                         // 만든 자막 옆에 노트 파일이 있으면 알려 준다. 봐야 할 자리다.
                         var notes = Path.ChangeExtension(expectedOutput, ".notes.srt");
