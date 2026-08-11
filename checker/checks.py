@@ -703,3 +703,53 @@ def _full_bleep(ev: Event, ctx: dict):
     if style != "[음 소거 효과음]" and has_marker:
         return [(None, "여러 단어가 삐 처리되면 부호를 늘어놓습니다([음 소거 효과음] 아님)")]
     return []
+
+
+SPEAKER_AT_HEAD = re.compile(r"^\s*-?\s*([\[(])([^\])]+)([\])])\s*(.*)$")
+
+
+@check("speaker_id_enclosure")
+def _speaker_enclosure(ev: Event, ctx: dict):
+    """화자명 괄호. **쿠팡은 소괄호, 넷플릭스·디즈니는 대괄호**를 쓴다.
+
+    효과음은 셋 다 대괄호이므로, 줄 맨 앞에서 뒤에 대사가 이어지는 자리만 본다.
+    """
+    want = (ctx["profile"].get("speaker_id") or {}).get("enclosure")
+    if want not in ("[]", "()"):
+        return []
+    out = []
+    for i, line in enumerate(ev.lines, 1):
+        m = SPEAKER_AT_HEAD.match(strip_tags(line))
+        if not m or not m.group(4).strip():
+            continue
+        used = m.group(1) + m.group(3)
+        if used != want:
+            out.append((i, f"{used} -> {want} 로 씁니다"))
+    return out
+
+
+@check("speaker_id_conjunction")
+def _speaker_conjunction(ev: Event, ctx: dict):
+    """여럿이 동시에 말할 때. `[철수와 영희]`(x) -> `[철수, 영희]`·`[함께]`(o)."""
+    out = []
+    for i, line in enumerate(ev.lines, 1):
+        m = SPEAKER_AT_HEAD.match(strip_tags(line))
+        if not m or not m.group(4).strip():
+            continue
+        inner = m.group(2)
+        if re.search(r"[가-힣]{1,6}(와|과)\s+[가-힣]", inner):
+            out.append((i, f"[{inner}] — 쉼표로 나열하거나 [함께]로 씁니다"))
+    return out
+
+
+@check("speaker_id_alone_on_line")
+def _speaker_alone(ev: Event, ctx: dict):
+    """화자명과 대사 첫마디는 반드시 같은 줄에 둔다."""
+    lines = [strip_tags(l).strip() for l in ev.lines]
+    out = []
+    for i, line in enumerate(lines):
+        if i + 1 >= len(lines) or not lines[i + 1]:
+            continue
+        if re.fullmatch(r"-?\s*[\[(][^\])]+[\])]", line) and not lines[i + 1].startswith(("[", "(", "-", "♪")):
+            out.append((i + 1, f"{line} — 대사 첫마디와 같은 줄에 둡니다"))
+    return out

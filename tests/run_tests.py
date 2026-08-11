@@ -628,6 +628,45 @@ ok("넷플릭스·쿠팡은 표준어", pr4["korean"]["orthography"] == "standar
    and cp4["korean"]["orthography"] == "standard")
 
 
+# --- 화자명·외국어 표(이미지) -------------------------------------------------
+
+cp5 = load_profile_file(Path("rules/coupang/ko-sdh.yaml"))
+dp5 = load_profile_file(Path("rules/disney/ko-sdh.yaml"))
+pr5 = load_profile_file(Path("rules/netflix/ko-sdh-practice.yaml"))
+
+ok("쿠팡만 화자명이 소괄호", cp5["speaker_id"]["enclosure"] == "()"
+   and dp5["speaker_id"]["enclosure"] == "[]" and pr5["speaker_id"]["enclosure"] == "[]")
+r = check_events([ev("[철수] 안녕")], cp5)
+ok("쿠팡에서 대괄호 화자명을 잡는다", "CP16" in ids(r))
+r = check_events([ev("(철수) 안녕")], cp5)
+ok("쿠팡에서 소괄호는 정상", "CP16" not in ids(r))
+r = check_events([ev("(철수) 안녕")], pr5)
+ok("넷플릭스에서 소괄호를 잡는다", "S29" in ids(r))
+r = check_events([ev("(철수) [작게] 안녕")], cp5)
+ok("쿠팡의 (화자) [어조] 형식은 정상", "CP16" not in ids(r))
+r = check_events([ev("[문이 쾅 닫힌다]")], cp5)
+ok("효과음은 쿠팡에서도 대괄호라 걸리지 않는다", "CP16" not in ids(r))
+
+r = check_events([ev("[철수와 영희] 출발!")], pr5)
+ok("동시 발화의 '와'를 잡는다", "S30" in ids(r))
+r = check_events([ev("[철수, 영희] 출발!")], pr5)
+ok("쉼표 나열은 정상", "S30" not in ids(r))
+r = check_events([ev("[함께] 출발!")], pr5)
+ok("[함께]도 정상", "S30" not in ids(r))
+
+r = check_events([ev("[철수]\n안녕하세요")], pr5)
+ok("화자명만 있는 줄을 잡는다", "S31" in ids(r))
+r = check_events([ev("[철수] 안녕하세요\n반갑습니다")], pr5)
+ok("같은 줄에 있으면 정상", "S31" not in ids(r))
+r = check_events([ev("[문이 쾅 닫힌다]\n[진수] 왔어?")], pr5)
+ok("효과음 다음 줄이 표시로 시작하면 걸리지 않는다", "S31" not in ids(r))
+
+ok("넷플릭스는 한국어 복귀 표시를 넣지 않는다",
+   pr5["speaker_id"]["foreign_return_marker"] is False
+   and dp5["speaker_id"]["foreign_return_marker"] is True
+   and cp5["speaker_id"]["foreign_return_marker"] is True)
+
+
 # --- 결과 ---------------------------------------------------------------
 
 print(f"통과 {PASSED}건")
