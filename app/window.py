@@ -11,11 +11,14 @@ from pathlib import Path
 from PySide6.QtCore import QObject, QThread, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (
-    QFileDialog, QHBoxLayout, QLabel, QMainWindow, QMessageBox, QPushButton,
-    QSplitter, QTableView, QVBoxLayout, QWidget)
+    QCheckBox, QComboBox, QDockWidget, QFileDialog, QHBoxLayout, QLabel,
+    QMainWindow, QMessageBox, QPushButton, QSplitter, QTableView,
+    QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 
 from checker.parsers import parse
 from checker.writers import to_timecode, write_srt
+
+from . import jobs
 
 from .model import SubtitleModel
 from .player import Player, PlayerUnavailable
@@ -60,8 +63,11 @@ class MainWindow(QMainWindow):
         # 미리 보기 때문에 원본이 바뀌면 안 된다.
         self._preview_path = Path(tempfile.gettempdir()) / "subtitle-editor-preview.srt"
 
+        self._threads: list = []          # 실을 붙잡아 둔다. 놓으면 프로그램이 죽는다
         self._build()
         self._build_menu()
+        self._build_pipeline()
+        self._build_results()
 
         # 재생 위치를 따라 표가 움직인다. 자막 작업은 "지금 무엇이 보이나"를
         # 계속 확인하는 일이라 이것이 없으면 눈이 두 곳을 오간다.
@@ -131,6 +137,195 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(splitter)
         self.statusBar().showMessage("영상과 자막을 여세요")
 
+    def _build_pipeline(self) -> None:
+        """파이프라인 막대 — 엔진은 `checker/`에 있고 여기서는 부르기만 한다."""
+        bar = self.addToolBar("작업")
+        bar.setMovable(False)
+
+        self.platform_box = QComboBox()
+        self.platform_box.addItems(["netflix", "disney", "coupang"])
+        self.kind_box = QComboBox()
+        self.kind_box.addItems(["translation", "sdh"])
+        self.language_box = QComboBox()
+        self.language_box.addItems(["en", "ko", "auto"])
+        self.translate_check = QCheckBox("번역까지")
+        self.korean_check = QCheckBox("한국어 교정")
+        self.korean_check.setChecked(True)
+
+        for label, widget in (("플랫폼", self.platform_box), ("종류", self.kind_box),
+                              ("원어", self.language_box)):
+            bar.addWidget(QLabel(f"  {label} "))
+            bar.addWidget(widget)
+        bar.addWidget(self.translate_check)
+        bar.addWidget(self.korean_check)
+        bar.addSeparator()
+
+        self.pipeline_buttons = []
+        for title, slot in (("영상에서 자막 만들기", self.run_generate),
+                            ("검사·교정", self.run_check),
+                            ("번역", self.run_translate),
+                            ("용어표", self.run_terms)):
+            action = QAction(title, self)
+            action.triggered.connect(slot)
+            bar.addAction(action)
+            self.pipeline_buttons.append(action)
+
+    def _build_results(self) -> None:
+        """지적 목록. **두 번 누르면 그 자막으로 간다** — 목록과 영상이 이어져야
+        사람이 확인할 수 있다."""
+        self.results = QTableWidget(0, 3)
+        self.results.setHorizontalHeaderLabels(["자막", "규칙", "내용"])
+        self.results.horizontalHeader().setStretchLastSection(True)
+        self.results.setColumnWidth(0, 60)
+        self.results.setColumnWidth(1, 70)
+        self.results.doubleClicked.connect(self._jump_to_violation)
+
+        dock = QDockWidget("검사 결과", self)
+        dock.setWidget(self.results)
+        self.addDockWidget(Qt.BottomDockWidgetArea, dock)
+        dock.hide()
+        self.results_dock = dock
+
+    def _show_violations(self, violations) -> None:
+        self.results.setRowCount(len(violations))
+        for row, violation in enumerate(violations):
+            mark = "자동" if violation.get("auto_fixable") else "확인"
+            self.results.setItem(row, 0, QTableWidgetItem(str(violation["event_index"])))
+            self.results.setItem(row, 1, QTableWidgetItem(f"{violation['rule_id']} {mark}"))
+            detail = violation.get("detail") or violation.get("message") or ""
+            self.results.setItem(row, 2, QTableWidgetItem(str(detail)[:120]))
+        self.results_dock.setVisible(bool(violations))
+
+    def _jump_to_violation(self, index) -> None:
+        item = self.results.item(index.row(), 0)
+        if not item:
+            return
+        number = int(item.text())
+        for row, event in enumerate(self.model.events):
+            if event.index == number:
+                self.table.selectRow(row)
+                if self.player:
+                    self.player.seek(event.start_ms)
+                break
+
+    # --- 파이프라인 ---------------------------------------------------
+    def _profile(self):
+        from checker import load_profile
+        return load_profile(self.platform_box.currentText(), "ko",
+                            self.kind_box.currentText())
+
+    def _corrector_path(self) -> str | None:
+        import os
+        return os.environ.get("KSC_PATH")
+
+    def _busy(self, busy: bool, what: str = "") -> None:
+        for action in self.pipeline_buttons:
+            action.setEnabled(not busy)
+        if what:
+            self.statusBar().showMessage(what)
+
+    def _start(self, job, on_done, what: str) -> None:
+        self._busy(True, what)
+
+        def done(result):
+            self._busy(False)
+            on_done(result)
+
+        def failed(why):
+            self._busy(False)
+            self.statusBar().showMessage(f"실패: {why}")
+            QMessageBox.warning(self, "작업을 마치지 못했습니다", why)
+
+        thread = jobs.start(job, done,
+                            lambda m: self.statusBar().showMessage(m), failed)
+        self._threads.append(thread)
+
+    def run_generate(self) -> None:
+        if not self.player or not getattr(self, "_video_path", None):
+            QMessageBox.information(self, "영상이 필요합니다", "먼저 영상을 여세요.")
+            return
+        script = None
+        if self.kind_box.currentText() == "translation":
+            path, _ = QFileDialog.getOpenFileName(
+                self, "원어 대본 (없으면 취소)", "", "대본 (*.txt *.md);;모든 파일 (*.*)")
+            script = Path(path) if path else None
+
+        job = jobs.GenerateJob(Path(self._video_path), self._profile(), script,
+                               self.language_box.currentText(),
+                               self.translate_check.isChecked())
+
+        def done(draft):
+            self.model.replace(draft.events)
+            self.waveform.set_events(self.model.events)
+            self._preview_timer.start()
+            notes = len(draft.notes)
+            self.statusBar().showMessage(
+                f"자막 {len(draft.events)}개를 만들었습니다"
+                + (f" — 봐야 할 자리 {notes}곳" if notes else ""))
+            if draft.notes:
+                self._show_violations([
+                    {"event_index": i, "rule_id": "확인", "detail": note,
+                     "auto_fixable": False} for i, note in draft.notes])
+
+        self._start(job, done, "영상에서 자막을 만드는 중입니다...")
+
+    def run_check(self) -> None:
+        if not self.model.events:
+            return
+        job = jobs.CheckJob(self.model.events, self._profile(), fix=True,
+                            korean=self.korean_check.isChecked(),
+                            corrector_path=self._corrector_path())
+
+        def done(result):
+            events, violations = result
+            self.model.replace(events)
+            self.waveform.set_events(self.model.events)
+            self._preview_timer.start()
+            self._show_violations(violations)
+            self.statusBar().showMessage(f"남은 지적 {len(violations)}건")
+
+        self._start(job, done, "검사·교정 중입니다...")
+
+    def run_translate(self) -> None:
+        if not self.model.events:
+            return
+        from checker.knp import find_for
+        knp = find_for(self.subtitle_path) if self.subtitle_path else None
+        job = jobs.TranslateJob(self.model.events, self._profile(),
+                                passes=3 if self.translate_check.isChecked() else 1,
+                                knp=knp)
+
+        def done(events):
+            self.model.replace(events)
+            self.waveform.set_events(self.model.events)
+            self._preview_timer.start()
+            self.statusBar().showMessage(
+                f"번역했습니다 — 타임코드는 그대로입니다({len(events)}개)")
+
+        self._start(job, done, "한국어로 옮기는 중입니다...")
+
+    def run_terms(self) -> None:
+        if not self.model.events:
+            return
+        from checker.knp import find_for
+        base = self.subtitle_path or Path("용어표.srt")
+        out = base.with_suffix(".terms.tsv")
+        job = jobs.TermsJob(self.model.events, out, web=True, explain=True,
+                            corrector_path=self._corrector_path(),
+                            knp=find_for(base) if self.subtitle_path else None)
+
+        def done(result):
+            terms, path = result
+            filled = sum(1 for t in terms if t.korean)
+            self.statusBar().showMessage(
+                f"용어 {len(terms)}개 중 {filled}개에 표기를 채웠습니다: {path.name}")
+            self._show_violations([
+                {"event_index": 0, "rule_id": t.kind,
+                 "detail": f"{t.source} -> {t.korean or '확인 필요'}  {t.meaning}",
+                 "auto_fixable": bool(t.korean)} for t in terms])
+
+        self._start(job, done, "용어를 조사하는 중입니다...")
+
     def _build_menu(self) -> None:
         file_menu = self.menuBar().addMenu("파일(&F)")
         for title, shortcut, slot in (
@@ -155,6 +350,7 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(self, "영상을 재생할 수 없습니다",
                                     f"{MPV_MISSING}\n\n{exc}")
                 return
+        self._video_path = path
         self.player.open(path)
         self.statusBar().showMessage(f"영상: {Path(path).name}  {self.player.fps:.3f}fps"
                                      f" — 파형을 만드는 중입니다...")
