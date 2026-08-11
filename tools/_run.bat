@@ -33,8 +33,11 @@ if not defined PY set "PY=python"
 
 rem Korean correction lane runs too when the corrector is reachable. If it cannot be
 rem loaded the checker says so and keeps going with the rule checks.
+rem The Korean correction lane is the point of this tool, so it is ON by default
+rem whenever the corrector is reachable. SKIP_KOREAN=1 exists only for quick
+rem debugging of the rule checks; there is no .bat for it on purpose.
 set "KO="
-if defined KSC_PATH if /i "%LANG%"=="ko" set "KO=--korean --ksc-path "%KSC_PATH%""
+if not defined SKIP_KOREAN if defined KSC_PATH if /i "%LANG%"=="ko" set "KO=--korean --ksc-path "%KSC_PATH%""
 
 set "REPORT=%~dp1checker-report.txt"
 
