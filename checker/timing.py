@@ -167,3 +167,76 @@ def converge(events: list[Event], limits: TimingLimits, rounds: int = 3) -> Timi
 
     result.events.sort(key=lambda e: e.start_ms)
     return result
+
+
+# 작업자 자료의 스포팅 기준:
+#   모눈 1칸 = 0.1초 = 3프레임
+#   인점: 보이스 시작 전 0.1초 이내(2~3프레임)
+#   아웃점: 보이스 끝난 후 0.2~0.3초 이내(6~9프레임)
+#   음성이 겹치면 다음 화자의 인점 우선
+#   아웃점 규칙보다 Minimum Duration이 우선
+LEAD_IN_FRAMES = (2, 3)
+LEAD_OUT_FRAMES = (6, 9)
+
+
+@dataclass
+class SpotSuggestion:
+    event_index: int
+    field_name: str
+    current: int
+    suggested: int
+    reason: str
+
+
+def suggest_spotting(events: list[Event], speech: list[tuple[int, int]], fps: float,
+                     tolerance_frames: int = 4) -> list[SpotSuggestion]:
+    """말소리 구간과 견줘 인점·아웃점을 제안한다.
+
+    **자동으로 고치지 않는다.** 말소리 검출은 음량 기준이라 배경음악이 크면 경계가
+    흐려지고, 그 값으로 타임코드를 덮어쓰면 싱크가 통째로 어긋난다. 사람이 보고
+    고르도록 제안만 낸다.
+
+    `tolerance_frames`보다 적게 어긋난 것은 말하지 않는다 — 이미 규정 안이다.
+    """
+    if not speech:
+        return []
+    frame = 1000.0 / fps
+    tolerance = tolerance_frames * frame
+    out: list[SpotSuggestion] = []
+
+    ordered = sorted(events, key=lambda e: e.start_ms)
+    for i, ev in enumerate(ordered):
+        # 다음 자막의 인점을 넘어서까지 늘리지 않는다.
+        # 작업자 자료: "음성이 겹치는 경우에는 다음 화자의 인점 우선".
+        next_start = ordered[i + 1].start_ms if i + 1 < len(ordered) else None
+
+        # 이 자막과 겹치는 말소리 구간
+        overlapping = [(s, e) for s, e in speech if e > ev.start_ms and s < ev.end_ms]
+        if not overlapping:
+            out.append(SpotSuggestion(ev.index, "start_ms", ev.start_ms, ev.start_ms,
+                                      "이 구간에서 말소리를 찾지 못했습니다"
+                                      " — 효과음·화면 자막이면 정상입니다"))
+            continue
+
+        voice_start = min(s for s, _ in overlapping)
+        voice_end = max(e for _, e in overlapping)
+        if next_start is not None:
+            voice_end = min(voice_end, next_start)
+
+        want_start = voice_start - LEAD_IN_FRAMES[1] * frame
+        if abs(ev.start_ms - want_start) > tolerance:
+            out.append(SpotSuggestion(
+                ev.index, "start_ms", ev.start_ms, int(round(want_start)),
+                f"말소리 시작 {voice_start}ms의 {LEAD_IN_FRAMES[0]}~{LEAD_IN_FRAMES[1]}프레임 앞"))
+
+        want_end = voice_end + LEAD_OUT_FRAMES[0] * frame
+        if next_start is not None:
+            # 여유 프레임을 더한 뒤에도 다음 인점을 넘지 않게 한다.
+            # 간격 확보는 converge()가 따로 본다.
+            want_end = min(want_end, next_start)
+        if abs(ev.end_ms - want_end) > tolerance:
+            out.append(SpotSuggestion(
+                ev.index, "end_ms", ev.end_ms, int(round(want_end)),
+                f"말소리 끝 {voice_end}ms의 {LEAD_OUT_FRAMES[0]}~{LEAD_OUT_FRAMES[1]}프레임 뒤"))
+
+    return out

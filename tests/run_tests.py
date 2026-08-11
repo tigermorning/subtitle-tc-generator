@@ -772,6 +772,47 @@ converge(original, lim)
 ok("원본 이벤트를 건드리지 않는다", original[0].end_ms == 400)
 
 
+# --- 스포팅 제안 (영상 없이 합성 구간으로 검증) -------------------------------
+
+from checker.timing import suggest_spotting  # noqa: E402
+
+fps = 23.976
+frame = 1000 / fps
+speech = [(3667, 4594), (5112, 7667)]
+
+sug = suggest_spotting([Event(1, 3000, 5000, "첫 대사")], speech, fps)
+by_field = {s.field_name: s for s in sug}
+ok("인점을 말소리 앞으로 제안한다", "start_ms" in by_field)
+ok("제안값이 말소리 시작보다 앞이다", by_field["start_ms"].suggested < 3667)
+# 아웃점 5000ms는 말소리 끝(4594) + 6프레임(4844)에서 156ms 차이라 허용 범위(4프레임=167ms)
+# 안이다. 규정 안인 것은 말하지 않는 것이 맞다.
+ok("허용 범위 안의 아웃점은 말하지 않는다", "end_ms" not in by_field)
+
+sug = suggest_spotting([Event(1, 3000, 6000, "첫 대사"), Event(2, 6500, 9000, "둘째")],
+                       speech, fps)
+by_field = {s.field_name: s for s in sug if s.event_index == 1}
+ok("다음 자막 인점을 넘어서까지 늘리지 않는다",
+   "end_ms" not in by_field or by_field["end_ms"].suggested <= 6500, str(sug))
+
+# 이미 규정 안이면 말하지 않는다
+good_start = int(3667 - 3 * frame)
+good_end = int(4594 + 6 * frame)
+ok("규정 안이면 조용하다",
+   not suggest_spotting([Event(1, good_start, good_end, "대사")], speech, fps),
+   str(suggest_spotting([Event(1, good_start, good_end, "대사")], speech, fps)))
+
+sug = suggest_spotting([Event(1, 100000, 102000, "효과음뿐")], speech, fps)
+ok("말소리가 없으면 그렇다고 알린다",
+   sug and "말소리를 찾지 못했습니다" in sug[0].reason, str(sug))
+
+ok("말소리 구간이 없으면 아무 말도 하지 않는다",
+   suggest_spotting([Event(1, 0, 2000, "대사")], [], fps) == [])
+
+original = Event(1, 3000, 5000, "대사")
+suggest_spotting([original], speech, fps)
+ok("제안은 원본을 바꾸지 않는다", original.start_ms == 3000 and original.end_ms == 5000)
+
+
 # --- 결과 ---------------------------------------------------------------
 
 print(f"통과 {PASSED}건")

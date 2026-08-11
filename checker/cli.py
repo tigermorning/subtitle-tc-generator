@@ -55,6 +55,14 @@ def _format_text(report: dict, path: Path) -> str:
             out.append(f"    {n:>4}건  {rule_id}  {message}")
         out.append("")
     out.append(f"  위반 {len(violations)}건")
+    if report.get("spot_suggestions"):
+        out.append(f"  스포팅 제안 {len(report['spot_suggestions'])}건 (자동 적용 안 함)")
+        for sug in report["spot_suggestions"][:8]:
+            out.append(f"    #{sug['event_index']} {sug['field']} "
+                       f"{sug['current']} -> {sug['suggested']}ms  ({sug['reason']})")
+        if len(report["spot_suggestions"]) > 8:
+            out.append(f"    … 외 {len(report['spot_suggestions']) - 8}건")
+
     if report.get("timing_changes") is not None:
         out.append(f"  타임코드 {len(report['timing_changes'])}곳 조정")
         for c in report["timing_changes"][:8]:
@@ -132,6 +140,19 @@ def _run_one(path: Path, profile: dict, args, backend) -> dict | None:
     report = check_events([e.__dict__ for e in events], profile,
                           children=args.children, fps=args.fps)
     report["file"] = str(path)
+    if getattr(args, "spot", False) and getattr(args, "_media", None):
+        from .media import MediaToolUnavailable, detect_speech
+        from .timing import suggest_spotting
+        try:
+            speech = detect_speech(args.video, duration_ms=args._media.duration_ms)
+        except MediaToolUnavailable as e:
+            print(f"말소리 검출을 건너뜁니다: {e}", file=sys.stderr)
+        else:
+            report["spot_suggestions"] = [
+                {"event_index": s.event_index, "field": s.field_name,
+                 "current": s.current, "suggested": s.suggested, "reason": s.reason}
+                for s in suggest_spotting(events, speech, args._media.fps)]
+
     if timing is not None:
         report["timing_changes"] = [
             {"event_index": c.event_index, "field": c.field_name,
@@ -174,6 +195,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("-l", "--lang", default="ko")
     ap.add_argument("-k", "--kind", choices=["sdh", "translation"], default="translation")
     ap.add_argument("--children", action="store_true", help="아동 프로그램 기준 적용")
+    ap.add_argument("--video", type=Path,
+                    help="영상 파일. 프레임레이트를 자동으로 읽고 --spot에 쓴다(ffmpeg 필요)")
+    ap.add_argument("--spot", action="store_true",
+                    help="말소리 구간과 견줘 인점·아웃점을 제안한다(자동 교정 아님)")
     ap.add_argument("--fps", type=float, default=23.976,
                     help="영상 프레임레이트. 자막 간격 같은 프레임 단위 규정을 환산한다")
     ap.add_argument("--json", action="store_true", help="JSON으로 출력")
@@ -204,6 +229,23 @@ def main(argv: list[str] | None = None) -> int:
 
     if not args.targets:
         ap.error("자막 파일이나 폴더가 필요합니다 (또는 --list)")
+
+    media = None
+    if args.video:
+        from .media import MediaToolUnavailable, probe
+        try:
+            media = probe(args.video)
+        except MediaToolUnavailable as e:
+            print(f"영상을 읽지 못했습니다: {e}", file=sys.stderr)
+        else:
+            # --fps를 손으로 준 경우가 아니면 영상 값을 쓴다
+            if "--fps" not in (argv or sys.argv[1:]):
+                args.fps = media.fps
+            print(f"영상: {media.width}x{media.height}, {media.fps:g}fps, "
+                  f"{media.duration_ms / 1000:.1f}초", file=sys.stderr)
+            if media.variable_frame_rate:
+                print("  주의: 프레임레이트가 일정하지 않습니다(화면 녹화물 등)."
+                      " 프레임 단위 규정 환산이 어긋날 수 있습니다.", file=sys.stderr)
 
     files = collect_files(args.targets)
     if not files:
@@ -236,6 +278,7 @@ def main(argv: list[str] | None = None) -> int:
             # 못 돌렸다는 사실을 숨기지 않는다 — 통과로 보이면 안 된다.
             print(f"한국어 교정 레인을 건너뜁니다: {e}", file=sys.stderr)
 
+    args._media = media
     reports = []
     for n, path in enumerate(files, 1):
         print(f"[{n}/{len(files)}] {path.name} 검사 중...", file=sys.stderr, flush=True)
