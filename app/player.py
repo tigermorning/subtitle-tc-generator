@@ -13,6 +13,23 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 
+# **자막 크기는 눈대중이 아니라 규격에서 나온다.**
+#
+# TTML(자막 파일 표준)의 기본 격자는 32열 x 15행이고(`ttp:cellResolution` 기본값
+# "32 15"), `tts:fontSize: 100%`는 **그 격자 한 칸의 높이**를 뜻한다. 곧 화면 높이의
+# 1/15 = 6.67%다. 넷플릭스가 TTML에 "fontSize는 100%"라고만 적는 이유가 이것이다
+# — 값이 이미 표준에 박혀 있다(우리 프로파일 `delivery.positioning.font_size_percent`
+# 도 100으로 적혀 있다).
+#
+# mpv의 `sub-font-size`는 **창 높이 720 기준의 픽셀**이다(mpv 문서). 그래서
+#
+#     720 x 6.67% = 48
+#
+# 이 값이 규격에 맞는 크기다. 이 libmpv 빌드의 기본값은 38(=5.3%)이라 규격보다
+# 작았다. 사람 눈에는 "조금 큰 듯"해도 실제 화면에서 그 크기로 나간다.
+SUB_FONT_SIZE = 48
+
+
 @dataclass
 class PlayerUnavailable(Exception):
     reason: str
@@ -53,7 +70,8 @@ class Player:
         # **빌드마다 있는 옵션이 다르다.** `sub-ass-use-margins`는 이 libmpv에 없다.
         # 없는 옵션 하나 때문에 재생기가 통째로 안 열리면 안 된다.
         for name, value in (("sub-use-margins", "no"),
-                            ("sub-ass-use-margins", "no")):
+                            ("sub-ass-use-margins", "no"),
+                            ("sub-font-size", str(SUB_FONT_SIZE))):
             self._set_optional(name, value)
 
         self._duration_ms = 0
