@@ -307,6 +307,22 @@ def _run_one(path: Path, profile: dict, args, backend) -> dict | None:
         cues = translate_events(events, translator, glossary,
                                 progress=lambda m: print(f"    {m}", file=sys.stderr))
         translated = to_events(cues, events)
+
+        # **2차·3차는 따로 돈다.** 사람도 나눠서 한다 — 1차는 정확도, 2차는 용어와
+        # 맥락, 3차는 말맛. 한 번에 시키면 셋을 뒤섞어 어중간하게 낸다.
+        if args.passes > 1:
+            from .revise import report as revision_report, revise
+            source = {e.index: e.text for e in events}
+            for stage in ("2차", "3차")[:args.passes - 1]:
+                translated, revisions = revise(
+                    translated, translator, source=source, glossary=glossary,
+                    stage=stage,
+                    progress=lambda m: print(f"    {m}", file=sys.stderr))
+                print(f"  {revision_report(revisions, show=6)}")
+                report[f"revisions_{stage}"] = [
+                    {"event_index": r.index, "before": r.before, "after": r.after}
+                    for r in revisions]
+
         out_path = args.out or path.with_suffix(".ko.srt")
         write_srt(translated, out_path)
         report["translated_file"] = str(out_path)
@@ -719,6 +735,9 @@ def main(argv: list[str] | None = None) -> int:
     gen.add_argument("--translate-model",
                      help="번역에 쓸 로컬 모델(기본: exaone3.5:7.8b). "
                           "`ollama list`에 있는 이름")
+    gen.add_argument("--passes", type=int, default=1, choices=[1, 2, 3],
+                     help="번역을 몇 차까지 할지. 1차=빠른 초벌, 2차=용어·맥락 감수, "
+                          "3차=말맛 윤문(작업자 자료의 단계 그대로)")
     gen.add_argument("--no-knp", action="store_true",
                      help="옆에 있는 KNP 시트를 쓰지 않는다(기본은 찾으면 쓴다)")
     gen.add_argument("--glossary", type=Path,

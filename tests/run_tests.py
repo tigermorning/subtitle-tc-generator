@@ -1557,6 +1557,38 @@ ok("화폐를 고치며 조사도 맞춘다", _fixed[0].text == "3천 달러를 
 ok("주격 조사도 맞춘다", _fixed[1].text == "5천 달러가 없어")
 
 
+# --- 2차·3차 번역 ----------------------------------------------------------
+# 작업자 자료 569~579행의 단계를 그대로 나눈다. 한 번에 "잘 번역해라"라고 하면
+# 모델이 정확도·용어·말맛을 뒤섞어 어중간하게 낸다.
+
+from checker.revise import _too_different, report as revision_report, revise  # noqa: E402
+
+_evs = [Event(1, 0, 1000, "그들과 싸우기 전에 그들을 발견해야 한다"),
+        Event(2, 1000, 2000, "놈들은 강하다")]
+
+_fake = _FakeTranslator(["1. 놈들과 싸우기 전에 우선 찾아야 한다\n2. 놈들은 강하다\n"])
+_out, _revisions = revise(_evs, _fake, source={1: "We must find them before we fight"})
+ok("고친 자막을 돌려준다", _out[0].text == "놈들과 싸우기 전에 우선 찾아야 한다")
+ok("타임코드는 그대로", (_out[0].start_ms, _out[0].end_ms) == (0, 1000))
+ok("바뀐 것만 내역에 남는다", len(_revisions) == 1 and _revisions[0].index == 1)
+ok("전후를 함께 남긴다", "그들과" in _revisions[0].before and "놈들과" in _revisions[0].after)
+
+# **의심스러우면 1차를 지킨다.** 2차가 늘 나은 것은 아니다.
+_fake = _FakeTranslator(["1. 이건 완전히 다른 아주 긴 문장으로 설명을 덧붙인 것입니다 정말 깁니다\n"])
+_out, _ = revise(_evs[:1], _fake)
+ok("너무 달라지면 1차를 지킨다", _out[0].text == _evs[0].text)
+
+_fake = _FakeTranslator([""])
+_out, _ = revise(_evs[:1], _fake)
+ok("답이 없으면 1차를 지킨다", _out[0].text == _evs[0].text)
+
+ok("길이가 두 배 넘으면 다시 쓴 것으로 본다", _too_different("짧은 말", "짧은 말을 아주 길게 늘여 쓴 것"))
+ok("비슷한 길이는 다듬은 것", not _too_different("먼저 연락했어야지", "먼저 연락했어야 했어"))
+ok("빈 원문은 견주지 않는다", not _too_different("", "무엇이든"))
+
+ok("바꾼 것이 없으면 그렇게 말한다", "없습니다" in revision_report([]))
+
+
 # --- 결과 ---------------------------------------------------------------
 
 print(f"통과 {PASSED}건")
