@@ -64,3 +64,25 @@ docs/       설계 문서
 ## 라이선스
 
 미정. SubtitleEdit은 MIT라 파생 작업에 제약이 없다.
+
+## 검사기 사용법
+
+```bash
+pip install -r requirements.txt
+
+python -m checker examples/ko-sdh-sample.srt -p netflix -l ko -k sdh
+python -m checker file.srt -p netflix -l en -k translation --json
+python -m checker --list
+```
+
+`--children`를 붙이면 아동 프로그램 기준(더 느린 읽기 속도)을 적용한다.
+종료 코드는 위반이 있으면 1, 없으면 0이다.
+
+리포트는 위반마다 **조항 번호를 인용한다**. `[자동]`은 기계적으로 고칠 수 있는 것,
+`[확인]`은 사람이 판단할 것이다. 프로파일에 있지만 아직 구현하지 않은 검사는
+`미구현 검사`로 따로 출력한다 — 검사하지 않은 것을 통과로 보이게 하지 않는다.
+
+코어는 JSON in / JSON out 순수 함수(`checker.check_events`)다. 편집기를 어떤
+언어로 만들든 이 계약만 지키면 옮겨진다.
+
+테스트: `python3 tests/run_tests.py`
