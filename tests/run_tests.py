@@ -1403,6 +1403,35 @@ ok("앞 자막을 침범하는 인점은 받지 않는다", _dense[1].start_ms =
 ok("마지막 자막은 늘릴 수 있다", _dense[2].end_ms == 4300 and _moved == 1)
 
 
+# --- 강사 첨삭 읽기 --------------------------------------------------------
+# 규정 문서가 "무엇이 맞는지"를 말한다면 첨삭은 "무엇이 실제로 틀리는지"를 말한다.
+
+from checker.bookmarks import classify, clean, read  # noqa: E402
+
+ok("SE의 <br />를 줄바꿈으로", clean("가<br />나") == "가\n나")
+ok("강사가 붙인 갈래 표시를 믿는다", classify("<오역><br />8-9번 문장에") == "translation")
+ok("표시가 없으면 말로 가른다", classify("아웃점 너무 빠릅니다") == "timecode")
+ok("표기 지적을 가른다", classify("시간과 시각은 아라비아 숫자로 표기합니다") == "notation")
+# 좁은 갈래가 이긴다 — "의미"가 들어가도 인점 이야기면 타임코드 일이다.
+ok("겹치면 좁은 갈래가 이긴다", classify("의미별 스파팅 수정해 주세요") == "timecode")
+ok("모르면 기타로 둔다", classify("좋습니다!") == "other")
+
+with _tf3.TemporaryDirectory() as _d:
+    _srt = Path(_d) / "a.srt"
+    _srt.write_text("1\n00:00:01,000 --> 00:00:03,000\n첫 줄\n\n"
+                    "2\n00:00:04,000 --> 00:00:06,000\n둘째 줄\n", encoding="utf-8")
+    _bm = Path(_d) / "a.srt.SE.bookmarks"
+    _bm.write_text('{"bookmarks":[{"idx":2,"txt":"아웃점 너무 빠릅니다"}]}', encoding="utf-8")
+    _notes = read(_bm)
+    ok("첨삭을 읽는다", len(_notes) == 1 and _notes[0].kind == "timecode")
+    ok("자막과 짝짓는다", _notes[0].cue is not None and _notes[0].cue.text == "둘째 줄")
+
+    # SE는 파일에 따라 0부터 번호를 매긴다. 자막 수를 넘는 번호가 그 증거다.
+    _bm.write_text('{"bookmarks":[{"idx":0,"txt":"가"},{"idx":2,"txt":"나"}]}', encoding="utf-8")
+    _zero = read(_bm)
+    ok("0-기준 파일을 알아본다", [n.index for n in _zero] == [1, 3])
+
+
 # --- 결과 ---------------------------------------------------------------
 
 print(f"통과 {PASSED}건")

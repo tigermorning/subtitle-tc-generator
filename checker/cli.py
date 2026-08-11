@@ -342,6 +342,45 @@ def _run_one(path: Path, profile: dict, args, backend) -> dict | None:
     return report
 
 
+def _bookmarks_mode(args, ap) -> int:
+    """강사 첨삭을 데이터로. **전문가가 짚은 실패 사례 목록**이다."""
+    from .bookmarks import collect, read, summarize
+
+    target = args.bookmarks
+    if not target.exists():
+        ap.error(f"찾지 못했습니다: {target}")
+    notes = collect(target) if target.is_dir() else read(target)
+    if not notes:
+        print("북마크를 찾지 못했습니다.")
+        return 1
+
+    stats = summarize(notes)
+    labels = {"timecode": "타임코드", "translation": "번역", "notation": "표기",
+              "other": "기타"}
+    print(f"첨삭 {stats['total']}건 (자막과 짝지음 {stats['with_cue']}건)")
+    for kind, count in sorted(stats["by_kind"].items(), key=lambda kv: -kv[1]):
+        print(f"  {labels.get(kind, kind):8} {count:3}건")
+
+    for kind in ("timecode", "notation", "translation", "other"):
+        found = [n for n in notes if n.kind == kind]
+        if not found:
+            continue
+        print()
+        print(f"[{labels.get(kind, kind)}]")
+        for note in found:
+            first = note.text.splitlines()[0]
+            cue = f"  | {note.cue.text.replace(chr(10), ' / ')[:30]}" if note.cue else ""
+            print(f"  {note.source[:18]:18} #{note.index:>3}  {first[:58]}{cue}")
+
+    if args.eval_json:
+        import json as _json
+        args.eval_json.write_text(
+            "\n".join(_json.dumps(n.to_dict(), ensure_ascii=False) for n in notes),
+            encoding="utf-8")
+        print(f"\n첨삭을 남겼습니다: {args.eval_json}")
+    return 0
+
+
 def _evaluate_mode(args, ap) -> int:
     """우리 자막 vs 정답 자막. **고칠 값을 읽기 위한 자리다.**"""
     from .evaluate import compare, report, save
@@ -516,6 +555,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--review-srt", action="store_true",
                     help="지적을 자막 파일로도 낸다(<원본>.review.srt). SE 번역 모드로 "
                          "원본 옆에 띄워 영상을 보며 확인할 수 있다")
+    ap.add_argument("--bookmarks", type=Path,
+                    help="SubtitleEdit 북마크(강사 첨삭)를 모아 갈래별로 낸다. "
+                         "폴더를 주면 그 안의 것을 모두 읽는다")
     ap.add_argument("--against", type=Path,
                     help="정답 자막과 대조한다. 인점·아웃점이 어느 방향으로 얼마나 "
                          "어긋나는지 재서, 감이 아니라 값으로 고칠 수 있게 한다")
@@ -568,6 +610,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.generate:
         return _generate_mode(args, ap)
+
+    if args.bookmarks:
+        return _bookmarks_mode(args, ap)
 
     if args.against:
         return _evaluate_mode(args, ap)
