@@ -226,10 +226,27 @@ def _generate_mode(args, ap) -> int:
     print(f"프로파일: {profile.get('platform')} {profile.get('language')} "
           f"{profile.get('kind')}")
 
+    translator = glossary = None
+    if args.translate:
+        from .translate import Glossary, TranslatorUnavailable, make_translator
+        try:
+            translator = make_translator(args.translate_model or "exaone3.5:7.8b")
+        except TranslatorUnavailable as exc:
+            print(f"[오류] {exc}")
+            return 2
+        glossary = Glossary.from_profile(profile)
+        if args.glossary:
+            glossary.merge_file(args.glossary)
+            print(f"표기 통일표 {len(glossary.terms)}개를 적용합니다")
+
+    out = args.out or args.video.with_suffix(".draft.srt")
     try:
         draft = generate(args.video, profile, script=args.script,
                          language=args.whisper_lang, model=args.whisper_model,
-                         fps=None, use_gpu=not args.cpu, progress=print)
+                         fps=None, use_gpu=not args.cpu, translator=translator,
+                         glossary=glossary,
+                         keep_source=out.with_suffix(".source.srt") if translator else None,
+                         progress=print)
     except MediaToolUnavailable as exc:
         print(f"[오류] {exc}")
         return 2
@@ -238,7 +255,6 @@ def _generate_mode(args, ap) -> int:
         print("말소리를 찾지 못했습니다.")
         return 1
 
-    out = args.out or args.video.with_suffix(".draft.srt")
     write_srt(draft.events, out)
     print(f"\n자막 초안을 저장했습니다: {out}  (자막 {len(draft.events)}개)")
 
@@ -307,6 +323,15 @@ def main(argv: list[str] | None = None) -> int:
                      help="말소리 언어(ko, en, auto…). 아는 값을 주면 정확해진다")
     gen.add_argument("--cpu", action="store_true",
                      help="GPU를 쓰지 않는다(느리다). 기본은 GPU")
+    gen.add_argument("--translate", action="store_true",
+                     help="원어를 한국어 초벌로 옮긴다. 모델은 이 컴퓨터에서 돈다"
+                          "(원고가 밖으로 나가지 않는다)")
+    gen.add_argument("--translate-model",
+                     help="번역에 쓸 로컬 모델(기본: exaone3.5:7.8b). "
+                          "`ollama list`에 있는 이름")
+    gen.add_argument("--glossary", type=Path,
+                     help="표기 통일표. `원어=한국어` 한 줄에 하나. "
+                          "발주처가 주는 표를 그대로 쓴다")
     args = ap.parse_args(argv)
 
     if args.generate:

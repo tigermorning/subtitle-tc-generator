@@ -124,11 +124,15 @@ def resplit(event: Event, max_chars_per_cue: float,
 
 
 def resplit_all(events: list[Event], profile: dict,
-                speech: list[tuple[int, int]] | None = None) -> list[Event]:
+                speech: list[tuple[int, int]] | None = None,
+                origins: list[int] | None = None) -> list[Event]:
     """전체를 다시 나누고 번호를 다시 매긴다.
 
     한 자막이 담을 수 있는 글자 수는 **한 줄 한계 × 줄 수**다. 줄바꿈은 이 뒤에
     `korean_break`가 보는 문제이고, 여기서는 자막 단위만 정한다.
+
+    `origins`를 주면 새 자막마다 **원래 번호**를 채워 준다. 번호를 다시 매기면
+    앞 단계에서 표시해 둔 "봐야 할 자리"가 엉뚱한 자막을 가리키기 때문이다.
     """
     limits = profile.get("limits") or {}
     per_line = limits.get("chars_per_line") or 42
@@ -137,7 +141,10 @@ def resplit_all(events: list[Event], profile: dict,
 
     out: list[Event] = []
     for ev in events:
-        out.extend(resplit(ev, per_line * max_lines, weights, speech))
+        pieces = resplit(ev, per_line * max_lines, weights, speech)
+        out.extend(pieces)
+        if origins is not None:
+            origins.extend([ev.index] * len(pieces))
     for i, ev in enumerate(out, 1):
         ev.index = i
     return out

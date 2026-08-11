@@ -998,6 +998,79 @@ ok("깨끗한 줄은 조용히 채운다", "·" in _out)
 ok("자막 수만큼 노트를 낸다", _out.count("-->") == 2)
 
 
+# --- 번역 -----------------------------------------------------------------
+# 모델은 시험에 넣지 않는다(기계마다 다르고 느리다). 모델에 **무엇을 보내고 무엇을
+# 받아 어떻게 되돌리는지**를 잡는다 — 사고는 거기서 났다.
+
+from checker.translate import (  # noqa: E402
+    Glossary, _parse_numbered, _protect, _restore, to_events, translate_events)
+
+body, frame = _protect("<i>She never did learn to knock.</i>")
+ok("이탤릭 태그를 떼고 보낸다", body == "She never did learn to knock.")
+ok("번역문에 태그를 도로 씌운다",
+   _restore("노크도 안 하더라.", frame) == "<i>노크도 안 하더라.</i>")
+
+body, frame = _protect("♪ Hello darkness my old friend ♪")
+ok("음표를 떼고 보낸다", body == "Hello darkness my old friend")
+ok("음표를 띄어쓰기와 함께 되돌린다",
+   _restore("안녕 어둠아 내 오랜 친구여", frame) == "♪ 안녕 어둠아 내 오랜 친구여 ♪")
+
+# 화자명은 떼지 않는다. SDH에서 화자명은 한국어로 옮겨야 할 대상이다.
+body, _ = _protect("[Sarah] You can't be serious.")
+ok("화자명은 모델에게 보낸다", body.startswith("[Sarah]"))
+
+body, frame = _protect("Wait{\\an8} what?")
+ok("대사 가운데 태그는 되돌리지 못한다고 표시한다", frame[2] is True)
+
+got = _parse_numbered("1. 진심이야?\n2. 20분이나 기다렸어\n", [1, 2])
+ok("번호 붙은 답을 읽는다", got == {1: "진심이야?", 2: "20분이나 기다렸어"})
+ok("엉뚱한 번호는 버린다", _parse_numbered("7. 남의 자막\n", [1, 2]) == {})
+ok("이어지는 줄은 앞 번호에 붙인다",
+   _parse_numbered("1. 첫 줄\n둘째 줄\n", [1]) == {1: "첫 줄\n둘째 줄"})
+
+
+class _FakeTranslator:
+    """정해진 답만 내는 가짜. 모자라게 답하는 상황을 일부러 만든다."""
+
+    def __init__(self, replies): self.replies, self.asked = list(replies), []
+
+    def ask(self, system, prompt):
+        self.asked.append(prompt)
+        return self.replies.pop(0) if self.replies else ""
+
+
+_evs = [Event(1, 0, 1000, "Hello."), Event(2, 1000, 2000, "Goodbye.")]
+_fake = _FakeTranslator(["1. 안녕하세요\n2. 안녕히 가세요\n"])
+_cues = translate_events(_evs, _fake, Glossary())
+ok("자막 수만큼 번역이 나온다", len(_cues) == 2)
+ok("타임코드는 원어 것을 그대로 쓴다",
+   [(e.start_ms, e.end_ms) for e in to_events(_cues, _evs)] == [(0, 1000), (1000, 2000)])
+
+# 한 줄이 빠지면 그 줄만 다시 묻는다. 통째로 다시 돌리면 잘 나온 것까지 흔들린다.
+_fake = _FakeTranslator(["1. 안녕하세요\n", "안녕히 가세요"])
+_cues = translate_events(_evs, _fake, Glossary())
+ok("빠진 줄만 다시 묻는다", len(_fake.asked) == 2 and "Goodbye" in _fake.asked[1])
+ok("다시 물은 자리를 표시한다", bool(_cues[1].note))
+
+_fake = _FakeTranslator(["", ""])
+_cues = translate_events(_evs[:1], _fake, Glossary())
+# 빈 자막은 사람이 못 보고 지나친다. 원문이 남아 있으면 눈에 띈다.
+ok("끝내 못 옮기면 원문을 남긴다", _cues[0].text == "Hello.")
+ok("못 옮겼다고 표시한다", "원문" in _cues[0].note)
+
+_gl = Glossary({"Halberd Systems": "핼버드 시스템즈"})
+ok("통일표를 어긴 자리를 찾는다",
+   _gl.check("From Halberd Systems.", "할버드 시스템에서") == ["Halberd Systems → 핼버드 시스템즈"])
+ok("지킨 자리는 조용하다", _gl.check("From Halberd Systems.", "핼버드 시스템즈에서") == [])
+ok("통일표를 프롬프트에 싣는다", "핼버드 시스템즈" in _gl.hint())
+
+_fake = _FakeTranslator(["1. 할버드에서 왔어\n"])
+_cues = translate_events([Event(1, 0, 1000, "From Halberd Systems.")], _fake, _gl)
+# 고치지 않는다 — 문맥에 따라 안 쓰는 것이 맞을 때가 있다.
+ok("통일표 위반은 표시만 한다",
+   _cues[0].text == "할버드에서 왔어" and "고정 표기" in _cues[0].note)
+
+
 # --- 결과 ---------------------------------------------------------------
 
 print(f"통과 {PASSED}건")

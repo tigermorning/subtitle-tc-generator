@@ -52,8 +52,14 @@ def read_script(path: Path) -> list[str]:
 def generate(video: Path, profile: dict, script: Path | None = None,
              language: str = "auto", model: str | None = None,
              fps: float | None = None, use_gpu: bool = True,
-             keep_transcript: Path | None = None, progress=None) -> Draft:
-    """영상에서 자막 초안을 만든다."""
+             keep_transcript: Path | None = None, translator=None,
+             glossary=None, keep_source: Path | None = None,
+             progress=None) -> Draft:
+    """영상에서 자막 초안을 만든다.
+
+    `translator`를 주면 원어를 한국어로 옮긴다. **번역이 먼저, 재분할이 나중이다** —
+    원어 기준으로 끊어 놓으면 한국어가 거기에 갇힌다(사용자 지적).
+    """
     from .transcribe import transcribe   # ffmpeg이 없어도 이 모듈은 import 되게
 
     say = progress or (lambda _m: None)
@@ -82,10 +88,34 @@ def generate(video: Path, profile: dict, script: Path | None = None,
         events = [Event(i, s.start_ms, s.end_ms, s.text)
                   for i, s in enumerate(segments, 1)]
 
+    if translator is not None:
+        from .translate import to_events, translate_events
+        if keep_source:
+            from .writers import write_srt
+            write_srt(events, Path(keep_source))
+            say(f"원어 자막을 남겼습니다: {keep_source}")
+        say(f"한국어로 옮깁니다 — 자막 {len(events)}개")
+        cues = translate_events(events, translator, glossary, progress=say)
+        for cue in cues:
+            if cue.note:
+                notes.append((cue.index, cue.note))
+        events = to_events(cues, events)
+        stats["translated"] = len(cues)
+
     speech = detect_speech(video, duration_ms=media.duration_ms)
-    before = len(events)
-    events = resplit_all(events, profile, speech)
+    before, origins = len(events), []
+    events = resplit_all(events, profile, speech, origins)
     say(f"자막 {before}개를 의미 단위로 다시 나눠 {len(events)}개")
+
+    # 번호가 다시 매겨졌다. 표시해 둔 자리를 새 번호로 옮긴다 — 안 하면 노트가
+    # 엉뚱한 자막을 가리킨다.
+    if notes:
+        moved: dict[int, list[str]] = {}
+        for new_index, old_index in enumerate(origins, 1):
+            for old, note in notes:
+                if old == old_index:
+                    moved.setdefault(new_index, []).append(note)
+        notes = [(i, " / ".join(v)) for i, v in sorted(moved.items())]
 
     result = converge(events, TimingLimits.from_profile(profile, fps=fps))
     say(f"스포팅 {len(result.changes)}곳 조정, 남은 문제 {len(result.unresolved)}건")
