@@ -490,3 +490,85 @@ def _speaker_consistency(events: list[Event], ctx: dict):
                 reported.add((a, b))
 
     return out
+
+
+# --- 실무 자료에서 나온 검사 ---------------------------------------------
+#
+# 작업자가 실제 작업하며 정리한 자료(rules/sources/작업자-자료)에서 왔다.
+# 공식 가이드에 없거나 명시되지 않은 것이 있어 프로파일이 켜야 적용된다.
+
+UNIT_COMPOSED = "㎡㎥㎢㎠㎣㎝㎜㎞㎏㎎㎖㎗㎘℃℉㎈㎉㎐㎑㎒㎓㎧㎨㏄㏊㎀㎁㎂㎃㎄"
+
+
+@check("speaker_effect_no_space")
+def _speaker_effect_gap(ev: Event, ctx: dict):
+    """`][` — 화자명과 효과음 사이에 공백이 없다.
+
+    작업자가 "내 습관"이라고 지목한 자리다. SE에서 다중 바꾸기로 `][`를 찾아
+    잡아내던 것을 검사로 옮겼다.
+    """
+    out = []
+    for i, line in enumerate(ev.lines, 1):
+        if "][" in strip_tags(line) or ")[" in strip_tags(line) or "](" in strip_tags(line):
+            out.append((i, "표시와 표시 사이를 한 칸 띄웁니다"))
+    return out
+
+
+@check("discouraged_silence_expression")
+def _silence_expr(ev: Event, ctx: dict):
+    """`[정적]`·`[조용해진다]` — 어느 OTT를 막론하고 지양한다."""
+    banned = (ctx["profile"].get("sound_effect") or {}).get("discouraged_expressions") or []
+    hits = [b for b in banned if b in ev.text]
+    return [(None, ", ".join(hits))] if hits else []
+
+
+@check("dialogue_double_quote")
+def _dialogue_double_quote(ev: Event, ctx: dict):
+    """말자막의 큰따옴표. 화면 자막에는 규칙에 따라 쓰이므로 확인만 구한다."""
+    out = []
+    for i, line in enumerate(ev.lines, 1):
+        s = strip_tags(line)
+        if '"' in s or "“" in s or "”" in s:
+            out.append((i, "말자막이면 큰따옴표를 쓰지 않습니다"))
+    return out
+
+
+@check("unit_composed_character")
+def _unit_composed(ev: Event, ctx: dict):
+    hits = sorted({c for c in ev.text if c in UNIT_COMPOSED})
+    return [(None, f"{' '.join(hits)} — 조합 문자 대신 풀어 씁니다")] if hits else []
+
+
+@check("ampersand_outside_initialism")
+def _ampersand(ev: Event, ctx: dict):
+    """`&`는 및·겸·쉼표로 바꾼다. 약어 안의 `&`(R&B, B&B)는 규정이 허용한다."""
+    s = strip_tags(ev.text)
+    for m in re.finditer(r"&", s):
+        left, right = s[max(0, m.start() - 1): m.start()], s[m.end(): m.end() + 1]
+        if left.isupper() and right.isupper():
+            continue  # R&B 같은 약어
+        return [(None, "'&'는 및·겸·쉼표로 바꿉니다")]
+    return []
+
+
+@check("middle_initial_period")
+def _middle_initial(ev: Event, ctx: dict):
+    """`John F. Kennedy`의 `F.` — 가운데 이름 뒤 온점은 떼고 쓴다."""
+    m = re.search(r"(?<![A-Za-z])[A-Z]\.(?=\s)", strip_tags(ev.text))
+    return [(None, f"{m.group(0)} — 가운데 이름 뒤 온점을 뗍니다")] if m else []
+
+
+@check("effect_after_dialogue")
+def _effect_after_dialogue(ev: Event, ctx: dict):
+    """대사 뒤에 붙은 효과음. 쿠팡은 이것을 허용하지 않는다."""
+    out = []
+    for i, line in enumerate(ev.lines, 1):
+        s = strip_tags(line).strip()
+        m = re.search(r"\[[^\]]+\]\s*$", s)
+        if not m:
+            continue
+        before = s[: m.start()].strip()
+        # 앞이 화자명뿐이면 대사가 아니다
+        if before and not re.fullmatch(r"[-\s]*[\[(][^\])]*[\])]", before):
+            out.append((i, f"대사 뒤 효과음 {m.group(0)}"))
+    return out

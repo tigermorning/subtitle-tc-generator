@@ -56,11 +56,12 @@ ok("공통 규칙도 이어 붙는다", any(r["id"] == "C01" for r in ko_sdh["ru
 ok("한국어 16자 / 영어 42자",
    ko_tr["limits"]["chars_per_line"] == 16 and en_tr["limits"]["chars_per_line"] == 42)
 
+# 디즈니·쿠팡 한국어 SDH는 실무 자료로 채워졌다. 아직 없는 조합은 여전히 실패해야 한다.
 try:
-    load_profile("disney", "ko", "sdh")
-    ok("미확보 플랫폼은 로드 실패", False, "예외가 나지 않았다")
+    load_profile("disney", "en", "sdh")
+    ok("없는 프로파일은 로드 실패", False, "예외가 나지 않았다")
 except ProfileError:
-    ok("미확보 플랫폼은 로드 실패", True)
+    ok("없는 프로파일은 로드 실패", True)
 
 try:
     _validate({"schema_version": 1, "kind": None}, Path("x.yaml"))
@@ -351,9 +352,9 @@ with _tempfile.TemporaryDirectory() as tmp:
     req3 = dict(req); req3["subtitle"] = {"subRip": ""}
     ok("빈 자막은 오류로", plugin_run(req3)["status"] == "error")
 
-    req4 = dict(req); req4["settings"] = {"platform": "disney", "kind": "sdh"}
+    req4 = dict(req); req4["settings"] = {"platform": "disney", "language": "en", "kind": "sdh"}
     r4 = plugin_run(req4)
-    ok("미확보 플랫폼은 오류로 알린다",
+    ok("없는 프로파일은 오류로 알린다",
        r4["status"] == "error" and "프로파일" in r4["message"], str(r4)[:60])
 
 
@@ -455,6 +456,49 @@ ok("문구의 조사가 맞는다",
 
 r = check_events([ev("- Hello there", index=1)], en_tr)
 ok("영어에는 한국어 줄바꿈 규칙을 적용하지 않는다", "T16" not in ids(r))
+
+
+# --- 실무 자료 기반 검사·프로파일 ---------------------------------------
+
+coupang = load_profile_file(Path("rules/coupang/ko-sdh.yaml"))
+disney = load_profile_file(Path("rules/disney/ko-sdh.yaml"))
+practice = load_profile_file(Path("rules/netflix/ko-sdh-practice.yaml"))
+
+ok("쿠팡 프로파일이 뜬다", coupang["platform"] == "coupang" and coupang["kind"] == "sdh")
+ok("공식 문서가 아님을 밝힌다",
+   coupang["source"]["official"] is False and bool(coupang["source"]["client"]))
+ok("쿠팡은 화자 번호를 에피 내 유지", coupang["speaker_id"]["numbering_reset"] == "episode")
+ok("디즈니는 씬마다 초기화", disney["speaker_id"]["numbering_reset"] == "scene")
+ok("쿠팡은 장면 전환 비적용", coupang["shot_change"]["applied"] is False)
+ok("디즈니는 장면 전환 적용", disney["shot_change"]["applied"] is True)
+ok("실무 판은 공식 값을 물려받는다",
+   practice["limits"]["reading_speed_cps"]["adult"] == 14
+   and practice["limits"]["chars_per_line"] == 16)
+
+r = check_events([ev("아, 저요? [웃음]")], coupang)
+ok("쿠팡은 대사 뒤 효과음을 잡는다", "CP01" in ids(r))
+r = check_events([ev("아, 저요? [웃음]")], practice)
+ok("넷플릭스는 대사 뒤 효과음을 잡지 않는다", "CP01" not in ids(r))
+
+r = check_events([ev("[진수][웃으며] 저요?")], practice)
+ok("표시 사이 공백 없음을 잡는다", "S18" in ids(r))
+r = check_events([ev("[진수] [웃으며] 저요?")], practice)
+ok("띄어 쓰면 조용하다", "S18" not in ids(r))
+
+r = check_events([ev("[정적]")], practice)
+ok("[정적]을 잡는다", "S19" in ids(r))
+r = check_events([ev("넓이는 30㎡야", end=6000)], practice)
+ok("단위 조합 문자를 잡는다", "S20" in ids(r))
+r = check_events([ev("철수 & 영희", end=6000)], practice)
+ok("'&'를 잡는다", "S21" in ids(r))
+r = check_events([ev("R&B 좋아", end=6000)], practice)
+ok("약어 안의 '&'는 넘어간다", "S21" not in ids(r))
+r = check_events([ev("John F. Kennedy", end=6000)], practice)
+ok("가운데 이름 온점을 잡는다", "S22" in ids(r))
+
+r = check_events([ev("[진수] 안녕")], practice)
+ok("정상 자막은 실무 규칙에도 안 걸린다",
+   not {"S18", "S19", "S20", "S21", "S22"} & ids(r), str(ids(r)))
 
 
 # --- 결과 ---------------------------------------------------------------
