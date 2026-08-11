@@ -314,6 +314,49 @@ ok("미구현 목록에서 S13이 빠졌다",
    all("S13" not in u for u in check_events([ev("[진수] 안녕")], ko_sdh)["unimplemented_checks"]))
 
 
+# --- SE 플러그인 어댑터 ---------------------------------------------------
+
+import json as _json  # noqa: E402
+import tempfile as _tempfile  # noqa: E402
+from checker.plugin import run as plugin_run  # noqa: E402
+from checker.parsers import parse_text  # noqa: E402
+
+SAMPLE_SRT = ("1\n00:00:01,000 --> 00:00:04,000\n[진수] 그러니까...\n\n"
+              "2\n00:00:05,000 --> 00:00:08,000\n[영희] 몰라도 돼\n")
+
+ok("문자열에서 바로 읽는다", len(parse_text(SAMPLE_SRT)) == 2)
+
+with _tempfile.TemporaryDirectory() as tmp:
+    req = {"apiVersion": 1, "responseFilePath": str(Path(tmp) / "response.json"),
+           "tempDirectory": tmp, "pluginDataDirectory": tmp,
+           "subtitle": {"format": "SubRip", "subRip": SAMPLE_SRT},
+           "settings": {"kind": "sdh"}}
+    resp = plugin_run(req)
+    ok("정상 응답", resp["status"] == "ok", str(resp)[:80])
+    ok("설정을 돌려준다(SE가 왕복시킨다)", resp["settings"]["kind"] == "sdh")
+    ok("고친 자막을 돌려준다", "subtitle" in resp and "…" in resp["subtitle"]["native"])
+    ok("undo 설명이 있다", bool(resp.get("undoDescription")))
+    ok("전체 리포트를 파일로 남긴다", (Path(tmp) / "last-report.txt").is_file())
+    report = (Path(tmp) / "last-report.txt").read_text(encoding="utf-8")
+    ok("리포트에 조항이 들어간다", "II." in report or "Section I" in report, report[:60])
+
+    # config.json 을 손으로 고칠 수 있어야 한다
+    (Path(tmp) / "config.json").write_text(
+        _json.dumps({"kind": "sdh", "applyFixes": False}), encoding="utf-8")
+    req2 = dict(req); req2["settings"] = None
+    resp2 = plugin_run(req2)
+    ok("config.json을 읽는다", resp2["settings"]["applyFixes"] is False)
+    ok("applyFixes=false면 자막을 건드리지 않는다", "subtitle" not in resp2)
+
+    req3 = dict(req); req3["subtitle"] = {"subRip": ""}
+    ok("빈 자막은 오류로", plugin_run(req3)["status"] == "error")
+
+    req4 = dict(req); req4["settings"] = {"platform": "disney", "kind": "sdh"}
+    r4 = plugin_run(req4)
+    ok("미확보 플랫폼은 오류로 알린다",
+       r4["status"] == "error" and "프로파일" in r4["message"], str(r4)[:60])
+
+
 # --- 결과 ---------------------------------------------------------------
 
 print(f"통과 {PASSED}건")

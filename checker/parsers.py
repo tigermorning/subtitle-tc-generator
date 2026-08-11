@@ -21,7 +21,12 @@ def _to_ms(h: str, m: str, s: str, frac: str) -> int:
 
 
 def parse(path: Path) -> list[Event]:
-    raw = path.read_text(encoding="utf-8-sig", errors="replace").replace("\r\n", "\n")
+    return parse_text(path.read_text(encoding="utf-8-sig", errors="replace"))
+
+
+def parse_text(raw: str) -> list[Event]:
+    """문자열에서 바로 읽는다. SE 플러그인은 파일이 아니라 JSON 안의 자막을 받는다."""
+    raw = raw.replace("\r\n", "\n")
     events: list[Event] = []
     index = 0
 
