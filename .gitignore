@@ -7,3 +7,7 @@ node_modules/
 
 *.fixed.srt
 checker-report.txt
+
+# 아이콘에 끌어다 놓다가 폴더로 떨어진 자막이 커밋되지 않게 한다.
+tools/*.srt
+tools/*.vtt

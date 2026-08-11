@@ -43,12 +43,14 @@ echo   profile: %PLATFORM% %LANG% %KIND% %EXTRA%
 echo   report:  %REPORT%
 echo.
 
+rem Do NOT redirect stdout here. The Korean lane takes a minute or two to load its
+rem morphological analyzer, and a window with no output is indistinguishable from a
+rem hung one. The checker prints progress as it goes and writes the report itself
+rem via --report.
 pushd "%REPO%"
-"%PY%" -m checker %* -p %PLATFORM% -l %LANG% -k %KIND% %KO% %EXTRA% > "%REPORT%" 2>&1
+"%PY%" -m checker %* -p %PLATFORM% -l %LANG% -k %KIND% %KO% %EXTRA% --report "%REPORT%"
 set "RC=%ERRORLEVEL%"
 popd
-
-type "%REPORT%"
 
 echo.
 if "%RC%"=="0" echo   [OK] no violations

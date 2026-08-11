@@ -151,6 +151,8 @@ def main(argv: list[str] | None = None) -> int:
                     help="자동 교정 가능한 것을 고쳐 새 파일로 쓴다(원본은 그대로)")
     ap.add_argument("-o", "--out", type=Path,
                     help="교정 결과 경로(기본: <원본>.fixed.srt). 파일 하나일 때만 쓴다")
+    ap.add_argument("--report", type=Path,
+                    help="리포트를 파일로도 남긴다(화면 출력은 그대로 나온다)")
     args = ap.parse_args(argv)
 
     if args.list:
@@ -182,14 +184,18 @@ def main(argv: list[str] | None = None) -> int:
         if args.lang != "ko":
             print("한국어 교정 레인은 --lang ko 에서만 씁니다.", file=sys.stderr)
             return 2
+        print("한국어 교정기를 올리는 중입니다. 형태소 분석기 적재에 1~2분 걸립니다...",
+              file=sys.stderr, flush=True)
         try:
             backend = load_backend(args.ksc_path)
+            print("한국어 교정기 준비 완료.", file=sys.stderr, flush=True)
         except CorrectorUnavailable as e:
             # 못 돌렸다는 사실을 숨기지 않는다 — 통과로 보이면 안 된다.
             print(f"한국어 교정 레인을 건너뜁니다: {e}", file=sys.stderr)
 
     reports = []
-    for path in files:
+    for n, path in enumerate(files, 1):
+        print(f"[{n}/{len(files)}] {path.name} 검사 중...", file=sys.stderr, flush=True)
         report = _run_one(path, profile, args, backend)
         if report is not None:
             reports.append(report)
@@ -198,17 +204,21 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     if args.json:
-        print(json.dumps(reports if len(reports) > 1 else reports[0],
-                         ensure_ascii=False, indent=2))
+        output = json.dumps(reports if len(reports) > 1 else reports[0],
+                            ensure_ascii=False, indent=2)
     else:
-        for report in reports:
-            print(_format_text(report, Path(report["file"])))
-            if len(reports) > 1:
-                print()
+        blocks = [_format_text(r, Path(r["file"])) for r in reports]
         if len(reports) > 1:
             total = sum(len(r["violations"]) for r in reports)
             clean = sum(1 for r in reports if not r["violations"])
-            print(f"합계: 파일 {len(reports)}개, 위반 {total}건, 위반 없는 파일 {clean}개")
+            blocks.append(f"합계: 파일 {len(reports)}개, 위반 {total}건, "
+                          f"위반 없는 파일 {clean}개")
+        output = "\n\n".join(blocks)
+
+    print(output)
+    if args.report:
+        args.report.write_text(output + "\n", encoding="utf-8")
+        print(f"\n리포트를 저장했습니다: {args.report}")
 
     return 1 if any(r["violations"] for r in reports) else 0
 
