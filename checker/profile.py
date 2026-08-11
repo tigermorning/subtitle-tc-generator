@@ -191,9 +191,9 @@ def user_root() -> Path:
     override = os.environ.get("SUBTITLE_EDITOR_PROFILES")
     if override:
         return Path(override)
-    appdata = os.environ.get("APPDATA")
-    base = Path(appdata) if appdata else Path.home() / ".config"
-    return base / "자막편집기" / "profiles"
+    from .paths import user_data
+
+    return user_data() / "profiles"
 
 
 def _roots() -> list[Path]:

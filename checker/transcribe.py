@@ -38,12 +38,11 @@ def find_model(explicit: str | None = None) -> Path:
         if value and Path(value).is_file():
             return Path(value)
 
-    # 흔히 두는 자리들. **실행 파일 옆을 먼저 본다** — 묶어서 배포하면 사용자가
-    # 모델을 그 자리에 둔다(1.5GB라 배포물에 넣지 않는다).
-    here = Path(__file__).resolve().parent.parent
-    beside_exe = Path(sys.executable).resolve().parent
-    for folder in (beside_exe / "models", beside_exe,
-                   here / ".tmp", here / "models", Path.home() / "whisper-models"):
+    # 흔히 두는 자리들(`paths.model_dirs`). **사용자 자료 자리가 먼저다** — 실행
+    # 파일을 다시 만들면 프로그램 폴더는 지워지지만 그 자리는 남는다.
+    from .paths import model_dirs
+
+    for folder in model_dirs():
         if folder.is_dir():
             found = sorted(folder.glob("ggml-*.bin"))
             if found:

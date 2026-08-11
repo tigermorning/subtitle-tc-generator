@@ -43,13 +43,9 @@ def find_model(explicit: str | None = None) -> Path:
     for value in (explicit, os.environ.get("VAD_MODEL")):
         if value and Path(value).is_file():
             return Path(value)
-    import sys
-    here = Path(__file__).resolve().parent.parent
-    bundled = Path(getattr(sys, "_MEIPASS", "")) if getattr(sys, "_MEIPASS", "") else None
-    beside_exe = Path(sys.executable).resolve().parent
-    for folder in ([bundled / "models"] if bundled else []) + [
-            beside_exe / "models", here / "models", here / ".tmp",
-            Path.home() / "whisper-models"]:
+    from .paths import model_dirs
+
+    for folder in model_dirs():
         candidate = folder / "silero_vad.onnx"
         if candidate.is_file():
             return candidate
