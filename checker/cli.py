@@ -342,6 +342,40 @@ def _run_one(path: Path, profile: dict, args, backend) -> dict | None:
     return report
 
 
+def _evaluate_mode(args, ap) -> int:
+    """우리 자막 vs 정답 자막. **고칠 값을 읽기 위한 자리다.**"""
+    from .evaluate import compare, report, save
+
+    files = collect_files(args.targets)
+    if len(files) != 1:
+        ap.error("--against는 우리 자막 파일 하나와 함께 씁니다")
+    if not args.against.is_file():
+        ap.error(f"정답 자막을 찾지 못했습니다: {args.against}")
+
+    ours, truth = parse(files[0]), parse(args.against)
+    if not ours or not truth:
+        print("자막을 읽지 못했습니다.", file=sys.stderr)
+        return 1
+
+    fps = args.fps
+    if args.video and args.video.is_file():
+        from .media import MediaToolUnavailable, probe
+        try:
+            fps = probe(args.video).fps or fps
+        except MediaToolUnavailable:
+            pass
+
+    comparison = compare(ours, truth)
+    print(f"우리 {files[0].name}  ↔  정답 {args.against.name}   ({fps:.3f}fps)")
+    print()
+    print(report(comparison, fps))
+
+    if args.eval_json:
+        save(comparison, args.eval_json, fps, note=f"{files[0].name} vs {args.against.name}")
+        print(f"\n대조 결과를 남겼습니다: {args.eval_json}")
+    return 0
+
+
 def _generate_mode(args, ap) -> int:
     """영상 -> 자막 초안. 검사 경로와 섞지 않는다 — 입력도 출력도 다르다."""
     from .generate import generate, notes_srt
@@ -482,6 +516,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--review-srt", action="store_true",
                     help="지적을 자막 파일로도 낸다(<원본>.review.srt). SE 번역 모드로 "
                          "원본 옆에 띄워 영상을 보며 확인할 수 있다")
+    ap.add_argument("--against", type=Path,
+                    help="정답 자막과 대조한다. 인점·아웃점이 어느 방향으로 얼마나 "
+                         "어긋나는지 재서, 감이 아니라 값으로 고칠 수 있게 한다")
+    ap.add_argument("--eval-json", type=Path,
+                    help="대조 결과를 JSON으로 남긴다(정답 파일이 쌓이면 학습 자료가 된다)")
     job = ap.add_argument_group(
         "작업 기준", "작업마다 달라지는 것들. **작업 시작 전에 정한다** — "
                   "정하지 않으면 위치 검사는 하지 않는다(추측해서 옮기지 않는다)")
@@ -529,6 +568,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.generate:
         return _generate_mode(args, ap)
+
+    if args.against:
+        return _evaluate_mode(args, ap)
 
     if args.list:
         for prof in available_profiles():

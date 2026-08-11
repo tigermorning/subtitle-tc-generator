@@ -1329,6 +1329,37 @@ else:
        "style" not in _corrector_options(None, load_profile("disney", "ko", "sdh")))
 
 
+# --- 정답과 대조 -----------------------------------------------------------
+# "타임코드가 이상하다"만으로는 무엇을 얼마나 바꿀지 모른다. 방향과 크기를 재야
+# 감이 아니라 값으로 고친다.
+
+from checker.evaluate import compare, report, summarize  # noqa: E402
+
+_truth = [Event(1, 1000, 3000, "안녕하세요"), Event(2, 4000, 6500, "날씨가 좋네요"),
+          Event(3, 8000, 10000, "그러게요")]
+_ours = [Event(1, 1150, 3120, "안녕하세요"), Event(2, 4160, 6600, "날씨가 좋네요"),
+         Event(3, 11000, 12000, "없는 자막")]
+
+_cmp = compare(_ours, _truth)
+_stats = summarize(_cmp)
+ok("짝지은 수를 센다", _stats["counts"]["matched"] == 2)
+ok("정답에만 있는 것을 센다", _stats["counts"]["missing"] == 1)
+ok("우리에게만 있는 것을 센다", _stats["counts"]["extra"] == 1)
+# 양수 = 늦게 시작했다. 방향이 뒤집히면 고칠 값의 부호가 뒤집힌다.
+ok("인점이 얼마나 늦은지 잰다", _stats["start_ms"]["median"] == 155)
+ok("프레임으로도 환산한다", _stats["start_frames"] == 3.7)
+# 흩어짐이 작으면 상수로 고칠 수 있고, 크면 방법이 틀린 것이다.
+ok("흩어진 정도를 잰다", _stats["start_ms"]["spread"] == 5)
+
+_no_match = compare([Event(1, 60000, 61000, "전혀 다른 말")], _truth)
+ok("짝이 없으면 짝짓지 않는다", summarize(_no_match)["counts"]["matched"] == 0)
+ok("그래도 개수는 보고한다", summarize(_no_match)["counts"]["missing"] == 3)
+
+_text = report(_cmp)
+ok("어긋난 자막을 보여 준다", "가장 많이 어긋난" in _text)
+ok("빠뜨린 자막을 보여 준다", "그러게요" in _text)
+
+
 # --- 결과 ---------------------------------------------------------------
 
 print(f"통과 {PASSED}건")
