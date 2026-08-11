@@ -424,6 +424,39 @@ r = check_events([ev("한 둘", end=10000)], agency2)
 ok("느리면 조용하다", "A05" not in ids(r))
 
 
+# --- 한국어 줄바꿈 ----------------------------------------------------------
+
+from checker.korean_break import check_line_break, check_top_heavy  # noqa: E402
+
+W = {"cjk": 1.0, "other": 0.5}
+
+ok("의존명사 분리를 잡는다",
+   any("의존명사" in p for p in check_line_break(["내가 할 수 있는", "것 같아"], W)))
+ok("보조 용언 분리를 잡는다",
+   any("보조 용언" in p for p in check_line_break(["내가 할 수", "있는 일이야"], W)))
+ok("관형사 분리를 잡는다",
+   any("관형사" in p for p in check_line_break(["그때 우리가 봤던 그", "영화 기억나"], W)))
+ok("관형형 분리를 잡는다",
+   any("갈렸을 수" in p for p in check_line_break(["목격된", "용의 차량이 있습니다"], W)))
+
+# 실사용에서 났던 오탐들 — 다시 나면 안 된다
+ok("인명 '척'을 의존명사로 보지 않는다", not check_line_break(["형사 두 명", "척 파머 형사입니다"], W))
+ok("조사 '를' 뒤는 끊어도 된다", not check_line_break(["도주 중인 운전자를", "추적 중입니다"], W))
+ok("조사 '는'을 관형형으로 보지 않는다", not check_line_break(["그 차는", "흰색이었어요"], W))
+ok("명사 어미 '인'을 관형형으로 보지 않는다", not check_line_break(["우리가 찾던 범인", "맞습니다"], W))
+ok("2인 화자 자막은 문법 단위로 보지 않는다",
+   not check_line_break(["- 어디 갔어", "- 몰라도 돼"], W))
+ok("한 줄 자막은 대상이 아니다", not check_line_break(["한 줄뿐이야"], W))
+
+ok("역피라미드는 따로 잰다", check_top_heavy(["아주 긴 윗줄입니다 정말로", "짧아"], W))
+ok("아래가 길면 조용하다", not check_top_heavy(["짧게", "조금 더 긴 아랫줄이야"], W))
+ok("문구의 조사가 맞는다",
+   any("'목격된'으로" in p for p in check_line_break(["목격된", "용의 차량이 있습니다"], W)))
+
+r = check_events([ev("- Hello there", index=1)], en_tr)
+ok("영어에는 한국어 줄바꿈 규칙을 적용하지 않는다", "T16" not in ids(r))
+
+
 # --- 결과 ---------------------------------------------------------------
 
 print(f"통과 {PASSED}건")

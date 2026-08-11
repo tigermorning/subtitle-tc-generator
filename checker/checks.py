@@ -76,6 +76,27 @@ def _cps(ev: Event, ctx: dict):
     return []
 
 
+@check("line_break_position")
+def _line_break(ev: Event, ctx: dict):
+    """한국어 줄바꿈 자리. 언어가 한국어일 때만 본다 — 판정 근거가 한국어 문법이다."""
+    from .korean_break import check_line_break
+
+    if (ctx["profile"].get("language") or "") != "ko":
+        return []
+    weights = (ctx["limits"] or {}).get("char_weights")
+    return [(2, problem) for problem in check_line_break(ev.lines, weights)]
+
+
+@check("line_break_top_heavy")
+def _top_heavy(ev: Event, ctx: dict):
+    from .korean_break import check_top_heavy
+
+    if (ctx["profile"].get("language") or "") != "ko":
+        return []
+    weights = (ctx["limits"] or {}).get("char_weights")
+    return [(2, problem) for problem in check_top_heavy(ev.lines, weights)]
+
+
 @check("optimal_cps_exceeded")
 def _optimal_cps(ev: Event, ctx: dict):
     """권장 읽기 속도. 상한(`reading_speed_cps`)과 달리 넘어도 규정 위반은 아니다.
