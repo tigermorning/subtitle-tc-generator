@@ -4,3 +4,8 @@
 *.jpg binary
 *.zip binary
 *.pdf binary
+
+# .bat은 CRLF여야 한다. LF면 cmd가 줄을 잘못 읽는 경우가 있다.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
