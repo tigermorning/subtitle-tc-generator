@@ -14,8 +14,12 @@ from .runtime import add_engine_to_path, prepare_mpv
 
 
 def main() -> int:
+    from .log import install_excepthook, write
+    install_excepthook()
+
     add_engine_to_path()
-    prepare_mpv()          # libmpv가 없어도 창은 뜬다. 영상만 안 나온다.
+    prepare_mpv()
+    write("엔진·재생기 준비 완료")          # libmpv가 없어도 창은 뜬다. 영상만 안 나온다.
 
     # 묶인 프로그램은 화면 없이 확인할 길이 없다. 진단 결과를 파일로 남기고 끝낸다.
     if "--selftest" in sys.argv:

@@ -13,6 +13,8 @@ from pathlib import Path
 
 from PySide6.QtCore import QObject, QThread, Signal
 
+from .log import write as log
+
 
 class Job(QObject):
     """일 하나. `run()`을 다른 실에서 부른다."""
@@ -21,13 +23,23 @@ class Job(QObject):
     failed = Signal(str)
     finished = Signal(object)
 
+    def say(self, text: str) -> None:
+        """진행 상황. 화면과 로그에 함께 남긴다."""
+        log(text)
+        self.message.emit(text)
+
     def run(self) -> None:                       # 자식이 채운다
         raise NotImplementedError
 
     def _guarded(self, work) -> None:
+        log(f"{type(self).__name__} 시작")
         try:
-            self.finished.emit(work())
+            result = work()
+            log(f"{type(self).__name__} 끝")
+            self.finished.emit(result)
         except Exception as exc:
+            import traceback
+            log(f"{type(self).__name__} 실패: {traceback.format_exc()}")
             # **조용히 죽지 않는다.** 왜 멈췄는지 화면에 남는다.
             self.failed.emit(f"{type(exc).__name__}: {exc}")
 
@@ -51,7 +63,7 @@ class GenerateJob(Job):
             draft = generate(self.video, self.profile, script=self.script,
                              language=self.language, translator=translator,
                              speech_method=self.speech,
-                             progress=self.message.emit)
+                             progress=self.say)
             return draft
         self._guarded(work)
 
@@ -74,13 +86,13 @@ class CheckJob(Job):
             events = [Event(e.index, e.start_ms, e.end_ms, e.text) for e in self.events]
             if self.korean and self.corrector_path:
                 from checker.korean import load_backend, run_korean_pass
-                self.message.emit("한국어 교정기를 부릅니다...")
+                self.say("한국어 교정기를 부릅니다...")
                 backend = load_backend(self.corrector_path)
                 events, _ = run_korean_pass(events, backend, profile=self.profile)
             if self.fix:
-                self.message.emit("규정 자동 교정 중...")
+                self.say("규정 자동 교정 중...")
                 events, applied, _ = apply_fixes(events, self.profile, self.job_rules)
-            self.message.emit("검사 중...")
+            self.say("검사 중...")
             report = check_events([e.__dict__ for e in events], self.profile,
                                   job_rules=self.job_rules)
             return events, report["violations"]
@@ -104,11 +116,11 @@ class TranslateJob(Job):
             glossary = Glossary.from_profile(self.profile)
             if self.knp:
                 added = glossary.merge_knp(self.knp)
-                self.message.emit(f"KNP에서 용어 {added}개")
+                self.say(f"KNP에서 용어 {added}개")
 
             source = [Event(e.index, e.start_ms, e.end_ms, e.text) for e in self.events]
             cues = translate_events(source, translator, glossary,
-                                    progress=self.message.emit)
+                                    progress=self.say)
             events = to_events(cues, source)
 
             if self.passes > 1:
@@ -117,7 +129,7 @@ class TranslateJob(Job):
                 for stage in ("2차", "3차")[:self.passes - 1]:
                     events, _ = revise(events, translator, source=original,
                                        glossary=glossary, stage=stage,
-                                       progress=self.message.emit)
+                                       progress=self.say)
             return events
         self._guarded(work)
 
@@ -136,7 +148,7 @@ class TermsJob(Job):
             from checker.terms import extract, research, to_tsv
 
             terms = extract([e.text for e in self.events])
-            self.message.emit(f"용어 후보 {len(terms)}개")
+            self.say(f"용어 후보 {len(terms)}개")
 
             lookup = None
             if self.corrector_path:
@@ -144,7 +156,7 @@ class TermsJob(Job):
                     from checker.cli import _loanword_lookup
                     lookup = _loanword_lookup(Path(self.corrector_path))
                 except Exception as exc:
-                    self.message.emit(f"규범 용례 조회를 건너뜁니다: {exc}")
+                    self.say(f"규범 용례 조회를 건너뜁니다: {exc}")
 
             glossary = {}
             if self.knp:
@@ -152,15 +164,15 @@ class TermsJob(Job):
                 glossary = read_terms(self.knp)
 
             research(terms, lookup=lookup, glossary=glossary, web=self.web,
-                     progress=self.message.emit)
+                     progress=self.say)
 
             if self.explain:
                 try:
                     from checker.terms import explain
                     from checker.translate import make_translator
-                    explain(terms, make_translator(), progress=self.message.emit)
+                    explain(terms, make_translator(), progress=self.say)
                 except Exception as exc:
-                    self.message.emit(f"용어 설명을 건너뜁니다: {exc}")
+                    self.say(f"용어 설명을 건너뜁니다: {exc}")
 
             self.out.write_text(to_tsv(terms), encoding="utf-8-sig")
             return terms, self.out

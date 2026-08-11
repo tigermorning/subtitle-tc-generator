@@ -24,6 +24,9 @@ def collect() -> list[dict]:
     """검사 결과 목록. 화면과 파일 양쪽에서 같은 것을 쓴다."""
     out: list[dict] = []
 
+    from .log import log_path
+    out.append(_line("기록(log)", True, str(log_path())))
+
     # --- 엔진 ---------------------------------------------------------
     try:
         from checker.profile import RULES_ROOT, available_profiles, user_root

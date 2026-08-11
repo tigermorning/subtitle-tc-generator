@@ -1612,7 +1612,16 @@ else:
        _app_model.data(_app_model.index(0, 1)) == "00:00:01,000")
     ok("길이를 초로 보여 준다", _app_model.data(_app_model.index(0, 3)) == "2.00")
     # 두 줄짜리 자막을 한 줄로 보면 줄바꿈이 맞는지 알 수 없다.
-    ok("줄바꿈을 눈에 보이게 둔다", "⏎" in _app_model.data(_app_model.index(1, 4)))
+    ok("줄바꿈을 눈에 보이게 둔다", "⏎" in _app_model.data(_app_model.index(1, 5)))
+
+    # **자막은 두 벌이다** — 원어와 번역을 나란히 봐야 번역을 검토할 수 있다.
+    _src = _app_model.remember_sources()
+    _app_model.replace([Event(1, 1000, 3000, "번역본"), Event(2, 5000, 7000, "둘째")], _src)
+    ok("원어 칸에 번역 전 글자가 남는다", _app_model.data(_app_model.index(0, 4)) == "첫 줄")
+    ok("자막 칸에는 번역이 온다", _app_model.data(_app_model.index(0, 5)) == "번역본")
+    # 검사·교정을 돌려도 원어는 남아야 한다.
+    _app_model.replace([Event(1, 1000, 3000, "교정본"), Event(2, 5000, 7000, "둘째")])
+    ok("원어를 주지 않으면 지우지 않는다", _app_model.data(_app_model.index(0, 4)) == "첫 줄")
     ok("그 시각의 자막을 찾는다", _app_model.row_for_time(2000) == 0)
     ok("아무것도 없는 시각은 -1", _app_model.row_for_time(4000) == -1)
 

@@ -31,6 +31,8 @@ class Draft:
     events: list[Event]
     notes: list[tuple[int, str]] = field(default_factory=list)  # (자막 번호, 봐야 할 이유)
     stats: dict = field(default_factory=dict)
+    # 자막 번호 -> 원어. 번역했다면 번역 전 글자를 남긴다. **자막은 두 벌이다.**
+    sources: dict[int, str] = field(default_factory=dict)
 
 
 # 대본의 화자 표시. `SARAH:`, `Mrs. Kim:`, `철수:` 꼴을 잡는다. 대사 안의 콜론
@@ -164,6 +166,7 @@ def generate(video: Path, profile: dict, script: Path | None = None,
             write_srt(events, Path(keep_source))
             say(f"원어 자막을 남겼습니다: {keep_source}")
         say(f"한국어로 옮깁니다 — 자막 {len(events)}개")
+        sources = {e.index: e.text for e in events}
         cues = translate_events(events, translator, glossary, progress=say)
         for cue in cues:
             if cue.note:
@@ -206,7 +209,14 @@ def generate(video: Path, profile: dict, script: Path | None = None,
     stats.update(cues_out=len(result.events), timing_changes=len(result.changes),
                  timing_unresolved=len(result.unresolved))
 
-    return Draft(result.events, notes, stats)
+    # 재분할로 번호가 바뀌었으면 원어도 새 번호로 옮긴다.
+    moved_sources: dict[int, str] = {}
+    if translator is not None:
+        for new_index, old_index in enumerate(origins, 1):
+            if old_index in sources:
+                moved_sources[new_index] = sources[old_index]
+
+    return Draft(result.events, notes, stats, moved_sources)
 
 
 def _to_events(cues: list[AlignedCue], notes: list[tuple[int, str]]) -> list[Event]:

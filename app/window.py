@@ -128,6 +128,7 @@ class MainWindow(QMainWindow):
         self.table.setColumnWidth(1, 110)
         self.table.setColumnWidth(2, 110)
         self.table.setColumnWidth(3, 60)
+        self.table.setColumnWidth(4, 240)      # 원어
         self.table.horizontalHeader().setStretchLastSection(True)
 
         splitter = QSplitter()
@@ -148,7 +149,7 @@ class MainWindow(QMainWindow):
         self.kind_box.addItems(["translation", "sdh"])
         self.language_box = QComboBox()
         self.language_box.addItems(["en", "ko", "auto"])
-        self.translate_check = QCheckBox("번역까지")
+        self.translate_check = QCheckBox("번역")
         self.korean_check = QCheckBox("한국어 교정")
         self.korean_check.setChecked(True)
 
@@ -176,6 +177,8 @@ class MainWindow(QMainWindow):
             bar.addAction(action)
             self.pipeline_buttons.append(action)
 
+    NEW_PROFILE = "＋ 새 기준 만들기..."
+
     def _reload_platforms(self) -> None:
         """쓸 수 있는 작업 기준을 목록에 채운다.
 
@@ -189,10 +192,26 @@ class MainWindow(QMainWindow):
         for profile in available_profiles():
             if profile["language"] == "ko" and profile["platform"] not in platforms:
                 platforms.append(profile["platform"])
+        self.platform_box.blockSignals(True)
         self.platform_box.clear()
         self.platform_box.addItems(platforms or ["netflix"])
+        # **원하는 만큼 기준을 더 만들 수 있어야 한다.** 딸려 온 셋에 갇히면
+        # 다른 회사 일을 못 받는다(사용자 지적 2026-08-12).
+        self.platform_box.addItem(self.NEW_PROFILE)
         if current in platforms:
             self.platform_box.setCurrentText(current)
+        self.platform_box.blockSignals(False)
+        try:
+            self.platform_box.currentTextChanged.disconnect(self._platform_changed)
+        except (RuntimeError, TypeError):
+            pass
+        self.platform_box.currentTextChanged.connect(self._platform_changed)
+
+    def _platform_changed(self, text: str) -> None:
+        if text == self.NEW_PROFILE:
+            # 고른 순간 목록을 되돌려 둔다 — 창을 닫아도 이상한 값이 남지 않는다.
+            self.platform_box.setCurrentIndex(0)
+            self.open_settings()
 
     def open_settings(self) -> None:
         """지금 걸려 있는 기준을 보여 주고, 발주처 기준으로 새로 저장하게 한다."""
@@ -291,7 +310,7 @@ class MainWindow(QMainWindow):
                                self.translate_check.isChecked())
 
         def done(draft):
-            self.model.replace(draft.events)
+            self.model.replace(draft.events, getattr(draft, "sources", None) or None)
             self.waveform.set_events(self.model.events)
             self._preview_timer.start()
             notes = len(draft.notes)
@@ -327,12 +346,14 @@ class MainWindow(QMainWindow):
             return
         from checker.knp import find_for
         knp = find_for(self.subtitle_path) if self.subtitle_path else None
+        # **번역 전 글자가 원어다.** 지금 잡아 두지 않으면 되돌릴 수도, 견줄 수도 없다.
+        sources = self.model.remember_sources()
         job = jobs.TranslateJob(self.model.events, self._profile(),
                                 passes=3 if self.translate_check.isChecked() else 1,
                                 knp=knp)
 
         def done(events):
-            self.model.replace(events)
+            self.model.replace(events, sources)
             self.waveform.set_events(self.model.events)
             self._preview_timer.start()
             self.statusBar().showMessage(
@@ -431,7 +452,18 @@ class MainWindow(QMainWindow):
         if not path:
             return
         write_srt(self.model.events, Path(path))
-        self.statusBar().showMessage(f"저장했습니다: {path}")
+        message = f"저장했습니다: {path}"
+
+        # **원어가 있으면 함께 낸다.** 자막은 두 벌이고, 검수자가 원어를 본다.
+        if self.model.sources:
+            from checker.model import Event
+            source_path = Path(path).with_suffix(".원어.srt")
+            write_srt([Event(e.index, e.start_ms, e.end_ms,
+                             self.model.sources.get(e.index, ""))
+                       for e in self.model.events
+                       if self.model.sources.get(e.index)], source_path)
+            message += f"  /  원어: {source_path.name}"
+        self.statusBar().showMessage(message)
 
     def _load_peaks(self, video: str) -> None:
         self._peak_thread = QThread(self)
