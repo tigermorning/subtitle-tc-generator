@@ -1,6 +1,7 @@
 @echo off
-rem netflix ko translation — 검사만
-rem 자막 파일이나 폴더를 이 파일 위로 끌어다 놓으세요.
+rem Netflix Korean subtitles - check only
+rem Drag subtitle files or a folder onto this icon.
+rem ASCII only - see _run.bat for why.
 set "PLATFORM=netflix"
 set "LANG=ko"
 set "KIND=translation"
