@@ -40,7 +40,29 @@ class Player:
             hr_seek="yes",           # 정확한 탐색. 이게 없으면 키프레임으로 튄다
             hr_seek_framedrop=False,
         )
+
+        # **자막을 영상 화면 안에 그린다.** mpv는 기본으로 위아래 검은 여백까지
+        # 자막 자리로 쓴다(`sub-use-margins=yes`). 그러면 편집기에서 본 위치와 실제
+        # 화면에서 보이는 위치가 달라져 작업자가 위치를 판단할 수 없다.
+        #
+        # 자막 크기는 **영상 크기 기준**으로 잡는다. 창을 키우고 줄여도 화면 대비
+        # 비율이 그대로라, 지금 보는 모양이 최종 화면에서 보이는 모양이다.
+        #
+        # **빌드마다 있는 옵션이 다르다.** `sub-ass-use-margins`는 이 libmpv에 없다.
+        # 없는 옵션 하나 때문에 재생기가 통째로 안 열리면 안 된다.
+        for name, value in (("sub-use-margins", "no"),
+                            ("sub-ass-use-margins", "no"),
+                            ("sub-scale-by-window", "no")):
+            self._set_optional(name, value)
+
         self._duration_ms = 0
+
+    def _set_optional(self, name: str, value: str) -> None:
+        """있으면 넣고 없으면 넘어간다. 빌드마다 가진 옵션이 다르다."""
+        try:
+            self._mpv[name] = value
+        except Exception:
+            pass
 
     # --- 파일 ---------------------------------------------------------
     def open(self, path: str) -> None:
