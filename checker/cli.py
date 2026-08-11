@@ -397,6 +397,18 @@ def _terms_mode(args, ap) -> int:
     research(terms, lookup=lookup, glossary=glossary, web=args.web,
              progress=lambda m: print(f"    {m}", file=sys.stderr))
 
+    if not args.no_explain:
+        from .terms import explain
+        from .translate import TranslatorUnavailable, make_translator
+        try:
+            translator = make_translator(args.translate_model or "exaone3.5:7.8b")
+        except TranslatorUnavailable as exc:
+            print(f"용어 설명을 건너뜁니다: {exc}", file=sys.stderr)
+        else:
+            print("각 용어가 무엇인지 로컬 모델에게 묻습니다(밖으로 나가지 않습니다)")
+            explain(terms, translator,
+                    progress=lambda m: print(f"    {m}", file=sys.stderr))
+
     stats = summarize(terms)
     print(f"근거 있는 표기 {stats['confirmed']}개 / 확인 필요 {stats['unknown']}개")
 
@@ -651,6 +663,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--terms", action="store_true",
                     help="작품에 나오는 고유명사·약어·용어를 뽑아 조사한다. "
                          "KNP 시트에 붙일 수 있는 표로 낸다")
+    ap.add_argument("--no-explain", action="store_true",
+                    help="용어 설명을 붙이지 않는다(기본은 로컬 모델로 한 줄 설명)")
     ap.add_argument("--web", action="store_true",
                     help="규범 용례에 없는 것을 위키백과에서도 찾는다. "
                          "**낱말만 보낸다** — 대사는 나가지 않는다. 기본은 끔")

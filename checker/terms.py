@@ -58,6 +58,7 @@ class Term:
     origin: str = ""             # 근거 — 어디서 온 표기인지
     wrong: list[str] = field(default_factory=list)   # 흔한 오표기
     context: str = ""            # 처음 나온 자리
+    meaning: str = ""            # 이게 무엇인지 한 줄 설명
 
     @property
     def confirmed(self) -> bool:
@@ -188,6 +189,52 @@ def research(terms: list[Term], lookup=None, glossary: dict | None = None,
     return terms
 
 
+EXPLAIN_SYSTEM = (
+    "당신은 영상 번역가를 돕는 조사원입니다. 대본에 나온 용어가 무엇인지 한 줄로 "
+    "설명합니다.\n"
+    "- 한 줄, 40자 이내. 번역가가 오역을 피할 만큼만 짧게.\n"
+    "- 분야를 앞에 답니다: [군사] [의학] [생태] [법률] [역사] [지명] [인명] [기타]\n"
+    "- **모르면 '모름'이라고 씁니다.** 지어내지 마세요. 지어낸 설명이 오역을 만듭니다.\n"
+    "- 번호를 그대로 붙여 같은 개수로 냅니다."
+)
+
+
+def explain(terms: list[Term], translator, batch: int = 10, progress=None) -> list[Term]:
+    """용어가 무엇인지 한 줄로 채운다 — **로컬 모델로**.
+
+    표기(어떻게 적는가)와 설명(무엇인가)은 다른 문제다. 오역은 표기를 몰라서가
+    아니라 **무엇인지 몰라서** 난다("작업자 자료: 작품마다 역사·의학·생태를 공부").
+
+    설명은 밖으로 나가지 않는다 — 로컬 모델이라 대본 문맥을 함께 줘도 된다. 표기와
+    달리 문맥이 있어야 쓸모가 있다.
+
+    **모르면 모른다고 적게 한다.** 지어낸 설명은 없는 것보다 나쁘다. 그리고 설명은
+    표기가 아니므로 `confirmed`를 바꾸지 않는다 — 사람이 판단할 재료일 뿐이다.
+    """
+    say = progress or (lambda _m: None)
+    from .translate import _parse_numbered
+
+    todo = [t for t in terms if not t.meaning]
+    for start in range(0, len(todo), batch):
+        chunk = todo[start:start + batch]
+        say(f"용어 설명 {start + 1}~{start + len(chunk)} / {len(todo)}")
+        lines = []
+        for i, term in enumerate(chunk, 1):
+            context = term.context[:90].replace("\n", " ")
+            lines.append(f"{i}. {term.source} — 나온 자리: {context}")
+        reply = translator.ask(EXPLAIN_SYSTEM,
+                               "다음 용어가 무엇인지 한 줄로 설명하세요.\n\n"
+                               + "\n".join(lines))
+        got = _parse_numbered(reply, list(range(1, len(chunk) + 1)))
+        for i, term in enumerate(chunk, 1):
+            text = (got.get(i) or "").strip()
+            # 모델이 굵게 표시(`**[법률]**`)를 붙인다. 표에 들어가면 눈에 거슬린다.
+            text = re.sub(r"\*+", "", text).strip()
+            if text and "모름" not in text[:6]:
+                term.meaning = text.splitlines()[0][:60]
+    return terms
+
+
 def _best_row(rows: list[dict], source: str) -> dict | None:
     """원어가 정확히 같은 줄을 고른다. 비슷한 것을 집으면 엉뚱한 표기가 들어간다."""
     lowered = source.lower()
@@ -201,7 +248,7 @@ def to_tsv(terms: list[Term]) -> str:
     칸 순서는 작업자 KNP와 맞춘다(Source / Target / Type / Note). 근거를 Note에
     적는 것도 그 관례를 따른 것이다.
     """
-    lines = ["Source Language\tTarget Language\tType\tNote\t횟수\t처음 나온 자리"]
+    lines = ["Source Language\tTarget Language\tType\tNote\t설명\t횟수\t처음 나온 자리"]
     for term in terms:
         note = term.origin
         if term.wrong:
@@ -210,7 +257,8 @@ def to_tsv(terms: list[Term]) -> str:
         if not term.korean:
             note = (note + " / " if note else "") + "확인 필요"
         lines.append("\t".join([
-            term.source, term.korean, term.kind, note, str(term.count),
+            term.source, term.korean, term.kind, note,
+            term.meaning.replace("\t", " "), str(term.count),
             term.context.replace("\t", " ")[:60],
         ]))
     return "\n".join(lines)
