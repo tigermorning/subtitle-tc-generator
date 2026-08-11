@@ -57,6 +57,16 @@ def _format_text(report: dict, path: Path) -> str:
             out.append(f"    {n:>4}건  {rule_id}  {message}")
         out.append("")
     out.append(f"  위반 {len(violations)}건")
+    if report.get("translated_file"):
+        out.append(f"  한국어 초벌: {report['translated_file']}")
+        notes = report.get("translation_notes") or []
+        if notes:
+            out.append(f"    확인이 필요한 자리 {len(notes)}곳: "
+                       + ", ".join(f"#{n['event_index']}" for n in notes[:8]))
+    if report.get("timecodes_locked"):
+        out.append("  타임코드 고정: 받은 타임코드를 그대로 둡니다(나누기·수렴·스포팅 안 함)")
+    if report.get("lock_violation"):
+        out.append(f"  [오류] {report['lock_violation']}")
     if report.get("spotting_applied"):
         out.append(f"  인점·아웃점 {report['spotting_applied']}곳을 말소리에 맞춰 옮겼습니다")
     if report.get("spot_suggestions"):
@@ -143,6 +153,26 @@ def collect_files(targets: list[Path]) -> list[Path]:
     return files
 
 
+def _timecodes_of(events) -> list[tuple[int, int, int]]:
+    return [(e.index, e.start_ms, e.end_ms) for e in events]
+
+
+def _assert_timecodes_unchanged(before, after, path: Path) -> str | None:
+    """정말 안 움직였는지 확인한다.
+
+    "건드리지 않기로 했다"는 약속은 지켰는지 확인할 수 있어야 약속이다. 어딘가에서
+    한 줄만 옮겨도 납품물이 반려된다 — 사람이 눈으로 찾기 전에 기계가 잡는다.
+    """
+    if before == after:
+        return None
+    moved = [b[0] for b, a in zip(before, after) if b != a]
+    if len(after) != len(before):
+        return (f"타임코드를 고정했는데 자막 개수가 {len(before)}개에서 {len(after)}개로 "
+                f"바뀌었습니다. 결과를 쓰지 않았습니다: {path.name}")
+    return (f"타임코드를 고정했는데 {len(moved)}곳이 움직였습니다"
+            f"(#{', #'.join(str(i) for i in moved[:5])}). 결과를 쓰지 않았습니다.")
+
+
 def _run_one(path: Path, profile: dict, args, backend) -> dict | None:
     from .timing import TimingLimits, converge
 
@@ -150,6 +180,9 @@ def _run_one(path: Path, profile: dict, args, backend) -> dict | None:
     if not events:
         print(f"자막 이벤트를 읽지 못했습니다: {path}", file=sys.stderr)
         return None
+
+    locked = getattr(args, "lock_timecodes", False)
+    original_tc = _timecodes_of(events) if locked else None
 
     timing = None
     if getattr(args, "fix_timing", False):
@@ -181,6 +214,8 @@ def _run_one(path: Path, profile: dict, args, backend) -> dict | None:
                           children=args.children, fps=args.fps,
                           busy_spans=busy_spans, job_rules=rules)
     report["file"] = str(path)
+    if locked:
+        report["timecodes_locked"] = True
 
     note = rules.undecided_note()
     if note:
@@ -218,7 +253,7 @@ def _run_one(path: Path, profile: dict, args, backend) -> dict | None:
                 print(f"    장면 전환 {len(shots)}곳", file=sys.stderr)
                 suggestions += suggest_shot_snap(events, shots, args._media.fps)
 
-            if getattr(args, "fix_spotting", False):
+            if getattr(args, "fix_spotting", False) and not args.lock_timecodes:
                 from .timing import apply_spotting
                 moved = apply_spotting(events, suggestions)
                 report["spotting_applied"] = moved
@@ -250,6 +285,38 @@ def _run_one(path: Path, profile: dict, args, backend) -> dict | None:
         report["violations"].extend(v.to_dict() for v in ko_violations)
         report["violations"].sort(key=lambda v: (v["event_index"], v["rule_id"]))
 
+    if getattr(args, "translate", False) and not getattr(args, "generate", False):
+        # **받은 TC에 번역만 얹는 작업.** 실무에서 가장 흔한 형태다
+        # (작업자 자료 190행: "TC 작업이 되어 온 파일에 내가 번역만 한 경우는
+        # TC를 절대 건드리면 안 됨!").
+        #
+        # 이때는 재분할을 하지 않는다. 나누면 경계가 새로 생기기 때문이다. 대신
+        # 주어진 칸 안에 들어가지 않는 한국어는 **검사가 잡아** 사람이 줄인다.
+        from .translate import Glossary, TranslatorUnavailable, make_translator
+        from .translate import to_events, translate_events
+        try:
+            translator = make_translator(args.translate_model or "exaone3.5:7.8b")
+        except TranslatorUnavailable as exc:
+            print(f"[오류] {exc}", file=sys.stderr)
+            return report
+        glossary = Glossary.from_profile(profile)
+        if getattr(args, "glossary", None):
+            glossary.merge_file(args.glossary)
+        print(f"    한국어로 옮깁니다 — 자막 {len(events)}개", file=sys.stderr)
+        cues = translate_events(events, translator, glossary,
+                                progress=lambda m: print(f"    {m}", file=sys.stderr))
+        translated = to_events(cues, events)
+        out_path = args.out or path.with_suffix(".ko.srt")
+        write_srt(translated, out_path)
+        report["translated_file"] = str(out_path)
+        report["translation_notes"] = [
+            {"event_index": c.index, "note": c.note} for c in cues if c.note]
+        # 번역본은 타임코드를 그대로 물려받는다. 그것을 확인해 둔다.
+        problem = _assert_timecodes_unchanged(
+            _timecodes_of(events), _timecodes_of(translated), path)
+        if problem:
+            report["lock_violation"] = problem
+
     if args.fix:
         fixed, applied, unfixable = apply_fixes(events, profile, rules)
         if ko_fixed is not None:
@@ -257,6 +324,15 @@ def _run_one(path: Path, profile: dict, args, backend) -> dict | None:
             # 넣은 문장부호를 규정 교정이 다시 걷어내는 왕복이 생긴다.
             fixed, applied2, _ = apply_fixes(ko_fixed, profile, rules)
             applied = sorted(set(applied) | set(applied2))
+        # 고정하기로 했으면 **쓰기 전에** 확인한다. 쓰고 나서 알면 늦다.
+        if original_tc is not None:
+            problem = _assert_timecodes_unchanged(
+                original_tc, _timecodes_of(fixed), path)
+            if problem:
+                report["lock_violation"] = problem
+                print(f"[오류] {problem}", file=sys.stderr)
+                return report
+
         out_path = args.out or path.with_suffix(".fixed.srt")
         write_srt(fixed, out_path)
         report["fixed_file"] = str(out_path)
@@ -342,6 +418,10 @@ def main(argv: list[str] | None = None) -> int:
                     help="영상 파일. 프레임레이트를 자동으로 읽고 --spot에 쓴다(ffmpeg 필요)")
     ap.add_argument("--spot", action="store_true",
                     help="말소리 구간과 견줘 인점·아웃점을 제안한다(자동 교정 아님)")
+    ap.add_argument("--lock-timecodes", action="store_true",
+                    help="**타임코드를 절대 건드리지 않는다.** TC 작업이 끝난 파일을 "
+                         "받아 번역·교정만 할 때 쓴다. 자막을 나누는 것도 막는다"
+                         "(나누면 경계가 새로 생긴다)")
     ap.add_argument("--fix-spotting", action="store_true",
                     help="제안을 **자동으로 반영한다**. 사람이 잡아 놓은 타임코드도 "
                          "덮어쓰므로, 남이 준 TC 파일에는 쓰지 말 것. --fix와 함께 쓴다")
@@ -416,6 +496,14 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{prof['name']:18} {prof['platform']:8} {prof['language']:3} "
                   f"{prof['kind']:12}{extra}{rev}")
         return 0
+
+    if args.lock_timecodes:
+        # 조용히 무시하면 사람은 고정된 줄 알고, 기계는 옮긴다. 둘 중 더 나쁜 쪽이다.
+        clash = [name for name, on in (("--fix-timing", args.fix_timing),
+                                       ("--fix-spotting", args.fix_spotting)) if on]
+        if clash:
+            ap.error(f"--lock-timecodes와 {', '.join(clash)}은(는) 함께 쓸 수 없습니다. "
+                     f"받은 타임코드를 지킬지 고칠지 먼저 정하세요")
 
     if not args.targets:
         ap.error("자막 파일이나 폴더가 필요합니다 (또는 --list)")

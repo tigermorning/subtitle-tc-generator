@@ -23,9 +23,9 @@ namespace Nikse.SubtitleEdit.PluginLogic
         private readonly Dictionary<string, string> _settings;
 
         private ComboBox _platform, _kind, _marker, _collision, _moveTo;
-        private CheckBox _korean, _fixTiming, _translate;
+        private CheckBox _korean, _fixTiming, _translate, _lockTc;
         private TextBox _script, _video, _log;
-        private Button _check, _fix, _generate, _apply, _close;
+        private Button _check, _fix, _generate, _translateOnly, _apply, _close;
         private Label _status;
         private string _repo;
 
@@ -121,8 +121,12 @@ namespace Nikse.SubtitleEdit.PluginLogic
             _korean = new CheckBox { Text = "한국어 교정기", Checked = Get("korean", "1") == "1", AutoSize = true };
             _fixTiming = new CheckBox { Text = "타임코드 수렴", Checked = Get("fixTiming", "0") == "1", AutoSize = true };
             _translate = new CheckBox { Text = "한국어 초벌 번역(만들기)", Checked = Get("translate", "0") == "1", AutoSize = true };
+            // 작업자 자료 190행: "TC 작업이 되어 온 파일에 내가 번역만 한 경우는
+            // TC를 절대 건드리면 안 됨!" 켜 두면 나누기·수렴·스포팅을 모두 막고,
+            // 결과를 쓰기 전에 정말 안 움직였는지 확인한다.
+            _lockTc = new CheckBox { Text = "타임코드 고정(받은 TC)", Checked = Get("lockTc", "0") == "1", AutoSize = true };
             var checks = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true };
-            checks.Controls.AddRange(new Control[] { _korean, _fixTiming, _translate });
+            checks.Controls.AddRange(new Control[] { _korean, _fixTiming, _translate, _lockTc });
             top.SetColumnSpan(checks, 3);
             top.Controls.Add(new Label { Text = "옵션", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft }, 0, 3);
             top.Controls.Add(checks, 1, 3);
@@ -144,13 +148,15 @@ namespace Nikse.SubtitleEdit.PluginLogic
             _close = new Button { Text = "닫기", Width = 80, DialogResult = DialogResult.Cancel };
             _apply = new Button { Text = "SE에 반영", Width = 110, Enabled = false };
             _generate = new Button { Text = "영상에서 자막 만들기", Width = 160 };
+            _translateOnly = new Button { Text = "받은 TC에 번역만", Width = 130 };
             _fix = new Button { Text = "검사 + 교정", Width = 110 };
             _check = new Button { Text = "검사만", Width = 90 };
-            buttons.Controls.AddRange(new Control[] { _close, _apply, _generate, _fix, _check });
+            buttons.Controls.AddRange(new Control[] { _close, _apply, _generate, _translateOnly, _fix, _check });
 
             _check.Click += (s, e) => Start(false);
             _fix.Click += (s, e) => Start(true);
             _generate.Click += (s, e) => StartGenerate();
+            _translateOnly.Click += (s, e) => StartTranslateOnly();
             _apply.Click += (s, e) => { DialogResult = DialogResult.OK; Close(); };
             CancelButton = _close;
 
@@ -256,6 +262,7 @@ namespace Nikse.SubtitleEdit.PluginLogic
             _settings["marker"] = (string)_marker.SelectedItem;
             _settings["collision"] = (string)_collision.SelectedItem;
             _settings["moveTo"] = (string)_moveTo.SelectedItem;
+            _settings["lockTc"] = _lockTc.Checked ? "1" : "0";
             if (_repo != null)
             {
                 _settings["repo"] = _repo;
@@ -305,8 +312,14 @@ namespace Nikse.SubtitleEdit.PluginLogic
             {
                 args.Append(" --korean");
             }
-            if (_fixTiming.Checked)
+            if (_lockTc.Checked)
             {
+                args.Append(" --lock-timecodes");
+            }
+            else if (_fixTiming.Checked)
+            {
+                // 고정과 수렴은 함께 쓸 수 없다. 고정이 이긴다 — 받은 것을 지키는 쪽이
+                // 되돌릴 수 없는 손해가 작다.
                 args.Append(" --fix-timing");
             }
             args.Append(JobArgs());
@@ -317,6 +330,35 @@ namespace Nikse.SubtitleEdit.PluginLogic
 
             RunAsync(args.ToString(), applyFixes ? output : null,
                      applyFixes ? "검사하고 고치는 중입니다..." : "검사 중입니다...");
+        }
+
+
+        private void StartTranslateOnly()
+        {
+            if (_subtitle.Length == 0)
+            {
+                MessageBox.Show(this, "먼저 타임코드가 잡힌 자막을 여세요.", "자막이 없습니다",
+                                MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+            Remember();
+
+            var work = Runner.TempDir();
+            var input = Path.Combine(work, "input.srt");
+            var output = Path.Combine(work, "translated.srt");
+            File.WriteAllText(input, _subtitle, new UTF8Encoding(false));
+
+            var args = new StringBuilder();
+            args.Append(Runner.Quote(input));
+            args.Append(" -p ").Append(_platform.SelectedItem);
+            args.Append(" -k ").Append(_kind.SelectedItem);
+            // 받은 타임코드를 지키는 것이 이 기능의 전부다. 선택이 아니다.
+            args.Append(" --translate --lock-timecodes -o ").Append(Runner.Quote(output));
+            args.Append(JobArgs());
+
+            Say("");
+            Say("받은 타임코드는 건드리지 않습니다. 칸에 안 들어가는 번역은 검사가 잡습니다.");
+            RunAsync(args.ToString(), output, "번역하는 중입니다...");
         }
 
         private void StartGenerate()

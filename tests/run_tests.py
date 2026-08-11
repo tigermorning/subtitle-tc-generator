@@ -1198,6 +1198,36 @@ ok("자막을 뒤집는 제안은 버린다",
 ok("없는 자막 번호는 조용히 넘긴다", apply_spotting(_evs, [_Spot(99, "start_ms", 0, 1)]) == 0)
 
 
+# --- 타임코드 고정 ---------------------------------------------------------
+# 작업자 자료 190행: "TC 작업이 되어 온 파일에 내가 번역만 한 경우는 TC를 절대
+# 건드리면 안 됨!" 약속은 확인할 수 있어야 약속이다.
+
+from checker.cli import _assert_timecodes_unchanged, _timecodes_of  # noqa: E402
+
+_before = [Event(1, 0, 1000, "가"), Event(2, 2000, 3000, "나")]
+_same = [Event(1, 0, 1000, "다른 글자"), Event(2, 2000, 3000, "나")]
+ok("글자만 바뀐 것은 통과",
+   _assert_timecodes_unchanged(_timecodes_of(_before), _timecodes_of(_same), Path("x.srt")) is None)
+
+_moved = [Event(1, 0, 1200, "가"), Event(2, 2000, 3000, "나")]
+_problem = _assert_timecodes_unchanged(_timecodes_of(_before), _timecodes_of(_moved), Path("x.srt"))
+ok("한 곳이라도 움직이면 잡는다", _problem is not None and "#1" in _problem)
+ok("결과를 쓰지 않는다고 말한다", "쓰지 않았습니다" in _problem)
+
+_split = [Event(1, 0, 500, "가"), Event(2, 500, 1000, "가"), Event(3, 2000, 3000, "나")]
+_problem = _assert_timecodes_unchanged(_timecodes_of(_before), _timecodes_of(_split), Path("x.srt"))
+# 나누면 경계가 새로 생긴다. 그것도 타임코드를 건드린 것이다.
+ok("자막을 나눈 것도 잡는다", _problem is not None and "개수" in _problem)
+
+# 고정과 수정은 함께 쓸 수 없다. 조용히 무시하면 사람은 고정된 줄 알고 기계는 옮긴다.
+import subprocess as _sp  # noqa: E402
+_res = _sp.run([sys.executable, "-m", "checker", "examples/ko-sdh-sample.srt",
+                "--lock-timecodes", "--fix-timing"],
+               capture_output=True, text=True, cwd=str(Path(__file__).resolve().parent.parent))
+ok("--lock-timecodes와 --fix-timing을 함께 쓰면 막는다",
+   _res.returncode != 0 and "함께 쓸 수 없습니다" in _res.stderr)
+
+
 # --- 결과 ---------------------------------------------------------------
 
 print(f"통과 {PASSED}건")
