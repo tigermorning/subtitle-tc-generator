@@ -65,6 +65,14 @@ def _format_text(report: dict, path: Path) -> str:
         if len(report["spot_suggestions"]) > 8:
             out.append(f"    … 외 {len(report['spot_suggestions']) - 8}건")
 
+    if report.get("position_suggestions"):
+        found = report["position_suggestions"]
+        out.append(f"  위치 제안 {len(found)}건 (영상 추정이라 자동 적용 안 함)")
+        for sug in found[:8]:
+            out.append(f"    #{sug['event_index']} {sug['reason']}")
+        if len(found) > 8:
+            out.append(f"    … 외 {len(found) - 8}건")
+
     if report.get("timing_changes") is not None:
         out.append(f"  타임코드 {len(report['timing_changes'])}곳 조정")
         for c in report["timing_changes"][:8]:
@@ -144,9 +152,32 @@ def _run_one(path: Path, profile: dict, args, backend) -> dict | None:
         timing = converge(events, limits)
         events = timing.events
 
+    # 영상이 있으면 화면 아래쪽에 글자가 타 있는 구간을 찾아 위치 규칙에 쓴다.
+    # 한 번의 ffmpeg 통과로 끝나고, 결과는 **제안에만** 쓴다(무늬를 글자로 볼 수 있다).
+    busy_spans = None
+    if getattr(args, "video", None) and getattr(args, "_media", None):
+        from .media import MediaToolUnavailable, detect_bottom_text
+        try:
+            busy_spans = detect_bottom_text(args.video)
+        except MediaToolUnavailable as e:
+            print(f"화면 글자 검출을 건너뜁니다: {e}", file=sys.stderr)
+        else:
+            if busy_spans:
+                print(f"    화면 아래 글자로 보이는 구간 {len(busy_spans)}곳", file=sys.stderr)
+
     report = check_events([e.__dict__ for e in events], profile,
-                          children=args.children, fps=args.fps)
+                          children=args.children, fps=args.fps,
+                          busy_spans=busy_spans)
     report["file"] = str(path)
+
+    # 영상 근거는 자동 교정에 쓰지 않는다. 사람이 볼 수 있게 따로 낸다.
+    if busy_spans:
+        from .position import suggest_positions
+        guesses = [s for s in suggest_positions(events, profile, busy_spans)
+                   if not s.certain]
+        if guesses:
+            report["position_suggestions"] = [
+                {"event_index": s.event_index, "reason": s.reason} for s in guesses]
 
     # 프로파일을 잘못 고르면 지적이 통째로 뒤집힌다. 자막 표기로 유추해 어긋나면 알린다.
     from .detect import mismatch_warning

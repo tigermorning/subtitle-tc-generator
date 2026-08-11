@@ -312,7 +312,8 @@ def excerpt(event: Event, line_no: int | None, limit: int = 60) -> str:
 
 
 def run_checks(events: list[Event], profile: dict, children: bool = False,
-               fps: float | None = None):
+               fps: float | None = None,
+               busy_spans: list[tuple[int, int]] | None = None):
     """프로파일이 지정한 검사를 이벤트마다 돌린다.
 
     반환: (violations, unimplemented_check_names)
@@ -320,7 +321,7 @@ def run_checks(events: list[Event], profile: dict, children: bool = False,
     from .model import Violation
 
     ctx = {"profile": profile, "limits": profile.get("limits") or {},
-           "children": children, "fps": fps}
+           "children": children, "fps": fps, "busy_spans": busy_spans}
 
     limits = ctx["limits"]
     speeds = limits.get("reading_speed_cps") or {}
@@ -431,6 +432,25 @@ def speaker_ids(events: list[Event]) -> list[tuple[str, int, int]]:
 def _base_label(label: str) -> str:
     """뒤에 붙은 번호를 뗀다. `[남자 1]`·`[남자 2]`는 규정이 허용하는 구분이다."""
     return re.sub(r"\s*\d+$", "", label)
+
+
+@doc_check("position_collides_with_forced_narrative")
+def _position(events: list[Event], ctx: dict):
+    """화면자막과 겹치는데 말자막을 옮기지 않았다.
+
+    **SDH·번역 가리지 않는 규칙이다.** 화면에 이미 글자가 있는 자리에 자막을
+    얹으면 둘 다 못 읽는다. 겹치는 구간의 말자막은 상단 중앙으로 올린다.
+
+    반대도 잡는다 — 올려 둔 자막을 되돌리지 않은 자국. 앞 장면에서 올린 채로
+    두면 그다음부터 자막이 계속 화면 위에 뜬다.
+    """
+    from .position import suggest_positions
+
+    found = []
+    for s in suggest_positions(events, ctx.get("profile"), ctx.get("busy_spans")):
+        if s.certain:
+            found.append((s.event_index, None, s.reason))
+    return found
 
 
 @doc_check("gap_too_short")

@@ -104,6 +104,36 @@ def _fix_lyric_caps(text: str, ctx: dict) -> str:
     return "\n".join(out)
 
 
+# --- 문서 단위 교정 -------------------------------------------------------
+#
+# 글자만 봐서는 못 고치는 것들. 자막 위치는 **다른 자막과의 관계**로 정해지므로
+# 한 줄씩 넘겨서는 판단할 수 없다.
+#   fn(events, ctx) -> 고친 개수
+
+DOC_FIXERS: dict[str, callable] = {}
+
+
+def doc_fixer(name: str):
+    def deco(fn):
+        DOC_FIXERS[name] = fn
+        return fn
+
+    return deco
+
+
+@doc_fixer("position_collides_with_forced_narrative")
+def _fix_position(events: list[Event], ctx: dict) -> int:
+    """화면자막과 겹치는 말자막을 상단 중앙으로. 겹칠 것이 없으면 되돌린다.
+
+    영상에서 추정한 근거(`certain=False`)로는 고치지 않는다 — 무늬를 글자로 잘못
+    본 것일 수 있고, 그렇게 올라간 자막은 사람이 원인을 못 찾는다.
+    """
+    from .position import apply_positions, suggest_positions
+
+    suggestions = suggest_positions(events, ctx.get("profile"), ctx.get("busy_spans"))
+    return apply_positions(events, suggestions, only_certain=True)
+
+
 def apply_fixes(events: list[Event], profile: dict) -> tuple[list[Event], list[str], list[str]]:
     """`auto: true` 규칙 중 고칠 수 있는 것을 적용한다.
 
@@ -119,6 +149,8 @@ def apply_fixes(events: list[Event], profile: dict) -> tuple[list[Event], list[s
             continue
         checks = rule["check"]
         for name in checks if isinstance(checks, list) else [checks]:
+            if name in DOC_FIXERS:
+                continue
             if name in FIXERS:
                 if name not in names:
                     names.append(name)
@@ -126,6 +158,19 @@ def apply_fixes(events: list[Event], profile: dict) -> tuple[list[Event], list[s
                 label = f"{rule['id']} ({name})"
                 if label not in unfixable:
                     unfixable.append(label)
+
+    # 문서 단위 교정을 먼저 돌린다. 위치 태그가 붙고 난 뒤에 글자 교정이 와야
+    # 태그를 글자로 착각하지 않는다.
+    staged = [Event(ev.index, ev.start_ms, ev.end_ms, ev.text) for ev in events]
+    for rule in profile.get("rules", []):
+        if not rule.get("auto"):
+            continue
+        checks = rule["check"]
+        for name in checks if isinstance(checks, list) else [checks]:
+            fn = DOC_FIXERS.get(name)
+            if fn is not None and fn(staged, ctx) and name not in applied:
+                applied.append(name)
+    events = staged
 
     fixed = []
     for ev in events:

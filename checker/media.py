@@ -203,6 +203,69 @@ def detect_shot_changes(video: Path, sensitivity: float = 0.2) -> list[int]:
     return sorted(set(times))
 
 
+META_TIME = re.compile(r"pts_time:([\d.]+)")
+META_VALUE = re.compile(r"lavfi\.signalstats\.YAVG=([\d.]+)")
+
+
+def detect_bottom_text(video: Path, sample_fps: float = 2.0,
+                       band: float = 0.25, sensitivity: float = 2.5,
+                       ) -> list[tuple[int, int]]:
+    """화면 **아래쪽에 글자가 타 있는** 것으로 보이는 구간 [(시작ms, 끝ms)].
+
+    글자는 윤곽선이 많다. 화면 아래 4분의 1을 잘라 윤곽선만 남기고 밝기 평균을
+    재면, 글자가 뜬 구간이 평소보다 뚜렷하게 튄다. 한 번의 ffmpeg 통과로 끝난다.
+
+    **글자를 읽지 않는다. 글자인지도 확신하지 않는다.** 벽돌 무늬나 나뭇가지도
+    윤곽선이 많다. 그래서 이 결과는 제안에만 쓰고 자동 교정에는 쓰지 않는다
+    (`position.apply_positions`가 `certain=False`를 건너뛴다).
+
+    기준은 중앙값에서 얼마나 떨어졌는지로 잡는다. 평균과 표준편차를 쓰면 밝은
+    장면 몇 개에 기준이 끌려간다.
+    """
+    out = subprocess.run(
+        [_find("ffmpeg"), "-hide_banner", "-nostats", "-i", str(video),
+         "-vf", (f"fps={sample_fps},scale=320:-2,"
+                 f"crop=iw:ih*{band}:0:ih*{1 - band},"
+                 "edgedetect=low=0.1:high=0.3,signalstats,"
+                 "metadata=print:key=lavfi.signalstats.YAVG"),
+         "-an", "-f", "null", "-"],
+        capture_output=True, text=True, check=False,
+        encoding="utf-8", errors="replace",
+    )
+
+    samples: list[tuple[float, float]] = []
+    when: float | None = None
+    for line in (out.stderr or "").splitlines():
+        found = META_TIME.search(line)
+        if found:
+            when = float(found.group(1))
+            continue
+        found = META_VALUE.search(line)
+        if found and when is not None:
+            samples.append((when, float(found.group(1))))
+            when = None
+    if len(samples) < 4:
+        return []
+
+    values = sorted(v for _t, v in samples)
+    middle = values[len(values) // 2]
+    deviations = sorted(abs(v - middle) for v in values)
+    spread = deviations[len(deviations) // 2] or 1.0
+    threshold = middle + sensitivity * spread
+
+    step_ms = int(1000 / sample_fps)
+    spans: list[tuple[int, int]] = []
+    for time_s, value in samples:
+        if value < threshold:
+            continue
+        start = int(time_s * 1000)
+        if spans and start - spans[-1][1] <= step_ms:
+            spans[-1] = (spans[-1][0], start + step_ms)
+        else:
+            spans.append((start, start + step_ms))
+    return spans
+
+
 VIDEO_SUFFIXES = (".mkv", ".mp4", ".mov", ".avi", ".m4v", ".ts", ".wmv", ".webm")
 
 
