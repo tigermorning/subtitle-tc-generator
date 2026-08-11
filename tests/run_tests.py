@@ -154,6 +154,61 @@ r = check_events([ev("[진수] 어디 갔었어?")], ko_sdh)
 ok("미구현 검사를 숨기지 않는다", len(r["unimplemented_checks"]) > 0)
 
 
+# --- 한국어 교정 레인 -----------------------------------------------------
+
+from checker.korean import (  # noqa: E402
+    split_chunks, extract_dialogue, rebuild, run_korean_pass, CorrectorUnavailable, load_backend,
+)
+from checker.model import Event  # noqa: E402
+
+chunks = split_chunks("[진수] 어디 갔었어?")
+ok("화자 표시는 markup", chunks[0] == ("markup", "[진수]"))
+ok("나머지는 dialogue", chunks[1] == ("dialogue", " 어디 갔었어?"))
+
+chunks = split_chunks("-[영희] 몰라도 돼")
+ok("선행 하이픈도 markup", chunks[0][0] == "markup" and chunks[1] == ("markup", "[영희]"))
+
+chunks = split_chunks("♪ 사랑이 지나간 자리에 ♪")
+ok("음표는 markup", [c[0] for c in chunks] == ["markup", "dialogue", "markup"])
+
+evs = [Event(1, 0, 3000, "[진수] 어디 갔었어?\n♪ 사랑이 ♪")]
+texts, slots = extract_dialogue(evs)
+ok("대사만 뽑는다", texts == [" 어디 갔었어?", " 사랑이 "], str(texts))
+ok("자막 문법은 교정기에 안 간다",
+   all("[" not in t and "♪" not in t for t in texts))
+
+back = rebuild(evs, texts, slots)
+ok("그대로 되돌리면 원문", back[0].text == evs[0].text, back[0].text)
+
+back = rebuild(evs, [" 어디 갔어?", " 사랑이 "], slots)
+ok("교정 결과가 제자리에 들어간다",
+   back[0].text == "[진수] 어디 갔어?\n♪ 사랑이 ♪", back[0].text)
+
+
+def fake_backend(texts, spacing_mode="principle"):
+    """교정기 대신 쓰는 가짜 백엔드. 한 군데를 고치고 플래그 하나를 낸다."""
+    fixed = [t.replace("갔었어", "갔었어요") for t in texts]
+    flags = [{"line_index": 1, "original_text": texts[0],
+              "suggested_fix": "어디 갔니?", "reason": "확인이 필요한 표현입니다"}]
+    return fixed, flags
+
+
+fixed_events, ko_v = run_korean_pass(evs, fake_backend)
+by_id = {v.rule_id for v in ko_v}
+ok("교정 제안은 K01", "K01" in by_id)
+ok("플래그는 K02", "K02" in by_id)
+ok("출처가 corrector로 표시된다", all(v.source == "corrector" for v in ko_v))
+ok("자동 교정도 파일을 바로 바꾸지 않는다", evs[0].text.find("갔었어요") == -1)
+ok("되돌린 결과에는 반영된다", "갔었어요" in fixed_events[0].text)
+ok("자막 문법이 살아 있다", fixed_events[0].text.startswith("[진수]"))
+
+try:
+    load_backend("/존재하지/않는/경로")
+    ok("없는 교정기 경로는 예외", False, "예외가 나지 않았다")
+except CorrectorUnavailable:
+    ok("없는 교정기 경로는 예외", True)
+
+
 # --- 결과 ---------------------------------------------------------------
 
 print(f"통과 {PASSED}건")
@@ -163,3 +218,5 @@ if FAILED:
         print("  -", f)
     sys.exit(1)
 print("전부 통과")
+
+

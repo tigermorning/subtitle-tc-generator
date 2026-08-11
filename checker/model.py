@@ -47,6 +47,10 @@ class Violation:
     detail: str = ""
     auto_fixable: bool = False
     line_no: int | None = None
+    # 근거의 출처. 사용자가 신뢰도를 스스로 판단할 수 있어야 한다.
+    #   rule      — 플랫폼 규정 프로파일
+    #   corrector — 한국어 교정기(사전·어문 규범)
+    source: str = "rule"
 
     def to_dict(self) -> dict:
         return asdict(self)

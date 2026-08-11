@@ -86,3 +86,24 @@ python -m checker --list
 언어로 만들든 이 계약만 지키면 옮겨진다.
 
 테스트: `python3 tests/run_tests.py`
+
+### 한국어 교정 레인
+
+`--korean`을 붙이면 [korean-subtitle-corrector](https://github.com/tigermorning/korean-subtitle-corrector)의
+맞춤법·띄어쓰기 교정을 함께 돌린다.
+
+```bash
+python -m checker file.srt -l ko -k sdh --korean --ksc-path /path/to/korean-subtitle-corrector
+# 또는 KSC_PATH 환경변수
+```
+
+**교정기에는 대사만 넘어간다.** 화자 표시 `[진수]`, 효과음 `[문 닫는 소리]`, 음표 `♪`,
+2인 화자 하이픈, 서식 태그는 자막 문법이지 한국어가 아니다. `checker/korean.py`가
+이것들을 벗겨 내고 대사 조각만 넘긴 뒤 결과를 제자리에 되돌린다 — 자막 지식은
+편집기가, 한국어 지식은 교정기가 갖는다는 분리 원칙이 코드로 나타나는 자리다.
+
+교정기 결과는 `source: corrector`로 표시되고 `K01`(교정 제안)·`K02`(확인 필요)로
+분류된다. 자동 교정도 파일을 바로 바꾸지 않고 제안으로만 보고한다.
+
+교정기는 kiwipiepy(약 310MB)와 국립국어원 API 키가 필요하다. 교정기 저장소의
+가상환경 파이썬으로 이 검사기를 실행하는 것이 가장 간단하다.
