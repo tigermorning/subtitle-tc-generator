@@ -1685,6 +1685,48 @@ with _tf3.TemporaryDirectory() as _d:
     _os3.environ.pop("SUBTITLE_EDITOR_PROFILES", None)
 
 
+# --- 자막 편집 조작 --------------------------------------------------------
+# 작업자가 SE에서 쓰던 조작을 그대로 옮겼다. 화면과 떼어 놓아 여기서 시험한다.
+
+try:
+    from app.edits import (merge_with_next, remove_line_breaks, set_in_point,  # noqa: E402
+                           set_out_point, split_at, toggle_dash)
+except ImportError:
+    pass
+else:
+    _cues = [Event(1, 0, 4000, "첫 자막입니다"), Event(2, 5000, 8000, "둘째 자막")]
+    _split, _new = split_at([Event(e.index, e.start_ms, e.end_ms, e.text) for e in _cues],
+                            1, 2000)
+    ok("재생 위치에서 나눈다", len(_split) == 3)
+    ok("시간이 이어진다", _split[0].end_ms == 2000 and _split[1].start_ms == 2000)
+    ok("번호를 다시 매긴다", [e.index for e in _split] == [1, 2, 3])
+    # 가장자리에서는 나누지 않는다 — 길이 0짜리가 생긴다.
+    ok("가장자리에서는 나누지 않는다",
+       len(split_at([Event(1, 0, 4000, "가나다")], 1, 10)[0]) == 1)
+
+    _merged, _ = merge_with_next(
+        [Event(1, 0, 2000, "가"), Event(2, 2000, 4000, "나")], 1)
+    ok("다음 자막과 합친다", len(_merged) == 1 and _merged[0].end_ms == 4000)
+    ok("독백은 줄만 바꾼다", _merged[0].text == "가\n나")
+
+    _dialogue, _ = merge_with_next(
+        [Event(1, 0, 2000, "가"), Event(2, 2000, 4000, "나")], 1, dialogue=True)
+    ok("대화는 하이픈을 넣는다", _dialogue[0].text == "- 가\n- 나")
+
+    ok("하이픈을 뺀다", toggle_dash(Event(1, 0, 1, "- 가\n- 나")) == "가\n나")
+    ok("없으면 넣는다", toggle_dash(Event(1, 0, 1, "가\n나")) == "- 가\n- 나")
+    ok("줄바꿈을 없앤다", remove_line_breaks(Event(1, 0, 1, "가\n나")) == "가 나")
+    # 위치 태그는 편집을 거쳐도 살아남아야 한다.
+    ok("위치 태그를 지키며 줄바꿈만 없앤다",
+       remove_line_breaks(Event(1, 0, 1, "{\\an8}가\n나")) == "{\\an8}가 나")
+
+    _points = [Event(1, 1000, 3000, "가"), Event(2, 4000, 6000, "나")]
+    ok("인점을 지금 위치로", set_in_point(_points, 1, 1500) and _points[0].start_ms == 1500)
+    # 이웃을 침범하면 하지 않는다. 겹친 자막은 둘 다 못 읽는다.
+    ok("다음 자막을 침범하면 안 한다", not set_out_point(_points, 1, 5000))
+    ok("아웃점을 지금 위치로", set_out_point(_points, 1, 3500) and _points[0].end_ms == 3500)
+
+
 # --- 결과 ---------------------------------------------------------------
 
 print(f"통과 {PASSED}건")

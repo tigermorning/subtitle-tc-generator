@@ -12,8 +12,8 @@ from PySide6.QtCore import QObject, QThread, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDockWidget, QFileDialog, QHBoxLayout, QLabel,
-    QMainWindow, QMessageBox, QPushButton, QSplitter, QTableView,
-    QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
+    QMainWindow, QMessageBox, QPlainTextEdit, QProgressBar, QPushButton,
+    QSplitter, QTableView, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 
 from checker.parsers import parse
 from checker.writers import to_timecode, write_srt
@@ -68,6 +68,8 @@ class MainWindow(QMainWindow):
         self._build_menu()
         self._build_pipeline()
         self._build_results()
+        self._build_progress()
+        self._build_shortcuts()
 
         # 재생 위치를 따라 표가 움직인다. 자막 작업은 "지금 무엇이 보이나"를
         # 계속 확인하는 일이라 이것이 없으면 눈이 두 곳을 오간다.
@@ -105,6 +107,14 @@ class MainWindow(QMainWindow):
         controls.addWidget(back)
         controls.addWidget(self.play_button)
         controls.addWidget(forward)
+        zoom_in = QPushButton("파형 ＋")
+        zoom_in.setToolTip("파형 확대 (Alt+=, Ctrl+휠)")
+        zoom_in.clicked.connect(lambda: self.waveform.zoom(0.7))
+        zoom_out = QPushButton("파형 －")
+        zoom_out.setToolTip("파형 축소 (Alt+-)")
+        zoom_out.clicked.connect(lambda: self.waveform.zoom(1.4))
+        controls.addWidget(zoom_in)
+        controls.addWidget(zoom_out)
         controls.addStretch(1)
         controls.addWidget(self.position_label)
 
@@ -113,12 +123,22 @@ class MainWindow(QMainWindow):
         self.waveform.cue_changed.connect(self._cue_changed)
         self.waveform.cue_selected.connect(self._select_cue)
 
-        left = QVBoxLayout()
-        left.addWidget(self.video_area, 1)
-        left.addLayout(controls)
-        left.addWidget(self.waveform)
-        left_panel = QWidget()
-        left_panel.setLayout(left)
+        # **면적을 사람이 정한다.** 타임코드를 미세하게 볼 때는 파형을 크게,
+        # 번역을 다듬을 때는 표를 크게 쓴다(사용자 지적 2026-08-12).
+        control_bar = QWidget()
+        control_bar.setLayout(controls)
+
+        video_panel = QWidget()
+        video_box = QVBoxLayout(video_panel)
+        video_box.setContentsMargins(0, 0, 0, 0)
+        video_box.addWidget(self.video_area, 1)
+        video_box.addWidget(control_bar)
+
+        self.left_splitter = QSplitter(Qt.Vertical)
+        self.left_splitter.addWidget(video_panel)
+        self.left_splitter.addWidget(self.waveform)
+        self.left_splitter.setSizes([420, 220])
+        left_panel = self.left_splitter
 
         self.table = QTableView()
         self.table.setModel(self.model)
@@ -131,11 +151,12 @@ class MainWindow(QMainWindow):
         self.table.setColumnWidth(4, 240)      # 원어
         self.table.horizontalHeader().setStretchLastSection(True)
 
-        splitter = QSplitter()
-        splitter.addWidget(left_panel)
-        splitter.addWidget(self.table)
-        splitter.setSizes([620, 660])
-        self.setCentralWidget(splitter)
+        self.main_splitter = QSplitter()
+        self.main_splitter.addWidget(left_panel)
+        self.main_splitter.addWidget(self.table)
+        self.main_splitter.setSizes([620, 660])
+        self.setCentralWidget(self.main_splitter)
+        self._restore_layout()
         self.statusBar().showMessage("영상과 자막을 여세요")
 
     def _build_pipeline(self) -> None:
@@ -201,11 +222,10 @@ class MainWindow(QMainWindow):
         if current in platforms:
             self.platform_box.setCurrentText(current)
         self.platform_box.blockSignals(False)
-        try:
-            self.platform_box.currentTextChanged.disconnect(self._platform_changed)
-        except (RuntimeError, TypeError):
-            pass
-        self.platform_box.currentTextChanged.connect(self._platform_changed)
+        # 한 번만 잇는다. 끊었다 다시 이으면 Qt가 경고를 뱉는다.
+        if not getattr(self, "_platform_connected", False):
+            self.platform_box.currentTextChanged.connect(self._platform_changed)
+            self._platform_connected = True
 
     def _platform_changed(self, text: str) -> None:
         if text == self.NEW_PROFILE:
@@ -263,6 +283,49 @@ class MainWindow(QMainWindow):
                     self.player.seek(event.start_ms)
                 break
 
+    def _build_progress(self) -> None:
+        """**돌고 있는지 눈에 보여야 한다.**
+
+        상태줄 글자만 바뀌면 사람은 멈춘 줄 안다(사용자 지적 2026-08-12). 전사는
+        몇 분씩 걸리고 그동안 겉으로는 조용하다. 그래서 셋을 함께 보여 준다.
+
+            움직이는 막대   지금 일하고 있다
+            흐른 시간      얼마나 됐나
+            진행 기록      무엇을 하는 중인가 (한 줄씩 쌓인다)
+        """
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setRange(0, 0)         # 끝을 모르는 일이라 계속 움직인다
+        self.progress_bar.setFixedWidth(160)
+        self.progress_bar.setTextVisible(False)
+        self.progress_bar.hide()
+        self.elapsed_label = QLabel("")
+        self.statusBar().addPermanentWidget(self.elapsed_label)
+        self.statusBar().addPermanentWidget(self.progress_bar)
+
+        self.progress_log = QPlainTextEdit()
+        self.progress_log.setReadOnly(True)
+        self.progress_log.setMaximumBlockCount(500)
+        dock = QDockWidget("진행 기록", self)
+        dock.setWidget(self.progress_log)
+        self.addDockWidget(Qt.BottomDockWidgetArea, dock)
+        self.progress_dock = dock
+        dock.hide()
+
+        self._elapsed = QTimer(self)
+        self._elapsed.setInterval(1000)
+        self._elapsed.timeout.connect(self._tick)
+        self._started_at = 0.0
+
+    def _tick(self) -> None:
+        import time
+        seconds = int(time.time() - self._started_at)
+        self.elapsed_label.setText(f"{seconds // 60}:{seconds % 60:02d} 경과")
+
+    def _note(self, text: str) -> None:
+        """진행 한 줄. 상태줄과 기록 창에 함께 남긴다."""
+        self.statusBar().showMessage(text)
+        self.progress_log.appendPlainText(text)
+
     # --- 파이프라인 ---------------------------------------------------
     def _profile(self):
         from checker import load_profile
@@ -274,10 +337,22 @@ class MainWindow(QMainWindow):
         return os.environ.get("KSC_PATH")
 
     def _busy(self, busy: bool, what: str = "") -> None:
+        import time
+
         for action in self.pipeline_buttons:
             action.setEnabled(not busy)
-        if what:
-            self.statusBar().showMessage(what)
+        self.progress_bar.setVisible(busy)
+        if busy:
+            self._started_at = time.time()
+            self._elapsed.start()
+            self.progress_dock.show()
+            self.progress_log.appendPlainText("")
+            if what:
+                self._note(what)
+        else:
+            self._elapsed.stop()
+            seconds = int(time.time() - self._started_at)
+            self.elapsed_label.setText(f"{seconds // 60}:{seconds % 60:02d} 걸림")
 
     def _start(self, job, on_done, what: str) -> None:
         self._busy(True, what)
@@ -288,11 +363,10 @@ class MainWindow(QMainWindow):
 
         def failed(why):
             self._busy(False)
-            self.statusBar().showMessage(f"실패: {why}")
+            self._note(f"실패: {why}")
             QMessageBox.warning(self, "작업을 마치지 못했습니다", why)
 
-        thread = jobs.start(job, done,
-                            lambda m: self.statusBar().showMessage(m), failed)
+        thread = jobs.start(job, done, self._note, failed)
         self._threads.append(thread)
 
     def run_generate(self) -> None:
@@ -308,6 +382,15 @@ class MainWindow(QMainWindow):
         job = jobs.GenerateJob(Path(self._video_path), self._profile(), script,
                                self.language_box.currentText(),
                                self.translate_check.isChecked())
+
+        # **얼마나 걸릴지 미리 말해 준다.** 모르면 멈춘 줄 안다. 전사는 실측
+        # 20배속쯤이고, 번역은 자막 수에 비례해 그보다 훨씬 느리다.
+        minutes = (self.player.duration_ms or 0) / 60000
+        guess = f"전사에 {max(1, round(minutes * 3))}초쯤" if minutes else ""
+        if self.translate_check.isChecked():
+            guess += ", 번역까지 하면 몇 분 더" if guess else "몇 분"
+        if guess:
+            self._note(f"영상 {minutes:.1f}분 — {guess} 걸립니다")
 
         def done(draft):
             self.model.replace(draft.events, getattr(draft, "sources", None) or None)
@@ -407,6 +490,10 @@ class MainWindow(QMainWindow):
         diagnosis = QAction("진단...", self)
         diagnosis.triggered.connect(self.show_diagnosis)
         help_menu.addAction(diagnosis)
+        shortcuts = QAction("단축키...", self)
+        shortcuts.setShortcut(QKeySequence("F1"))
+        shortcuts.triggered.connect(self.show_shortcuts)
+        help_menu.addAction(shortcuts)
 
     # --- 파일 ---------------------------------------------------------
     def open_video(self) -> None:
@@ -535,13 +622,171 @@ class MainWindow(QMainWindow):
         if self.player:
             self.player.step(frames)
 
+    # --- 단축키 -------------------------------------------------------
+    #
+    # **작업자가 SE에서 쓰던 것을 그대로 옮겼다**(작업자 자료의 단축키 목록).
+    # 손이 기억하는 자리를 바꾸면 그것만으로 도구를 못 쓴다.
+    SHORTCUTS = (
+        ("Esc", "재생 / 일시정지", "toggle_play"),
+        ("Ctrl+Shift+Left", "1프레임 뒤로", "step_back"),
+        ("Ctrl+Shift+Right", "1프레임 앞으로", "step_forward"),
+        ("PgUp", "이전 자막으로(영상도 그 자리로)", "go_previous"),
+        ("PgDown", "다음 자막으로(영상도 그 자리로)", "go_next"),
+        ("Ctrl+Space", "재생 위치에서 자막 나누기", "split_cue"),
+        ("Alt+Space", "다음 자막과 합치기(독백)", "merge_cue"),
+        ("Alt+Shift+Space", "다음 자막과 합치기(대화, 하이픈)", "merge_dialogue"),
+        ("Ctrl+-", "대화 하이픈 넣고 빼기", "toggle_dash"),
+        ("Ctrl+\\", "줄바꿈 제거", "remove_breaks"),
+        ("Alt+Up", "자막 위로 {\\an8}", "place_top"),
+        ("Alt+Down", "자막 아래로(기본)", "place_bottom"),
+        ("F5", "인점을 지금 위치로", "set_in_point"),
+        ("F6", "아웃점을 지금 위치로", "set_out_point"),
+        ("Alt+=", "파형 확대", "zoom_in"),
+        ("Alt+-", "파형 축소", "zoom_out"),
+        ("Ctrl+G", "자막 번호로 이동", "go_to_number"),
+    )
+
+    def _build_shortcuts(self) -> None:
+        for keys, title, slot in self.SHORTCUTS:
+            action = QAction(title, self)
+            action.setShortcut(QKeySequence(keys))
+            action.triggered.connect(getattr(self, slot))
+            self.addAction(action)
+
+    def _current_event(self):
+        row = self.table.currentIndex().row()
+        return self.model.event_at(row)
+
+    def _apply_edit(self, events, focus_index: int) -> None:
+        """고친 결과를 표·파형·미리 보기에 한 번에 반영한다."""
+        self.model.replace(events)
+        self.waveform.set_events(self.model.events)
+        self._preview_timer.start()
+        for row, event in enumerate(self.model.events):
+            if event.index == focus_index:
+                self.table.selectRow(row)
+                break
+
+    def step_back(self) -> None:
+        self.step(-1)
+
+    def step_forward(self) -> None:
+        self.step(1)
+
+    def zoom_in(self) -> None:
+        self.waveform.zoom(0.7)
+
+    def zoom_out(self) -> None:
+        self.waveform.zoom(1.4)
+
+    def go_previous(self) -> None:
+        self._go(-1)
+
+    def go_next(self) -> None:
+        self._go(1)
+
+    def _go(self, step: int) -> None:
+        row = self.table.currentIndex().row()
+        row = max(0, min(len(self.model.events) - 1, (row if row >= 0 else 0) + step))
+        self.table.selectRow(row)
+        event = self.model.event_at(row)
+        if event and self.player:
+            self.player.seek(event.start_ms)
+
+    def go_to_number(self) -> None:
+        from PySide6.QtWidgets import QInputDialog
+        number, ok = QInputDialog.getInt(self, "자막 번호로 이동", "번호",
+                                         1, 1, max(1, len(self.model.events)))
+        if not ok:
+            return
+        for row, event in enumerate(self.model.events):
+            if event.index == number:
+                self.table.selectRow(row)
+                if self.player:
+                    self.player.seek(event.start_ms)
+                break
+
+    def split_cue(self) -> None:
+        from .edits import split_at
+        event = self._current_event()
+        if not event or not self.player:
+            return
+        events, new_index = split_at(self.model.events, event.index,
+                                     self.player.position_ms)
+        self._apply_edit(events, new_index)
+        self._note(f"#{event.index}를 나눴습니다")
+
+    def merge_cue(self) -> None:
+        self._merge(dialogue=False)
+
+    def merge_dialogue(self) -> None:
+        self._merge(dialogue=True)
+
+    def _merge(self, dialogue: bool) -> None:
+        from .edits import merge_with_next
+        event = self._current_event()
+        if not event:
+            return
+        events, index = merge_with_next(self.model.events, event.index, dialogue)
+        self._apply_edit(events, index)
+        self._note(f"#{event.index}를 다음 자막과 합쳤습니다"
+                   + (" (대화)" if dialogue else ""))
+
+    def toggle_dash(self) -> None:
+        from .edits import toggle_dash
+        event = self._current_event()
+        if event:
+            event.text = toggle_dash(event)
+            self._apply_edit(self.model.events, event.index)
+
+    def remove_breaks(self) -> None:
+        from .edits import remove_line_breaks
+        event = self._current_event()
+        if event:
+            event.text = remove_line_breaks(event)
+            self._apply_edit(self.model.events, event.index)
+
+    def place_top(self) -> None:
+        self._place("top_center")
+
+    def place_bottom(self) -> None:
+        self._place("default")
+
+    def _place(self, place: str) -> None:
+        from .edits import set_position
+        event = self._current_event()
+        if event:
+            event.text = set_position(event, place)
+            self._apply_edit(self.model.events, event.index)
+
+    def set_in_point(self) -> None:
+        self._set_point(start=True)
+
+    def set_out_point(self) -> None:
+        self._set_point(start=False)
+
+    def _set_point(self, start: bool) -> None:
+        from .edits import set_in_point, set_out_point
+        event = self._current_event()
+        if not event or not self.player:
+            return
+        at = self.player.position_ms
+        done = (set_in_point if start else set_out_point)(
+            self.model.events, event.index, at)
+        if done:
+            self._apply_edit(self.model.events, event.index)
+            self._note(f"#{event.index} {'인점' if start else '아웃점'}을 "
+                       f"{to_timecode(at)}로")
+        else:
+            self._note("이웃 자막을 침범하거나 자막이 뒤집혀서 하지 않았습니다")
+
+    def show_shortcuts(self) -> None:
+        rows = "\n".join(f"  {keys:20} {title}" for keys, title, _ in self.SHORTCUTS)
+        QMessageBox.information(self, "단축키", f"<pre>{rows}</pre>")
+
     def keyPressEvent(self, event) -> None:
         if event.key() == Qt.Key_Space:
             self.toggle_play()
-        elif event.key() == Qt.Key_Left:
-            self.step(-1)
-        elif event.key() == Qt.Key_Right:
-            self.step(1)
         else:
             super().keyPressEvent(event)
 
@@ -563,7 +808,26 @@ class MainWindow(QMainWindow):
         if row >= 0 and row != self.table.currentIndex().row():
             self.table.selectRow(row)
 
+    def _settings(self):
+        from PySide6.QtCore import QSettings
+        return QSettings("자막편집기", "layout")
+
+    def _restore_layout(self) -> None:
+        """지난번 나눠 놓은 면적을 되살린다. 매번 다시 잡게 하지 않는다."""
+        store = self._settings()
+        for key, widget in (("main", self.main_splitter), ("left", self.left_splitter)):
+            state = store.value(f"splitter/{key}")
+            if state is not None:
+                widget.restoreState(state)
+        geometry = store.value("window")
+        if geometry is not None:
+            self.restoreGeometry(geometry)
+
     def closeEvent(self, event) -> None:
+        store = self._settings()
+        store.setValue("splitter/main", self.main_splitter.saveState())
+        store.setValue("splitter/left", self.left_splitter.saveState())
+        store.setValue("window", self.saveGeometry())
         if self.player:
             self.player.close()
         super().closeEvent(event)
