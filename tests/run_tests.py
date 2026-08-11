@@ -555,6 +555,42 @@ r = check_events(gap_events, ko_sdh, fps=23.976)
 ok("공식 판에는 간격 규정을 넣지 않았다", not any(v["rule_id"] == "S23" for v in r["violations"]))
 
 
+# --- 문장부호 표(이미지)에서 읽은 규칙 ---------------------------------------
+
+cp3 = load_profile_file(Path("rules/coupang/ko-sdh.yaml"))
+dp3 = load_profile_file(Path("rules/disney/ko-sdh.yaml"))
+pr3 = load_profile_file(Path("rules/netflix/ko-sdh-practice.yaml"))
+
+r = check_events([ev("그러니까…")], cp3)
+ok("쿠팡은 전각 말줄임표를 잡는다", "CP09" in ids(r))
+r = check_events([ev("그러니까...")], cp3)
+ok("쿠팡에서 점 셋은 정상", "CP09" not in ids(r))
+r = check_events([ev("그러니까...")], pr3)
+ok("넷플릭스는 점 셋을 잡는다", "S24" in ids(r))
+r = check_events([ev("그러니까…")], pr3)
+ok("넷플릭스에서 전각은 정상", "S24" not in ids(r))
+
+fixed, _, _ = apply_fixes([Event(1, 0, 3000, "그래…")], cp3)
+ok("쿠팡 교정은 점 셋으로 간다", fixed[0].text == "그래...", fixed[0].text)
+fixed, _, _ = apply_fixes([Event(1, 0, 3000, "그래...")], pr3)
+ok("넷플릭스 교정은 전각으로 간다", fixed[0].text == "그래…", fixed[0].text)
+
+r = check_events([ev("뭐라고?!")], cp3)
+ok("쿠팡은 이중 부호를 잡는다", "CP10" in ids(r))
+r = check_events([ev("뭐라고?!")], pr3)
+ok("넷플릭스는 이중 부호를 허용한다", not any(v["rule_id"] == "S26" for v in r["violations"]))
+r = check_events([ev("오~ 그래")], cp3)
+ok("쿠팡은 물결표를 잡는다", "CP11" in ids(r))
+
+r = check_events([ev("아…", index=1), ev("그래...", index=2)], dp3)
+ok("디즈니는 말줄임표 혼용을 잡는다", "DP08" in ids(r))
+r = check_events([ev("아…", index=1), ev("그래…", index=2)], dp3)
+ok("통일돼 있으면 조용하다", "DP08" not in ids(r))
+
+r = check_events([ev("[문이 쾅\n닫히는 소리]")], cp3)
+ok("줄 넘어간 효과음을 잡는다", "CP12" in ids(r))
+
+
 # --- 결과 ---------------------------------------------------------------
 
 print(f"통과 {PASSED}건")

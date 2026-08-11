@@ -139,3 +139,18 @@ def apply_fixes(events: list[Event], profile: dict) -> tuple[list[Event], list[s
         fixed.append(Event(ev.index, ev.start_ms, ev.end_ms, text))
 
     return fixed, applied, unfixable
+
+
+@fixer("ellipsis_style_mismatch")
+def _fix_ellipsis_style(text: str, ctx: dict) -> str:
+    """말줄임표를 **프로파일이 정한 쪽으로** 맞춘다.
+
+    방향이 플랫폼마다 반대라 한쪽으로 굳혀 두면 다른 쪽에서 틀린다
+    (넷플릭스 전각, 쿠팡 점 셋).
+    """
+    want = (ctx["profile"].get("text") or {}).get("ellipsis_char")
+    if want == "…":
+        return re.sub(r"\.{3,}", "…", text)
+    if want == "...":
+        return text.replace("…", "...")
+    return text

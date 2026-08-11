@@ -586,3 +586,64 @@ def _effect_after_dialogue(ev: Event, ctx: dict):
         if before and not re.fullmatch(r"[-\s]*[\[(][^\])]*[\])]", before):
             out.append((i, f"대사 뒤 효과음 {m.group(0)}"))
     return out
+
+
+@check("ellipsis_style_mismatch")
+def _ellipsis_style(ev: Event, ctx: dict):
+    """말줄임표 표기가 플랫폼마다 **정반대**다.
+
+    넷플릭스는 전각(`…`), 쿠팡은 점 셋(`...`), 디즈니는 둘 다 되지만 작업물 안에서
+    통일해야 한다. 한쪽 기준으로 고쳐 주면 다른 쪽에서는 그것이 위반이 된다.
+    """
+    want = (ctx["profile"].get("text") or {}).get("ellipsis_char")
+    if not want:
+        return []
+    s = strip_tags(ev.text)
+    if want == "…" and "..." in s:
+        return [(None, "'...' -> '…'")]
+    if want == "..." and "…" in s:
+        return [(None, "'…' -> '...'")]
+    return []
+
+
+@doc_check("ellipsis_style_inconsistent")
+def _ellipsis_mixed(events: list[Event], ctx: dict):
+    """표기를 고르는 것은 발주처지만, **섞어 쓰는 것은 어느 쪽에서도 틀렸다.**"""
+    if not (ctx["profile"].get("text") or {}).get("ellipsis_consistency_required"):
+        return []
+    full = [e for e in events if "…" in strip_tags(e.text)]
+    dots = [e for e in events if "..." in strip_tags(e.text)]
+    if full and dots:
+        first = min(full[0].index, dots[0].index)
+        return [(first, None,
+                 f"전각 {len(full)}건, 점 셋 {len(dots)}건이 섞였습니다 — 한쪽으로 통일합니다")]
+    return []
+
+
+@check("double_punctuation")
+def _double_punct(ev: Event, ctx: dict):
+    """`?!`·`!?`·`!!` 같은 이중 부호. 디즈니·쿠팡은 금지, 넷플릭스는 남용 금지다."""
+    policy = (ctx["profile"].get("text") or {}).get("double_punctuation")
+    if policy not in ("forbidden", "limited"):
+        return []
+    m = re.search(r"[?!]{2,}", strip_tags(ev.text))
+    return [(None, m.group(0))] if m else []
+
+
+@check("tilde_used")
+def _tilde(ev: Event, ctx: dict):
+    """물결표. 디즈니·쿠팡은 금지, 넷플릭스는 `오~` 정도만 허용하고 남용 금지."""
+    policy = (ctx["profile"].get("text") or {}).get("tilde")
+    if policy != "forbidden":
+        return []
+    return [(None, "'~'")] if "~" in strip_tags(ev.text) else []
+
+
+@check("sound_effect_multiline")
+def _effect_multiline(ev: Event, ctx: dict):
+    """효과음은 반드시 한 줄로 쓴다. 대괄호가 줄을 넘으면 쪼개진 것이다."""
+    for i, line in enumerate(ev.lines, 1):
+        s = strip_tags(line)
+        if s.count("[") != s.count("]"):
+            return [(i, "효과음 표기가 줄을 넘어갑니다 — 한 줄로 씁니다")]
+    return []
