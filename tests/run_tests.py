@@ -1589,6 +1589,31 @@ ok("빈 원문은 견주지 않는다", not _too_different("", "무엇이든"))
 ok("바꾼 것이 없으면 그렇게 말한다", "없습니다" in revision_report([]))
 
 
+# --- 독립 프로그램 화면 ----------------------------------------------------
+# 화면은 PySide6가 있어야 시험할 수 있다. 없는 환경(개발용 WSL)에서는 건너뛴다 —
+# 엔진 시험이 화면 때문에 멈추면 안 된다.
+
+try:
+    from PySide6.QtWidgets import QApplication      # noqa: F401
+except ImportError:
+    pass
+else:
+    import os as _os2
+    _os2.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from app.model import SubtitleModel  # noqa: E402
+
+    _app_model = SubtitleModel([Event(1, 1000, 3000, "첫 줄"),
+                                Event(2, 5000, 7000, "둘째\n줄")])
+    ok("표에 자막 수만큼 줄이 선다", _app_model.rowCount() == 2)
+    ok("타임코드를 사람이 읽는 꼴로 보여 준다",
+       _app_model.data(_app_model.index(0, 1)) == "00:00:01,000")
+    ok("길이를 초로 보여 준다", _app_model.data(_app_model.index(0, 3)) == "2.00")
+    # 두 줄짜리 자막을 한 줄로 보면 줄바꿈이 맞는지 알 수 없다.
+    ok("줄바꿈을 눈에 보이게 둔다", "⏎" in _app_model.data(_app_model.index(1, 4)))
+    ok("그 시각의 자막을 찾는다", _app_model.row_for_time(2000) == 0)
+    ok("아무것도 없는 시각은 -1", _app_model.row_for_time(4000) == -1)
+
+
 # --- 결과 ---------------------------------------------------------------
 
 print(f"통과 {PASSED}건")
