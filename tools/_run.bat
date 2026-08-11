@@ -55,6 +55,10 @@ pushd "%REPO%"
 set "RC=%ERRORLEVEL%"
 popd
 
+rem Open the report so the result survives the window closing. The console output
+rem scrolls away and users press a key to close it - the file is what remains.
+if exist "%REPORT%" start "" "%REPORT%"
+
 echo.
 if "%RC%"=="0" echo   [OK] no violations
 if "%RC%"=="1" echo   [VIOLATIONS] see the report above

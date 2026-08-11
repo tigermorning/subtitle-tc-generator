@@ -5,5 +5,5 @@ rem ASCII only - see _run.bat for why.
 set "PLATFORM=netflix"
 set "LANG=ko"
 set "KIND=translation"
-set "EXTRA=--fix"
+set "EXTRA=--fix --fix-timing"
 call "%~dp0_run.bat" %*
