@@ -21,8 +21,8 @@ from pathlib import Path
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QHBoxLayout,
-    QLabel, QLineEdit, QMessageBox, QSpinBox, QTableWidget, QTableWidgetItem,
-    QTabWidget, QVBoxLayout, QWidget)
+    QKeySequenceEdit, QLabel, QLineEdit, QMessageBox, QPushButton, QSpinBox,
+    QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget)
 
 from checker import load_profile
 from checker.profile import available_profiles, user_root
@@ -74,6 +74,7 @@ class SettingsDialog(QDialog):
         tabs.addTab(self._numbers_tab(), "수치")
         tabs.addTab(self._job_tab(), "이 작업에서 정할 것")
         tabs.addTab(self._rules_tab(), f"검사 규칙 ({len(self.profile.get('rules') or [])})")
+        tabs.addTab(self._shortcut_tab(), "단축키와 기능")
         tabs.addTab(self._raw_tab(), "적용 중인 값 전부")
         layout.addWidget(tabs, 1)
 
@@ -164,6 +165,70 @@ class SettingsDialog(QDialog):
         layout.addWidget(table)
         return page
 
+    def _shortcut_tab(self) -> QWidget:
+        """**무엇을 할 수 있는지 설명하고, 키는 사람이 정한다.**
+
+        기본값은 작업자가 SE에서 쓰던 자리지만, 손이 기억하는 자리는 사람마다 다르다.
+        설명 칸을 넓게 둔 이유는 사용자 지적 그대로다 — 어떤 기능이 있는지 알아야
+        프로그램을 쓴다.
+        """
+        from . import shortcuts
+
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.addWidget(QLabel(
+            "키 칸을 눌러 원하는 조합을 누르면 바뀝니다. 겹치면 저장할 때 알려 줍니다."))
+
+        keys = shortcuts.load()
+        table = QTableWidget(len(shortcuts.ACTIONS), 4)
+        table.setHorizontalHeaderLabels(["묶음", "기능", "단축키", "무엇을 하는가"])
+        table.setColumnWidth(0, 60)
+        table.setColumnWidth(1, 150)
+        table.setColumnWidth(2, 150)
+        table.horizontalHeader().setStretchLastSection(True)
+        table.verticalHeader().setDefaultSectionSize(46)
+        table.setWordWrap(True)
+
+        self.key_editors = {}
+        for row, action in enumerate(shortcuts.ACTIONS):
+            table.setItem(row, 0, QTableWidgetItem(action.group))
+            table.setItem(row, 1, QTableWidgetItem(action.title))
+            editor = QKeySequenceEdit(keys.get(action.key, action.default))
+            table.setCellWidget(row, 2, editor)
+            self.key_editors[action.key] = editor
+            table.setItem(row, 3, QTableWidgetItem(action.what))
+        layout.addWidget(table, 1)
+
+        reset = QPushButton("기본값으로 되돌리기")
+        reset.clicked.connect(self._reset_shortcuts)
+        layout.addWidget(reset)
+        return page
+
+    def _reset_shortcuts(self) -> None:
+        from . import shortcuts
+        from PySide6.QtGui import QKeySequence
+
+        for action in shortcuts.ACTIONS:
+            self.key_editors[action.key].setKeySequence(QKeySequence(action.default))
+
+    def _save_shortcuts(self) -> bool:
+        """바꾼 키를 저장한다. 겹치면 **말없이 덮어쓰지 않고** 물어본다."""
+        from . import shortcuts
+
+        keys = {name: editor.keySequence().toString()
+                for name, editor in self.key_editors.items()}
+        clashes = shortcuts.conflicts(keys)
+        if clashes:
+            lines = "\n".join(f"  {key}: {first} / {second}" for key, first, second in clashes)
+            answer = QMessageBox.question(
+                self, "단축키가 겹칩니다",
+                f"같은 키를 두 기능이 쓰고 있습니다.\n\n{lines}\n\n"
+                "겹친 키는 둘 중 하나만 듣습니다. 그래도 저장할까요?")
+            if answer != QMessageBox.Yes:
+                return False
+        shortcuts.save(keys)
+        return True
+
     def _raw_tab(self) -> QWidget:
         """상속까지 끝난 **최종 값**을 보여 준다. 무엇이 걸려 있는지 숨기지 않는다."""
         page = QWidget()
@@ -195,10 +260,16 @@ class SettingsDialog(QDialog):
 
     # --- 저장 ---------------------------------------------------------
     def _save(self) -> None:
+        # 단축키는 발주처 기준과 무관하다. 이름이 없어도 저장한다.
+        if not self._save_shortcuts():
+            return
+
         name = self.name_edit.text().strip()
         if not name:
-            QMessageBox.information(self, "이름이 필요합니다",
-                                    "발주처 이름을 적어야 새 기준으로 저장합니다.")
+            QMessageBox.information(
+                self, "단축키를 저장했습니다",
+                "발주처 기준까지 만들려면 이름을 적어 주세요.")
+            self.accept()
             return
 
         overrides: dict = {}

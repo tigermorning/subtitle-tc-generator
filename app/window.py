@@ -140,13 +140,13 @@ class MainWindow(QMainWindow):
         video_box.addWidget(self.video_area, 1)
         video_box.addWidget(control_bar)
 
-        self.left_splitter = QSplitter(Qt.Vertical)
-        self.left_splitter.setHandleWidth(8)
-        self.left_splitter.setChildrenCollapsible(False)
-        self.left_splitter.addWidget(video_panel)
-        self.left_splitter.addWidget(self.waveform)
-        self.left_splitter.setSizes([420, 220])
-        left_panel = self.left_splitter
+        # **파형은 아래 전체 폭을 쓴다.** 자막 표는 스크롤하며 보면 되니 넓을 필요가
+        # 없지만, 파형은 넓을수록 시간이 길게 펼쳐져 경계를 잡기 쉽다(사용자 지적
+        # 2026-08-12). SE도 같은 꼴이다 — 위에 영상과 목록, 아래에 파형.
+        self.top_splitter = QSplitter(Qt.Horizontal)
+        self.top_splitter.setHandleWidth(8)
+        self.top_splitter.setChildrenCollapsible(False)
+        self.top_splitter.addWidget(video_panel)
 
         self.table = QTableView()
         self.table.setModel(self.model)
@@ -159,12 +159,15 @@ class MainWindow(QMainWindow):
         self.table.setColumnWidth(4, 240)      # 원어
         self.table.horizontalHeader().setStretchLastSection(True)
 
-        self.main_splitter = QSplitter()
+        self.top_splitter.addWidget(self.table)
+        self.top_splitter.setSizes([620, 660])
+
+        self.main_splitter = QSplitter(Qt.Vertical)
         self.main_splitter.setHandleWidth(8)
         self.main_splitter.setChildrenCollapsible(False)
-        self.main_splitter.addWidget(left_panel)
-        self.main_splitter.addWidget(self.table)
-        self.main_splitter.setSizes([620, 660])
+        self.main_splitter.addWidget(self.top_splitter)
+        self.main_splitter.addWidget(self.waveform)
+        self.main_splitter.setSizes([460, 300])
         # **잡이가 보여야 잡는다.** 가는 선은 있는 줄도 모른다.
         self.setStyleSheet(
             "QSplitter::handle { background: #3a3f4b; }"
@@ -255,6 +258,7 @@ class MainWindow(QMainWindow):
         dialog = SettingsDialog(self.platform_box.currentText(),
                                 self.kind_box.currentText(), self)
         dialog.exec()
+        self.reload_shortcuts()
         if dialog.saved_as:
             self._reload_platforms()
             self.platform_box.setCurrentText(dialog.saved_as)
@@ -700,34 +704,28 @@ class MainWindow(QMainWindow):
 
     # --- 단축키 -------------------------------------------------------
     #
-    # **작업자가 SE에서 쓰던 것을 그대로 옮겼다**(작업자 자료의 단축키 목록).
-    # 손이 기억하는 자리를 바꾸면 그것만으로 도구를 못 쓴다.
-    SHORTCUTS = (
-        ("Esc", "재생 / 일시정지", "toggle_play"),
-        ("Ctrl+Shift+Left", "1프레임 뒤로", "step_back"),
-        ("Ctrl+Shift+Right", "1프레임 앞으로", "step_forward"),
-        ("PgUp", "이전 자막으로(영상도 그 자리로)", "go_previous"),
-        ("PgDown", "다음 자막으로(영상도 그 자리로)", "go_next"),
-        ("Ctrl+Space", "재생 위치에서 자막 나누기", "split_cue"),
-        ("Alt+Space", "다음 자막과 합치기(독백)", "merge_cue"),
-        ("Alt+Shift+Space", "다음 자막과 합치기(대화, 하이픈)", "merge_dialogue"),
-        ("Ctrl+-", "대화 하이픈 넣고 빼기", "toggle_dash"),
-        ("Ctrl+\\", "줄바꿈 제거", "remove_breaks"),
-        ("Alt+Up", "자막 위로 {\\an8}", "place_top"),
-        ("Alt+Down", "자막 아래로(기본)", "place_bottom"),
-        ("F5", "인점을 지금 위치로", "set_in_point"),
-        ("F6", "아웃점을 지금 위치로", "set_out_point"),
-        ("Alt+=", "파형 확대", "zoom_in"),
-        ("Alt+-", "파형 축소", "zoom_out"),
-        ("Ctrl+G", "자막 번호로 이동", "go_to_number"),
-    )
-
+    # 목록과 설명은 `app/shortcuts.py`에 있다. **설명이 키보다 중요하다** —
+    # 무엇을 할 수 있는지 알아야 도구를 쓴다(사용자 지적 2026-08-12).
     def _build_shortcuts(self) -> None:
-        for keys, title, slot in self.SHORTCUTS:
-            action = QAction(title, self)
-            action.setShortcut(QKeySequence(keys))
-            action.triggered.connect(getattr(self, slot))
-            self.addAction(action)
+        from . import shortcuts
+
+        self._shortcut_actions = {}
+        keys = shortcuts.load()
+        for action in shortcuts.ACTIONS:
+            item = QAction(action.title, self)
+            item.setShortcut(QKeySequence(keys.get(action.key, action.default)))
+            item.setToolTip(action.what)
+            item.triggered.connect(getattr(self, action.slot))
+            self.addAction(item)
+            self._shortcut_actions[action.key] = item
+
+    def reload_shortcuts(self) -> None:
+        """바꾼 단축키를 곧바로 반영한다. 프로그램을 다시 켜게 하지 않는다."""
+        from . import shortcuts
+
+        keys = shortcuts.load()
+        for name, item in self._shortcut_actions.items():
+            item.setShortcut(QKeySequence(keys.get(name, "")))
 
     def _current_event(self):
         row = self.table.currentIndex().row()
@@ -857,8 +855,25 @@ class MainWindow(QMainWindow):
             self._note("이웃 자막을 침범하거나 자막이 뒤집혀서 하지 않았습니다")
 
     def show_shortcuts(self) -> None:
-        rows = "\n".join(f"  {keys:20} {title}" for keys, title, _ in self.SHORTCUTS)
-        QMessageBox.information(self, "단축키", f"<pre>{rows}</pre>")
+        """무엇을 할 수 있는지 **설명과 함께** 보여 준다. 바꾸려면 작업 기준 창으로."""
+        from . import shortcuts
+
+        keys = shortcuts.load()
+        lines = []
+        for group in shortcuts.GROUPS:
+            lines.append(f"[{group}]")
+            for action in shortcuts.ACTIONS:
+                if action.group != group:
+                    continue
+                lines.append(f"  {keys.get(action.key, action.default):18} "
+                             f"{action.title}")
+                lines.append(f"  {'':18} {action.what}")
+            lines.append("")
+        box = QMessageBox(self)
+        box.setWindowTitle("기능과 단축키")
+        box.setText("<pre>" + "\n".join(lines).replace("<", "&lt;") + "</pre>")
+        box.setInformativeText("바꾸려면 [작업 기준...] 창의 '단축키' 탭에서 고칩니다.")
+        box.exec()
 
     def keyPressEvent(self, event) -> None:
         if event.key() == Qt.Key_Space:
@@ -885,22 +900,22 @@ class MainWindow(QMainWindow):
             self.table.selectRow(row)
 
     LAYOUTS = {
-        # (왼쪽:표) , (영상:파형)
-        "spotting": ((7, 3), (3, 7)),
-        "translating": ((4, 6), (6, 4)),
+        # (위:파형) 세로 비율 , (영상:표) 가로 비율
+        "spotting": ((3, 7), (6, 4)),      # 파형을 아래 전체로 크게
+        "translating": ((7, 3), (3, 7)),   # 표를 크게, 파형은 얇게
         "video": ((7, 3), (8, 2)),
-        "balanced": ((5, 5), (6, 4)),
+        "balanced": ((6, 4), (5, 5)),
     }
 
     def apply_layout(self, name: str) -> None:
         """면적을 한 번에 바꾼다. 비율로 잡아 창 크기와 무관하게 같은 모양이 된다."""
-        main_ratio, left_ratio = self.LAYOUTS.get(name, self.LAYOUTS["balanced"])
-        width = max(self.main_splitter.width(), 800)
-        height = max(self.left_splitter.height(), 600)
-        self.main_splitter.setSizes([int(width * main_ratio[0] / 10),
-                                     int(width * main_ratio[1] / 10)])
-        self.left_splitter.setSizes([int(height * left_ratio[0] / 10),
-                                     int(height * left_ratio[1] / 10)])
+        vertical, horizontal = self.LAYOUTS.get(name, self.LAYOUTS["balanced"])
+        height = max(self.main_splitter.height(), 600)
+        width = max(self.top_splitter.width(), 800)
+        self.main_splitter.setSizes([int(height * vertical[0] / 10),
+                                     int(height * vertical[1] / 10)])
+        self.top_splitter.setSizes([int(width * horizontal[0] / 10),
+                                    int(width * horizontal[1] / 10)])
         self._note(f"배치: {name}")
 
     def _settings(self):
@@ -910,7 +925,7 @@ class MainWindow(QMainWindow):
     def _restore_layout(self) -> None:
         """지난번 나눠 놓은 면적을 되살린다. 매번 다시 잡게 하지 않는다."""
         store = self._settings()
-        for key, widget in (("main", self.main_splitter), ("left", self.left_splitter)):
+        for key, widget in (("main2", self.main_splitter), ("top", self.top_splitter)):
             state = store.value(f"splitter/{key}")
             if state is not None:
                 widget.restoreState(state)
@@ -925,8 +940,8 @@ class MainWindow(QMainWindow):
             super().closeEvent(event)
             return
         store = self._settings()
-        store.setValue("splitter/main", self.main_splitter.saveState())
-        store.setValue("splitter/left", self.left_splitter.saveState())
+        store.setValue("splitter/main2", self.main_splitter.saveState())
+        store.setValue("splitter/top", self.top_splitter.saveState())
         store.setValue("window", self.saveGeometry())
         if self.player:
             self.player.close()

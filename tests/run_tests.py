@@ -1659,21 +1659,25 @@ else:
 
     # **두 배치를 견준다.** 절대 크기로 재면 화면이 작은 기계에서 창이 눌려
     # 통과·실패가 갈린다(실제로 그랬다). 견주는 것이 원래 확인하려던 것이기도 하다.
+    # **파형은 아래 전체 폭을 쓴다.** 표는 스크롤하며 보면 되니 좁아도 된다.
     _win.apply_layout("spotting")
     _qt_app.processEvents()
-    _spotting_main = _win.main_splitter.sizes()
-    _spotting_left = _win.left_splitter.sizes()
+    _spotting_rows = _win.main_splitter.sizes()      # [위, 파형]
+    _spotting_top = _win.top_splitter.sizes()        # [영상, 표]
 
     _win.apply_layout("translating")
     _qt_app.processEvents()
-    _translating_main = _win.main_splitter.sizes()
+    _translating_rows = _win.main_splitter.sizes()
+    _translating_top = _win.top_splitter.sizes()
 
-    ok("번역 배치가 타임코드 배치보다 표를 넓게 준다",
-       _translating_main[1] > _spotting_main[1])
-    ok("타임코드 배치가 왼쪽(영상·파형)을 넓게 준다",
-       _spotting_main[0] > _translating_main[0])
-    ok("타임코드 배치에서는 파형이 영상보다 크다",
-       _spotting_left[1] > _spotting_left[0])
+    ok("타임코드 배치는 파형을 크게 준다",
+       _spotting_rows[1] > _translating_rows[1])
+    ok("타임코드 배치에서는 파형이 위쪽보다 크다",
+       _spotting_rows[1] > _spotting_rows[0])
+    ok("번역 배치는 표를 넓게 준다",
+       _translating_top[1] > _spotting_top[1])
+    ok("파형은 창 전체 폭을 쓴다",
+       _win.waveform.width() >= _win.top_splitter.width() - 2)
 
     # 잡이가 보여야 잡는다. 가는 선은 있는 줄도 모른다.
     ok("잡이가 잡을 만큼 두껍다", _win.main_splitter.handleWidth() >= 6)
@@ -1805,6 +1809,35 @@ with _tf3.TemporaryDirectory() as _d:
         ok("워드가 아니면 알려 준다", False)
     except ScriptUnavailable:
         ok("워드가 아니면 알려 준다", True)
+
+
+# --- 단축키와 기능 설명 ----------------------------------------------------
+# **설명이 키보다 중요하다.** 어떤 기능을 쓸 수 있는지 알아야 도구를 쓴다
+# (사용자 지적 2026-08-12). 키는 기본값일 뿐이고 사람이 바꾼다.
+
+from app import shortcuts as _shortcuts  # noqa: E402
+
+ok("기능마다 설명이 있다", all(len(a.what) > 20 for a in _shortcuts.ACTIONS))
+ok("기능마다 묶음이 있다", all(a.group in _shortcuts.GROUPS for a in _shortcuts.ACTIONS))
+ok("기본 단축키가 겹치지 않는다",
+   _shortcuts.conflicts({a.key: a.default for a in _shortcuts.ACTIONS}) == [])
+# 같은 키를 둘이 쓰면 하나만 듣는다. 말없이 덮어쓰지 않는다.
+_clash = _shortcuts.conflicts({"play": "Ctrl+D", "split": "Ctrl+D"})
+ok("겹친 키를 찾아낸다", len(_clash) == 1 and _clash[0][0] == "Ctrl+D")
+ok("빈 키는 겹침으로 보지 않는다", _shortcuts.conflicts({"a": "", "b": ""}) == [])
+
+with _tf3.TemporaryDirectory() as _d:
+    _os3.environ["SUBTITLE_EDITOR_HOME"] = _d
+    _keys = _shortcuts.load()
+    ok("바꾸지 않으면 기본값", _keys["split"] == "Ctrl+Space")
+
+    _keys["split"] = "Ctrl+D"
+    _shortcuts.save(_keys)
+    ok("바꾼 값이 남는다", _shortcuts.load()["split"] == "Ctrl+D")
+    # **바꾼 것만 적는다.** 기본값이 나중에 바뀌면 따라가야 한다.
+    _saved = _json.loads((Path(_d) / "shortcuts.json").read_text(encoding="utf-8"))
+    ok("바꾼 것만 파일에 적는다", list(_saved) == ["split"])
+    _os3.environ.pop("SUBTITLE_EDITOR_HOME", None)
 
 
 # --- 결과 ---------------------------------------------------------------
