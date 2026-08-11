@@ -27,6 +27,7 @@ class Options:
     ksc_path: str | None = None
     spacing: str = "principle"
     out: Path | None = None
+    fps: float = 23.976        # 프레임 단위 규정(자막 간격 2프레임)을 환산할 때 쓴다
 
 
 @dataclass
@@ -90,7 +91,8 @@ def run_files(
             result.notes.append(f"자막을 읽지 못했습니다: {path.name}")
             continue
 
-        report = check_events([e.__dict__ for e in events], profile, children=options.children)
+        report = check_events([e.__dict__ for e in events], profile,
+                              children=options.children, fps=options.fps)
         report["file"] = str(path)
 
         ko_fixed = None

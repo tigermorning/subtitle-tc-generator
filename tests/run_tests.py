@@ -524,6 +524,37 @@ detail = " ".join(v["detail"] for v in r["violations"] if v["rule_id"] == "S06")
 ok("지적에 대안이 함께 나온다", "이렇게 쓸 수 있습니다" in detail, detail[:60])
 
 
+# --- 스펙 표에서 읽은 값 -----------------------------------------------------
+
+coupang2 = load_profile_file(Path("rules/coupang/ko-sdh.yaml"))
+disney2 = load_profile_file(Path("rules/disney/ko-sdh.yaml"))
+practice2 = load_profile_file(Path("rules/netflix/ko-sdh-practice.yaml"))
+
+ok("쿠팡 듀레이션 상한만 6초", coupang2["limits"]["duration_ms"]["max"] == 6000
+   and disney2["limits"]["duration_ms"]["max"] == 7000)
+ok("CPL·CPS는 세 플랫폼이 같다",
+   coupang2["limits"]["chars_per_line"] == disney2["limits"]["chars_per_line"] == 16
+   and coupang2["limits"]["reading_speed_cps"]["adult"] == 14)
+ok("쿠팡은 불가피할 때의 한계도 적어 둔다",
+   coupang2["limits"]["chars_per_line_hard"] == 20 and coupang2["limits"]["max_lines_hard"] == 3)
+
+r = check_events([ev("가나다", end=6500)], coupang2)
+ok("쿠팡 6초 초과를 잡는다", "CP00" in ids(r))
+r = check_events([ev("가나다", end=6500)], disney2)
+ok("디즈니는 6.5초를 잡지 않는다", "DP00" not in ids(r))
+
+gap_events = [{"index": 1, "start_ms": 0, "end_ms": 2000, "text": "첫 줄"},
+              {"index": 2, "start_ms": 2050, "end_ms": 4000, "text": "둘째 줄"}]
+r = check_events(gap_events, coupang2, fps=23.976)
+ok("2프레임 간격을 잰다", "CP08" in ids(r))
+r = check_events(gap_events, coupang2, fps=59.94)
+ok("프레임레이트가 높으면 같은 간격도 통과한다", "CP08" not in ids(r))
+r = check_events(gap_events, practice2, fps=23.976)
+ok("넷플릭스 실무 판에도 간격 규정이 있다", "S23" in ids(r))
+r = check_events(gap_events, ko_sdh, fps=23.976)
+ok("공식 판에는 간격 규정을 넣지 않았다", not any(v["rule_id"] == "S23" for v in r["violations"]))
+
+
 # --- 결과 ---------------------------------------------------------------
 
 print(f"통과 {PASSED}건")

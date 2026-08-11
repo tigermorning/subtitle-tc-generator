@@ -110,7 +110,8 @@ def _run_one(path: Path, profile: dict, args, backend) -> dict | None:
         print(f"자막 이벤트를 읽지 못했습니다: {path}", file=sys.stderr)
         return None
 
-    report = check_events([e.__dict__ for e in events], profile, children=args.children)
+    report = check_events([e.__dict__ for e in events], profile,
+                          children=args.children, fps=args.fps)
     report["file"] = str(path)
 
     ko_fixed = None
@@ -147,6 +148,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("-l", "--lang", default="ko")
     ap.add_argument("-k", "--kind", choices=["sdh", "translation"], default="translation")
     ap.add_argument("--children", action="store_true", help="아동 프로그램 기준 적용")
+    ap.add_argument("--fps", type=float, default=23.976,
+                    help="영상 프레임레이트. 자막 간격 같은 프레임 단위 규정을 환산한다")
     ap.add_argument("--json", action="store_true", help="JSON으로 출력")
     ap.add_argument("--list", action="store_true", help="쓸 수 있는 프로파일 목록")
     ap.add_argument("--korean", action="store_true",

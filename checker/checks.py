@@ -311,14 +311,16 @@ def excerpt(event: Event, line_no: int | None, limit: int = 60) -> str:
     return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
-def run_checks(events: list[Event], profile: dict, children: bool = False):
+def run_checks(events: list[Event], profile: dict, children: bool = False,
+               fps: float | None = None):
     """프로파일이 지정한 검사를 이벤트마다 돌린다.
 
     반환: (violations, unimplemented_check_names)
     """
     from .model import Violation
 
-    ctx = {"profile": profile, "limits": profile.get("limits") or {}, "children": children}
+    ctx = {"profile": profile, "limits": profile.get("limits") or {},
+           "children": children, "fps": fps}
 
     limits = ctx["limits"]
     speeds = limits.get("reading_speed_cps") or {}
@@ -440,7 +442,14 @@ def _gap(events: list[Event], ctx: dict):
     없고, 발주처가 요구할 때만 `limits.min_gap_ms`로 켠다. SubtitleEdit의 2프레임
     갭 검사는 옛 판본 기준이라 지금 넷플릭스에는 근거가 없다.
     """
-    min_gap = (ctx["limits"] or {}).get("min_gap_ms")
+    limits = ctx["limits"] or {}
+    min_gap = limits.get("min_gap_ms") or 0
+    # 프레임 단위 규정은 프레임레이트가 있어야 시간이 된다. 2프레임은 23.976fps에서
+    # 83ms, 29.97fps에서 67ms다 — 프레임 수를 밀리초로 굳혀 두면 다른 영상에서 틀린다.
+    frames = limits.get("min_gap_frames")
+    if frames:
+        fps = ctx.get("fps") or 23.976
+        min_gap = max(min_gap, frames * 1000.0 / fps)
     if not min_gap:
         return []
     out = []
@@ -450,7 +459,7 @@ def _gap(events: list[Event], ctx: dict):
         if gap < 0:
             out.append((cur.index, None, f"앞 자막과 {-gap}ms 겹칩니다"))
         elif gap < min_gap:
-            out.append((cur.index, None, f"간격 {gap}ms — 최소 {min_gap}ms"))
+            out.append((cur.index, None, f"간격 {gap}ms — 최소 {min_gap:.0f}ms"))
     return out
 
 
