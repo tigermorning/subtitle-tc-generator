@@ -96,6 +96,14 @@ def run_files(
         report["file"] = str(path)
 
         ko_fixed = None
+        if backend is not None and (profile.get("korean") or {}).get("orthography") == "as_spoken":
+            # 디즈니는 표준어와 비슷해도 발화 그대로 적는다(`니가`·`그치`). 교정기는
+            # 표준어로 옮기려 하므로, 그 제안을 그대로 받으면 규정을 어기게 된다.
+            note = ("이 프로파일은 발화 표기를 우선합니다(orthography: as_spoken). "
+                    "한국어 교정기의 표준어 제안을 그대로 받아들이지 마세요.")
+            if note not in result.notes:
+                result.notes.append(note)
+                say(note)
         if backend is not None:
             ko_fixed, ko_violations = run_korean_pass(
                 events, backend, spacing_mode=options.spacing

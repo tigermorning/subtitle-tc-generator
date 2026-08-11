@@ -591,6 +591,44 @@ r = check_events([ev("[문이 쾅\n닫히는 소리]")], cp3)
 ok("줄 넘어간 효과음을 잡는다", "CP12" in ids(r))
 
 
+# --- 대사·배경음악 표(이미지)에서 읽은 규칙 ---------------------------------
+
+cp4 = load_profile_file(Path("rules/coupang/ko-sdh.yaml"))
+dp4 = load_profile_file(Path("rules/disney/ko-sdh.yaml"))
+pr4 = load_profile_file(Path("rules/netflix/ko-sdh-practice.yaml"))
+
+ok("디즈니만 대괄호 안에 음표", dp4["music"]["note_inside_bracket"] is True
+   and cp4["music"]["note_inside_bracket"] is False)
+r = check_events([ev("[잔잔한 음악]")], dp4)
+ok("디즈니에서 음표 빠지면 잡는다", "DP12" in ids(r))
+r = check_events([ev("[♪ 잔잔한 음악]")], dp4)
+ok("디즈니에서 음표 있으면 정상", "DP12" not in ids(r))
+r = check_events([ev("[♪ 잔잔한 음악]")], cp4)
+ok("쿠팡에서 음표 있으면 잡는다", "CP13" in ids(r))
+r = check_events([ev("♪ 사랑이 지나간 자리 ♪")], cp4)
+ok("가사의 음표는 대상이 아니다", "CP13" not in ids(r))
+
+ok("디즈니 삐 처리는 O", dp4["censorship"]["bleeped_word"] == "O"
+   and cp4["censorship"]["bleeped_word"] == "*")
+r = check_events([ev("이제 *됐네")], dp4)
+ok("디즈니에서 별표를 잡는다", "DP13" in ids(r))
+r = check_events([ev("이제 O됐네")], dp4)
+ok("디즈니에서 O는 정상", "DP13" not in ids(r))
+r = check_events([ev("이제 O됐네")], pr4)
+ok("넷플릭스에서 O를 잡는다", "S28" in ids(r))
+
+r = check_events([ev("이런 ** *** ***")], cp4)
+ok("쿠팡은 별표 나열을 잡는다", "CP14" in ids(r))
+r = check_events([ev("이런 [음 소거 효과음]")], pr4)
+ok("넷플릭스는 [음 소거 효과음]을 잡는다", "S27" in ids(r))
+r = check_events([ev("이런 [음 소거 효과음]")], cp4)
+ok("쿠팡에서 [음 소거 효과음]은 정상", "CP14" not in ids(r))
+
+ok("디즈니는 발화 표기 우선", dp4["korean"]["orthography"] == "as_spoken")
+ok("넷플릭스·쿠팡은 표준어", pr4["korean"]["orthography"] == "standard"
+   and cp4["korean"]["orthography"] == "standard")
+
+
 # --- 결과 ---------------------------------------------------------------
 
 print(f"통과 {PASSED}건")

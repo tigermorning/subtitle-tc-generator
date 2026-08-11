@@ -647,3 +647,59 @@ def _effect_multiline(ev: Event, ctx: dict):
         if s.count("[") != s.count("]"):
             return [(i, "효과음 표기가 줄을 넘어갑니다 — 한 줄로 씁니다")]
     return []
+
+
+@check("music_marker_style")
+def _music_marker(ev: Event, ctx: dict):
+    """음악 효과음의 음표 표기. **디즈니는 대괄호 안에 ♪를 넣고 나머지는 넣지 않는다.**
+
+    `[♪ 잔잔한 음악]`(디즈니) vs `[잔잔한 음악]`(넷플릭스·쿠팡).
+    가사 자막의 음표(`♪ 가사 ♪`)와는 다른 자리다 — 여기는 대괄호 **안**이다.
+    """
+    music = ctx["profile"].get("music") or {}
+    want = music.get("note_inside_bracket")
+    if want is None:
+        return []
+    keywords = ("음악", "곡", "연주", "노래")
+    out = []
+    for inner in BRACKET_RE.findall(strip_tags(ev.text)):
+        if not any(k in inner for k in keywords):
+            continue
+        has_note = "♪" in inner
+        if want and not has_note:
+            out.append((None, f"[{inner}] — 음악 효과음에는 ♪를 넣습니다"))
+        elif not want and has_note:
+            out.append((None, f"[{inner}] — 음악 효과음에 ♪를 넣지 않습니다"))
+    return out
+
+
+@check("bleep_mask_character")
+def _bleep_mask(ev: Event, ctx: dict):
+    """삐 처리 문자. 넷플릭스·쿠팡은 별표, **디즈니는 대문자 O**를 쓴다."""
+    censorship = ctx["profile"].get("censorship") or {}
+    mask = censorship.get("bleeped_word")
+    if not mask:
+        return []
+    s = strip_tags(ev.text)
+    if mask == "*" and re.search(r"O{1,}(?=[가-힣])|(?<=[가-힣])O{1,}", s):
+        return [(None, "삐 처리는 별표(*)로 합니다")]
+    if mask == "O" and re.search(r"\*+(?=[가-힣])|(?<=[가-힣])\*+", s):
+        return [(None, "삐 처리는 대문자 O로 합니다")]
+    return []
+
+
+@check("full_bleep_style")
+def _full_bleep(ev: Event, ctx: dict):
+    """문장 전체가 삐 처리됐을 때. 넷플릭스는 별표를 늘어놓고, 디즈니·쿠팡은 효과음으로 쓴다."""
+    censorship = ctx["profile"].get("censorship") or {}
+    style = censorship.get("full_sentence_bleep")
+    if not style:
+        return []
+    s = strip_tags(ev.text)
+    has_run = bool(re.search(r"[*O]{2,}(\s+[*O]{2,})+", s))
+    has_marker = "음 소거" in s
+    if style == "[음 소거 효과음]" and has_run:
+        return [(None, "여러 단어가 삐 처리되면 [음 소거 효과음]으로 씁니다")]
+    if style != "[음 소거 효과음]" and has_marker:
+        return [(None, "여러 단어가 삐 처리되면 부호를 늘어놓습니다([음 소거 효과음] 아님)")]
+    return []
