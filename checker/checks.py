@@ -436,6 +436,77 @@ def _base_label(label: str) -> str:
     return re.sub(r"\s*\d+$", "", label)
 
 
+# 강사 첨삭 150건에서 되풀이된 지적을 규칙으로 옮긴 것들이다(2026-08-11).
+# 규정 문서가 "무엇이 맞는지"를 말한다면 첨삭은 "무엇이 **실제로** 틀리는지"를
+# 말한다. 아래 넷은 사람이 매번 눈으로 잡던 것이고, 전부 기계가 볼 수 있다.
+
+# 숫자·단위 뒤에 붙은 '불'만 화폐로 본다. 뒤에 조사나 '짜리'가 붙어도 화폐다.
+# `불이 났다`는 앞에 숫자가 없어 걸리지 않는다.
+CURRENCY_BUL = re.compile(r"(?<=[\d만천억조])\s*불(?=짜리|[을를은는이가에의와과도만]?(?:\s|$|[,.!?…]))")
+# 자막에 쓰지 않는 특수기호. 강사: "자막에는 특수기호를 쓸 수 없습니다.
+# 제곱미터라고 표기해 주세요."
+SPECIAL_SYMBOLS = {
+    "㎡": "제곱미터", "㎢": "제곱킬로미터", "㎝": "센티미터", "㎞": "킬로미터",
+    "㎏": "킬로그램", "℃": "도", "℉": "화씨", "㎖": "밀리리터", "ℓ": "리터",
+    "²": "제곱", "³": "세제곱", "±": "플러스마이너스", "×": "곱하기", "÷": "나누기",
+    "&": "그리고", "＃": "샵",
+}
+# 시각을 한글로 적은 것. 자료 140행: "시간, 시각: 무조건 아라비아 숫자".
+# '세 시에'처럼 조사가 붙어도 시각이다. '시간'·'시계'는 아니다.
+HANGUL_CLOCK = re.compile(
+    r"(?<![가-힣])(한|두|세|네|다섯|여섯|일곱|여덟|아홉|열한|열두|열)\s*시"
+    r"(?=[에는을를쯤경까부터'\s,.!?…]|$)")
+# 10 이상을 한글로 적은 것. 자료 138행: "10 이상은 아라비아 숫자".
+# 한 글자씩 묶으면 '열다섯'이 '열'+'다'로 잘린다. 낱말 단위로 이어 붙인다.
+_TENS = "열|스물|서른|마흔|쉰|예순|일흔|여든|아흔"
+_ONES = "하나|한|둘|두|셋|세|넷|네|다섯|여섯|일곱|여덟|아홉"
+HANGUL_TEN_PLUS = re.compile(
+    rf"(?<![가-힣])(?:{_TENS})(?:{_ONES})?\s*"
+    r"(개|명|번|살|가지|마리|대|권|장|병|잔|켤레|자루|시간|분|초|년|달|주)")
+
+
+@check("currency_bul")
+def _currency_bul(ev: Event, ctx: dict):
+    """`20만 불` — 화폐 단위 '불'은 쓰지 않는다. 강사 첨삭에서 나온 지적이다.
+
+    숫자나 단위 뒤에 붙은 '불'만 본다. `불이 났다`의 '불'을 고치면 큰일이다.
+    """
+    for line_no, line in enumerate(ev.lines, 1):
+        if CURRENCY_BUL.search(strip_tags(line)):
+            yield line_no, "'불' -> '달러'"
+
+
+@check("special_symbol")
+def _special_symbol(ev: Event, ctx: dict):
+    """`㎡`, `℃` 같은 조합 문자·기호. 말로 풀어 쓴다."""
+    for line_no, line in enumerate(ev.lines, 1):
+        found = [f"{s} -> {word}" for s, word in SPECIAL_SYMBOLS.items()
+                 if s in strip_tags(line)]
+        if found:
+            yield line_no, ", ".join(found[:3])
+
+
+@check("hangul_clock")
+def _hangul_clock(ev: Event, ctx: dict):
+    """`아홉 시` — 시각은 아라비아 숫자로 적는다."""
+    for line_no, line in enumerate(ev.lines, 1):
+        found = HANGUL_CLOCK.search(strip_tags(line))
+        if found:
+            yield line_no, f"'{found.group(0)}' — 시각은 아라비아 숫자로"
+
+
+@check("hangul_number_ten_plus")
+def _hangul_ten_plus(ev: Event, ctx: dict):
+    """`열다섯 명` — 10 이상은 아라비아 숫자로 적는다.
+
+    10 미만은 소리 나는 대로 적는 것이 원칙이라 건드리지 않는다(자료 139행).
+    """
+    for line_no, line in enumerate(ev.lines, 1):
+        found = HANGUL_TEN_PLUS.search(strip_tags(line))
+        if found:
+            yield line_no, f"'{found.group(0)}' — 10 이상은 아라비아 숫자로"
+
+
 @check("colon_speaker_prefix")
 def _colon_speaker(ev: Event, ctx: dict):
     """`이름: 대사` — 대본의 화자 표기가 그대로 실려 나온 자리.

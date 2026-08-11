@@ -169,6 +169,36 @@ def _join_markers(text: str, ctx: dict) -> str:
     return "\n".join(out)
 
 
+# 받침이 있는 말과 없는 말은 붙는 조사가 다르다. `불`(받침 있음)을 `달러`(받침
+# 없음)로 바꾸면 조사도 함께 바뀌어야 한다 — `3천 불을`이 `3천 달러을`이 됐다.
+PARTICLE_AFTER_VOWEL = {"을": "를", "은": "는", "이": "가", "과": "와",
+                        "으로": "로", "이나": "나", "이라": "라", "이란": "란"}
+
+
+@fixer("currency_bul")
+def _fix_currency_bul(text: str, ctx: dict) -> str:
+    """숫자 뒤의 '불'만 '달러'로. `불이 났다`는 건드리지 않는다."""
+    from .checks import CURRENCY_BUL
+
+    def swap(match: "re.Match") -> str:
+        rest = text[match.end():]
+        for particle, replacement in PARTICLE_AFTER_VOWEL.items():
+            if rest.startswith(particle):
+                return " 달러" + replacement + rest[len(particle):match.end() - match.end()]
+        return " 달러"
+
+    out = []
+    cursor = 0
+    for match in CURRENCY_BUL.finditer(text):
+        out.append(text[cursor:match.start()])
+        rest = text[match.end():]
+        particle = next((p for p in PARTICLE_AFTER_VOWEL if rest.startswith(p)), "")
+        out.append(" 달러" + PARTICLE_AFTER_VOWEL.get(particle, ""))
+        cursor = match.end() + len(particle)
+    out.append(text[cursor:])
+    return "".join(out).replace("  달러", " 달러")
+
+
 # --- 문서 단위 교정 -------------------------------------------------------
 #
 # 글자만 봐서는 못 고치는 것들. 자막 위치는 **다른 자막과의 관계**로 정해지므로
