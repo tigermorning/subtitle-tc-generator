@@ -25,8 +25,11 @@ from dataclasses import dataclass
 #
 #     720 x 6.67% = 48
 #
-# 이 값이 규격에 맞는 크기다. 이 libmpv 빌드의 기본값은 38(=5.3%)이라 규격보다
-# 작았다. 사람 눈에는 "조금 큰 듯"해도 실제 화면에서 그 크기로 나간다.
+# **그런데 mpv가 재는 "창 높이"는 영상 높이가 아니다.** 영상이 창 안에서 레터박스로
+# 들어가면 위아래 검은 띠까지 창 높이에 들어가고, 그만큼 자막이 규격보다 커진다.
+# 실제로 그렇게 보였다(2026-08-12 사용자 지적: "자막 크기가 너무 커졌어").
+#
+# 그래서 영상이 창에서 차지하는 비율만큼 되돌린다(`_fit_subtitle_scale`).
 SUB_FONT_SIZE = 48
 
 
@@ -75,6 +78,27 @@ class Player:
             self._set_optional(name, value)
 
         self._duration_ms = 0
+
+    def fit_subtitle_scale(self) -> float:
+        """자막 크기를 **영상 높이** 기준으로 되돌린다. 되돌린 비율을 알려 준다.
+
+        mpv는 창 높이로 자막을 키운다. 영상이 레터박스로 들어가 있으면 검은 띠까지
+        높이에 포함되어 자막이 규격보다 커진다. `osd-dimensions`가 창 크기와 영상
+        여백을 주므로, 영상이 차지하는 비율만큼 줄인다.
+
+        창 크기가 바뀔 때마다 다시 불러야 한다.
+        """
+        try:
+            dimensions = self._mpv._get_property("osd-dimensions") or {}
+            height = float(dimensions.get("h") or 0)
+            margins = float(dimensions.get("mt") or 0) + float(dimensions.get("mb") or 0)
+        except Exception:
+            return 1.0
+        if height <= 0 or margins <= 0:
+            return 1.0
+        ratio = max(0.2, min(1.0, (height - margins) / height))
+        self._set_optional("sub-scale", f"{ratio:.4f}")
+        return ratio
 
     def _set_optional(self, name: str, value: str) -> None:
         """있으면 넣고 없으면 넘어간다. 빌드마다 가진 옵션이 다르다."""

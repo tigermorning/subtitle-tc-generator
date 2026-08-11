@@ -276,6 +276,8 @@ class MainWindow(QMainWindow):
     def _sync_position(self) -> None:
         if not self.player:
             return
+        # 창 크기가 바뀌면 영상이 차지하는 비율도 바뀐다. 자막 크기를 따라 맞춘다.
+        self.player.fit_subtitle_scale()
         position = self.player.position_ms
         self.position_label.setText(
             f"{to_timecode(position)} / {to_timecode(self.player.duration_ms)}")
