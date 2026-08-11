@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .align import AlignedCue, Segment, align, summary
-from .media import detect_speech, probe
+from .media import find_speech, probe
 from .model import Event
 from .resplit import resplit_all
 from .timing import TimingLimits, converge
@@ -96,7 +96,7 @@ def generate(video: Path, profile: dict, script: Path | None = None,
              fps: float | None = None, use_gpu: bool = True,
              keep_transcript: Path | None = None, translator=None,
              glossary=None, keep_source: Path | None = None,
-             progress=None) -> Draft:
+             speech_method: str = "auto", progress=None) -> Draft:
     """영상에서 자막 초안을 만든다.
 
     `translator`를 주면 원어를 한국어로 옮긴다. **번역이 먼저, 재분할이 나중이다** —
@@ -171,7 +171,9 @@ def generate(video: Path, profile: dict, script: Path | None = None,
         events = to_events(cues, events)
         stats["translated"] = len(cues)
 
-    speech = detect_speech(video, duration_ms=media.duration_ms)
+    speech, how = find_speech(video, method=speech_method,
+                              duration_ms=media.duration_ms, progress=say)
+    say(f"말소리 구간 {len(speech)}개 ({'모델' if how == 'vad' else '음량'})")
     before, origins = len(events), []
     events = resplit_all(events, profile, speech, origins)
     say(f"자막 {before}개를 의미 단위로 다시 나눠 {len(events)}개")

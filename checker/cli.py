@@ -448,6 +448,7 @@ def _generate_mode(args, ap) -> int:
         draft = generate(args.video, profile, script=args.script,
                          language=args.whisper_lang, model=args.whisper_model,
                          fps=None, use_gpu=not args.cpu, translator=translator,
+                         speech_method=args.speech,
                          glossary=glossary,
                          keep_source=out.with_suffix(".source.srt") if translator else None,
                          progress=print)
@@ -592,6 +593,9 @@ def main(argv: list[str] | None = None) -> int:
                           "가장 큰 것). large-v3-turbo 권장")
     gen.add_argument("--whisper-lang", default="auto",
                      help="말소리 언어(ko, en, auto…). 아는 값을 주면 정확해진다")
+    gen.add_argument("--speech", choices=["auto", "vad", "loudness"], default="auto",
+                     help="말소리를 어떻게 찾을지. auto는 모델(VAD)을 먼저 쓰고 "
+                          "없으면 음량으로 돌아간다")
     gen.add_argument("--cpu", action="store_true",
                      help="GPU를 쓰지 않는다(느리다). 기본은 GPU")
     gen.add_argument("--no-check", action="store_true",

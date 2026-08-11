@@ -226,6 +226,40 @@ def detect_speech(video: Path, noise_db: int = -20, min_silence_s: float = 0.25,
     return [(a, b) for a, b in speech if b > a]
 
 
+def find_speech(video: Path, method: str = "auto", duration_ms: int | None = None,
+                progress=None) -> tuple[list[tuple[int, int]], str]:
+    """말소리 구간을 찾는다. (구간, 쓴 방법)
+
+    **기본은 모델(VAD)이다.** 전문가·연습 자료 4편으로 견줬을 때(2026-08-11):
+
+        자료                음량 -20dB          Silero VAD
+        다큐(음악 깔림)      ±820ms, 31개        ±147ms, 66개
+        다큐                구간 3개(실패)       ±499ms, 66개
+        시트콤              ±411ms, 132개       ±422ms, 103개
+        드라마(정답 파일)    ±255ms,  28개       ±352ms,  21개
+
+    깨끗한 대사에서는 음량이 조금 낫고, 음악·잡음이 섞이면 VAD가 압도한다.
+    **VAD를 기본으로 두는 이유는 최악을 없애기 때문이다** — 음량 검출은 어떤
+    자료에서 30분짜리를 구간 3개로 잡았다. 그런 실패는 자막을 통째로 망친다.
+    조금 손해 보더라도 무너지지 않는 쪽을 기본으로 한다.
+
+    모델이나 onnxruntime이 없으면 조용히 음량으로 돌아간다.
+    """
+    say = progress or (lambda _m: None)
+    if method in ("auto", "vad"):
+        try:
+            from .vad import detect_speech as vad_speech
+            spans = vad_speech(video, progress=say)
+            if spans:
+                return spans, "vad"
+            say("모델이 말소리를 찾지 못했습니다. 음량으로 다시 봅니다.")
+        except Exception as exc:      # 모델·실행기가 없거나 도중에 실패
+            if method == "vad":
+                raise
+            say(f"말소리 모델을 쓰지 못해 음량으로 찾습니다: {exc}")
+    return detect_speech(video, duration_ms=duration_ms), "loudness"
+
+
 SCENE_TIME = re.compile(r"pts_time:([\d.]+)")
 
 
