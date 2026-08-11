@@ -58,6 +58,12 @@ def _known_places(name: str):
     return [folder / f"{name}{suffix}" for folder in places for suffix in (".exe", "")]
 
 
+def _drive_of(path: Path) -> str:
+    """WSL에서 이 경로가 어느 Windows 드라이브에 있는지(`/mnt/c` 꼴)."""
+    parts = path.parts
+    return "/".join(parts[:3]) if len(parts) >= 3 and parts[1] == "mnt" else ""
+
+
 def _as_tool_path(path) -> str:
     """도구에 넘길 수 있는 경로로 바꾼다.
 
@@ -72,12 +78,16 @@ def _as_tool_path(path) -> str:
     path = Path(path)
     if os.name == "nt" or not str(path).startswith("/mnt/"):
         return str(path)
+    # **드라이브가 같아야 상대 경로가 뜻을 가진다.** 다르면 `../../../../d/...`처럼
+    # /mnt 위로 올라갔다 내려오는 경로가 나오는데 Windows는 그것을 못 푼다.
+    # 문자열 모양으로 걸러 보려다 두 번 틀렸다(작업 폴더 깊이에 따라 모양이 바뀐다).
+    # 드라이브 자체를 견주는 것이 맞다.
+    if _drive_of(path.resolve()) != _drive_of(Path.cwd()):
+        return str(path)
     try:
-        relative = os.path.relpath(path.resolve(), Path.cwd())
+        return os.path.relpath(path.resolve(), Path.cwd())
     except ValueError:
         return str(path)
-    # `../../mnt/d/...`처럼 드라이브를 건너가면 Windows가 못 푼다.
-    return str(path) if relative.startswith("../../mnt/") else relative
 
 
 def _find(name: str) -> str:
