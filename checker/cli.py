@@ -141,7 +141,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("targets", nargs="*", type=Path,
                     help="자막 파일 또는 폴더 (.srt / .vtt). 여러 개 줄 수 있다")
     ap.add_argument("--profile", type=Path,
-                    help="프로파일 파일을 직접 지정한다(에이전시·발주처 전용 기준)")
+                    help="프로파일 파일을 직접 지정한다(발주처 기준·템플릿 등). "
+                         "--list로 이름을 확인한다")
     ap.add_argument("-p", "--platform", default="netflix")
     ap.add_argument("-l", "--lang", default="ko")
     ap.add_argument("-k", "--kind", choices=["sdh", "translation"], default="translation")
@@ -162,8 +163,11 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
 
     if args.list:
-        for platform, lang, kind in available_profiles():
-            print(f"{platform:10} {lang:4} {kind}")
+        for prof in available_profiles():
+            extra = f"  {prof['section']}" if prof["section"] else ""
+            rev = f" ({prof['revision']})" if prof["revision"] else ""
+            print(f"{prof['name']:18} {prof['platform']:8} {prof['language']:3} "
+                  f"{prof['kind']:12}{extra}{rev}")
         return 0
 
     if not args.targets:

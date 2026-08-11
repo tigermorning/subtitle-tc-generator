@@ -157,8 +157,12 @@ def _merge(parent: dict, child: dict) -> dict:
     return merged
 
 
-def available_profiles() -> list[tuple[str, str, str]]:
-    """(platform, language, kind) 목록. 미확보 플랫폼은 나오지 않는다."""
+def available_profiles() -> list[dict]:
+    """쓸 수 있는 프로파일 목록. 미확보 플랫폼은 나오지 않는다.
+
+    파일 이름을 함께 준다 — `en-translation`과 `en-template`은 platform·language·kind가
+    같아서 그 셋만으로는 구분되지 않는다(실제로 목록에 같은 줄이 두 번 나왔다).
+    """
     found = []
     for path in sorted(RULES_ROOT.glob("*/*.yaml")):
         try:
@@ -166,5 +170,14 @@ def available_profiles() -> list[tuple[str, str, str]]:
         except ProfileError:
             continue
         if data.get("kind") in ("sdh", "translation") and data.get("status") == "complete":
-            found.append((data["platform"], data["language"], data["kind"]))
+            src = data.get("source") or {}
+            found.append({
+                "name": path.stem,
+                "path": path,
+                "platform": data["platform"],
+                "language": data["language"],
+                "kind": data["kind"],
+                "section": src.get("section", ""),
+                "revision": src.get("revision", ""),
+            })
     return found
