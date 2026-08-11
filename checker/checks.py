@@ -244,6 +244,21 @@ def run_checks(events: list[Event], profile: dict, children: bool = False):
         names = rule["check"]
         names = names if isinstance(names, list) else [names]
         for name in names:
+            doc_fn = DOC_REGISTRY.get(name)
+            if doc_fn is not None:
+                for event_index, line_no, detail in doc_fn(events, ctx):
+                    violations.append(
+                        Violation(
+                            rule_id=rule["id"],
+                            clause=rule["clause"],
+                            event_index=event_index,
+                            message=rule["message"],
+                            detail=detail,
+                            auto_fixable=bool(rule.get("auto")),
+                            line_no=line_no,
+                        )
+                    )
+                continue
             fn = REGISTRY.get(name)
             if fn is None:
                 label = f"{rule['id']} ({name})"
@@ -266,3 +281,87 @@ def run_checks(events: list[Event], profile: dict, children: bool = False):
 
     violations.sort(key=lambda v: (v.event_index, v.rule_id))
     return violations, unimplemented
+
+
+# --- 문서 단위 검사 -------------------------------------------------------
+#
+# 자막 하나만 봐서는 알 수 없고 파일 전체를 훑어야 하는 검사다. 이벤트 단위
+# 검사와 계약이 달라 레지스트리를 나눈다.
+#   fn(events, ctx) -> list[tuple[event_index, line_no | None, detail]]
+
+DOC_REGISTRY: dict[str, callable] = {}
+
+
+def doc_check(name: str):
+    def deco(fn):
+        DOC_REGISTRY[name] = fn
+        return fn
+
+    return deco
+
+
+SPEAKER_ID_RE = re.compile(r"^\s*-?\s*\[([^\]]+)\]\s*(.*)$")
+
+
+def speaker_ids(events: list[Event]) -> list[tuple[str, int, int]]:
+    """화자 표시만 뽑는다: (라벨, event_index, line_no).
+
+    줄 맨 앞 대괄호 **뒤에 대사가 이어질 때만** 화자 표시로 본다. 대괄호만 있는
+    줄은 효과음이다(`[문이 쾅 닫히는 소리]`) — 둘을 섞으면 효과음 문구가 화자
+    이름으로 잡혀 일관성 검사가 무의미해진다.
+    """
+    found = []
+    for ev in events:
+        for line_no, line in enumerate(ev.lines, 1):
+            m = SPEAKER_ID_RE.match(strip_tags(line))
+            if m and m.group(2).strip():
+                found.append((m.group(1).strip(), ev.index, line_no))
+    return found
+
+
+def _base_label(label: str) -> str:
+    """뒤에 붙은 번호를 뗀다. `[남자 1]`·`[남자 2]`는 규정이 허용하는 구분이다."""
+    return re.sub(r"\s*\d+$", "", label)
+
+
+@doc_check("speaker_id_inconsistent")
+def _speaker_consistency(events: list[Event], ctx: dict):
+    labels = speaker_ids(events)
+    if not labels:
+        return []
+
+    first_seen: dict[str, tuple[int, int]] = {}
+    for label, ev_index, line_no in labels:
+        first_seen.setdefault(label, (ev_index, line_no))
+
+    out = []
+    reported: set[tuple[str, str]] = set()
+
+    # ① 공백만 다른 표기 — 같은 이름을 두 가지로 적은 것이라 확정 위반이다.
+    by_normal: dict[str, list[str]] = {}
+    for label in first_seen:
+        by_normal.setdefault(label.replace(" ", ""), []).append(label)
+    for variants in by_normal.values():
+        if len(variants) > 1:
+            variants = sorted(variants)
+            ev_index, line_no = first_seen[variants[-1]]
+            out.append((ev_index, line_no,
+                        "같은 이름을 다르게 적었습니다: " + " / ".join(f"[{v}]" for v in variants)))
+            reported.add((variants[0], variants[-1]))
+
+    # ② 한쪽이 다른 쪽에 포함되는 표기 — `[김 경위]`와 `[경위]`처럼 같은 인물일
+    #    가능성이 크다. 다만 규정은 전개에 따른 변경을 허용하므로 확인만 구한다.
+    names = sorted(first_seen, key=lambda x: first_seen[x])
+    for i, a in enumerate(names):
+        for b in names[i + 1:]:
+            na, nb = _base_label(a).replace(" ", ""), _base_label(b).replace(" ", "")
+            if not na or not nb or na == nb:
+                continue
+            if (na in nb or nb in na) and (a, b) not in reported and (b, a) not in reported:
+                ev_index, line_no = first_seen[b]
+                out.append((ev_index, line_no,
+                            f"[{a}]와 [{b}]가 같은 인물이면 하나로 통일해야 합니다"
+                            " (전개상 의도적 변경이면 그대로 두세요)"))
+                reported.add((a, b))
+
+    return out

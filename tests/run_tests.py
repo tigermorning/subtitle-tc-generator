@@ -279,6 +279,41 @@ with tempfile.TemporaryDirectory() as tmp:
                                         "--fix", "-o", str(d / "x.srt")]) == 2)
 
 
+# --- 문서 단위 검사 -------------------------------------------------------
+
+from checker.checks import speaker_ids  # noqa: E402
+
+doc = [ev("[김 경위] 어디 갔었어?", index=1),
+       ev("[진수] 몰라", index=2),
+       ev("[김경위] 말해", index=3)]
+r = check_events(doc, ko_sdh)
+detail = " ".join(v["detail"] for v in r["violations"] if v["rule_id"] == "S13")
+ok("공백만 다른 화자 표시를 잡는다", "김 경위" in detail and "김경위" in detail, detail)
+
+doc = [ev("[경위] 어디 갔었어?", index=1), ev("[김 경위] 말해", index=2)]
+r = check_events(doc, ko_sdh)
+ok("포함 관계인 화자 표시를 확인 요청한다", "S13" in ids(r))
+
+doc = [ev("[남자 1] 저기요", index=1), ev("[남자 2] 왜요", index=2)]
+r = check_events(doc, ko_sdh)
+ok("번호로 구분한 것은 위반이 아니다", "S13" not in ids(r),
+   str([v["detail"] for v in r["violations"] if v["rule_id"] == "S13"]))
+
+doc = [ev("[진수] 어디 갔었어?", index=1), ev("[영희] 몰라", index=2)]
+r = check_events(doc, ko_sdh)
+ok("서로 다른 인물은 위반이 아니다", "S13" not in ids(r))
+
+found = speaker_ids([Event(1, 0, 3000, "[문이 쾅 닫히는 소리]\n[진수] 어디 가")])
+ok("대괄호만 있는 줄은 효과음이라 화자로 안 센다",
+   [f[0] for f in found] == ["진수"], str(found))
+
+found = speaker_ids([Event(1, 0, 3000, "-[영희] 몰라도 돼")])
+ok("2인 화자 하이픈 뒤 화자 표시도 잡는다", found[0][0] == "영희", str(found))
+
+ok("미구현 목록에서 S13이 빠졌다",
+   all("S13" not in u for u in check_events([ev("[진수] 안녕")], ko_sdh)["unimplemented_checks"]))
+
+
 # --- 결과 ---------------------------------------------------------------
 
 print(f"통과 {PASSED}건")
