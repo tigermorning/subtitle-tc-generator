@@ -362,6 +362,14 @@ class MainWindow(QMainWindow):
 
         self._start(job, done, "용어를 조사하는 중입니다...")
 
+    def show_diagnosis(self) -> None:
+        """무엇을 찾았고 무엇을 못 찾았는지. 조용히 안 되는 것을 없앤다."""
+        from .diagnose import as_text
+        box = QMessageBox(self)
+        box.setWindowTitle("진단")
+        box.setText("<pre>" + as_text().replace("<", "&lt;") + "</pre>")
+        box.exec()
+
     def _build_menu(self) -> None:
         file_menu = self.menuBar().addMenu("파일(&F)")
         for title, shortcut, slot in (
@@ -373,6 +381,11 @@ class MainWindow(QMainWindow):
             action.setShortcut(QKeySequence(shortcut))
             action.triggered.connect(slot)
             file_menu.addAction(action)
+
+        help_menu = self.menuBar().addMenu("도움말(&H)")
+        diagnosis = QAction("진단...", self)
+        diagnosis.triggered.connect(self.show_diagnosis)
+        help_menu.addAction(diagnosis)
 
     # --- 파일 ---------------------------------------------------------
     def open_video(self) -> None:

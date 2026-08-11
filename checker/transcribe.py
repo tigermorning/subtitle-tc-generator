@@ -21,6 +21,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 from .align import Segment
@@ -37,9 +38,12 @@ def find_model(explicit: str | None = None) -> Path:
         if value and Path(value).is_file():
             return Path(value)
 
-    # 흔히 두는 자리들
+    # 흔히 두는 자리들. **실행 파일 옆을 먼저 본다** — 묶어서 배포하면 사용자가
+    # 모델을 그 자리에 둔다(1.5GB라 배포물에 넣지 않는다).
     here = Path(__file__).resolve().parent.parent
-    for folder in (here / ".tmp", here / "models", Path.home() / "whisper-models"):
+    beside_exe = Path(sys.executable).resolve().parent
+    for folder in (beside_exe / "models", beside_exe,
+                   here / ".tmp", here / "models", Path.home() / "whisper-models"):
         if folder.is_dir():
             found = sorted(folder.glob("ggml-*.bin"))
             if found:
