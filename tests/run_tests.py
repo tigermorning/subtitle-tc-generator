@@ -253,6 +253,32 @@ ok("SRT로 쓴다", srt.startswith("1\n00:00:00,000 --> 00:00:02,500\n첫 줄"),
 ok("번호를 다시 매긴다", "\n2\n00:00:02,500" in srt)
 
 
+# --- 배치 -----------------------------------------------------------------
+
+import tempfile  # noqa: E402
+from checker.cli import collect_files, main as cli_main  # noqa: E402
+
+with tempfile.TemporaryDirectory() as tmp:
+    d = Path(tmp)
+    (d / "a.srt").write_text("1\n00:00:01,000 --> 00:00:03,000\n[진수] 안녕\n", encoding="utf-8")
+    (d / "b.vtt").write_text("WEBVTT\n\n00:00:01.000 --> 00:00:03.000\n[영희] 그래\n", encoding="utf-8")
+    (d / "c.fixed.srt").write_text("1\n00:00:01,000 --> 00:00:03,000\n교정본\n", encoding="utf-8")
+    (d / "notes.txt").write_text("자막 아님", encoding="utf-8")
+
+    found = [f.name for f in collect_files([d])]
+    ok("폴더를 펴서 자막만 고른다", sorted(found) == ["a.srt", "b.vtt"], str(found))
+    ok("교정본은 다시 집지 않는다", "c.fixed.srt" not in found)
+
+    ok("여러 파일을 한 번에 검사한다",
+       cli_main([str(d), "-l", "ko", "-k", "sdh"]) == 0)
+
+    (d / "bad.srt").write_text(
+        "1\n00:00:01,000 --> 00:00:03,000\n그러니까...\n", encoding="utf-8")
+    ok("위반이 있으면 종료 코드 1", cli_main([str(d), "-l", "ko", "-k", "sdh"]) == 1)
+    ok("-o는 파일 하나일 때만", cli_main([str(d), "-l", "ko", "-k", "sdh",
+                                        "--fix", "-o", str(d / "x.srt")]) == 2)
+
+
 # --- 결과 ---------------------------------------------------------------
 
 print(f"통과 {PASSED}건")

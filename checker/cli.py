@@ -2,6 +2,7 @@
 
     python -m checker examples/sample.srt --platform netflix --lang ko --kind sdh
     python -m checker file.srt -p netflix -l en -k translation --json
+    python -m checker 시즌1/ -l ko -k sdh --fix        # 폴더 통째로
     python -m checker --list
 """
 
@@ -17,6 +18,8 @@ from .fixes import apply_fixes
 from .korean import CorrectorUnavailable, load_backend, run_korean_pass
 from .parsers import parse
 from .writers import write_srt
+
+SUBTITLE_SUFFIXES = (".srt", ".vtt")
 
 
 def _format_text(report: dict, path: Path) -> str:
@@ -65,10 +68,63 @@ def _force_utf8_output() -> None:
             pass
 
 
+def collect_files(targets: list[Path]) -> list[Path]:
+    """파일과 폴더를 섞어 받아 자막 파일 목록으로 편다.
+
+    폴더는 한 단계만 훑는다 — 회차 파일이 한 폴더에 모여 있는 실제 작업 형태에
+    맞추고, 교정 결과(`*.fixed.srt`)를 다시 집어 들지 않게 거른다.
+    """
+    files: list[Path] = []
+    for target in targets:
+        if target.is_dir():
+            found = [
+                p for p in sorted(target.iterdir())
+                if p.suffix.lower() in SUBTITLE_SUFFIXES and not p.name.endswith(".fixed.srt")
+            ]
+            files.extend(found)
+        elif target.is_file():
+            files.append(target)
+        else:
+            print(f"파일이 없습니다: {target}", file=sys.stderr)
+    return files
+
+
+def _run_one(path: Path, profile: dict, args, backend) -> dict | None:
+    events = parse(path)
+    if not events:
+        print(f"자막 이벤트를 읽지 못했습니다: {path}", file=sys.stderr)
+        return None
+
+    report = check_events([e.__dict__ for e in events], profile, children=args.children)
+    report["file"] = str(path)
+
+    ko_fixed = None
+    if backend is not None:
+        ko_fixed, ko_violations = run_korean_pass(events, backend, spacing_mode=args.spacing)
+        report["violations"].extend(v.to_dict() for v in ko_violations)
+        report["violations"].sort(key=lambda v: (v["event_index"], v["rule_id"]))
+
+    if args.fix:
+        fixed, applied, unfixable = apply_fixes(events, profile)
+        if ko_fixed is not None:
+            # 교정기 결과를 규정 자동 교정 위에 얹는다. 순서를 바꾸면 교정기가
+            # 넣은 문장부호를 규정 교정이 다시 걷어내는 왕복이 생긴다.
+            fixed, applied2, _ = apply_fixes(ko_fixed, profile)
+            applied = sorted(set(applied) | set(applied2))
+        out_path = args.out or path.with_suffix(".fixed.srt")
+        write_srt(fixed, out_path)
+        report["fixed_file"] = str(out_path)
+        report["applied_fixes"] = applied
+        report["auto_but_unfixable"] = unfixable
+
+    return report
+
+
 def main(argv: list[str] | None = None) -> int:
     _force_utf8_output()
     ap = argparse.ArgumentParser(prog="checker", description="플랫폼 규정 준수 검사")
-    ap.add_argument("file", nargs="?", type=Path, help="자막 파일 (.srt / .vtt)")
+    ap.add_argument("targets", nargs="*", type=Path,
+                    help="자막 파일 또는 폴더 (.srt / .vtt). 여러 개 줄 수 있다")
     ap.add_argument("-p", "--platform", default="netflix")
     ap.add_argument("-l", "--lang", default="ko")
     ap.add_argument("-k", "--kind", choices=["sdh", "translation"], default="translation")
@@ -82,7 +138,8 @@ def main(argv: list[str] | None = None) -> int:
                     help="보조 용언 띄어쓰기 기준(제47항). 교정기 레인에만 쓴다")
     ap.add_argument("--fix", action="store_true",
                     help="자동 교정 가능한 것을 고쳐 새 파일로 쓴다(원본은 그대로)")
-    ap.add_argument("-o", "--out", type=Path, help="교정 결과 경로(기본: <원본>.fixed.srt)")
+    ap.add_argument("-o", "--out", type=Path,
+                    help="교정 결과 경로(기본: <원본>.fixed.srt). 파일 하나일 때만 쓴다")
     args = ap.parse_args(argv)
 
     if args.list:
@@ -90,10 +147,15 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{platform:10} {lang:4} {kind}")
         return 0
 
-    if not args.file:
-        ap.error("자막 파일이 필요합니다 (또는 --list)")
-    if not args.file.is_file():
-        print(f"파일이 없습니다: {args.file}", file=sys.stderr)
+    if not args.targets:
+        ap.error("자막 파일이나 폴더가 필요합니다 (또는 --list)")
+
+    files = collect_files(args.targets)
+    if not files:
+        print("검사할 자막 파일이 없습니다.", file=sys.stderr)
+        return 2
+    if args.out and len(files) > 1:
+        print("-o는 파일 하나일 때만 씁니다.", file=sys.stderr)
         return 2
 
     try:
@@ -102,47 +164,42 @@ def main(argv: list[str] | None = None) -> int:
         print(f"프로파일 오류: {e}", file=sys.stderr)
         return 2
 
-    events = parse(args.file)
-    if not events:
-        print(f"자막 이벤트를 읽지 못했습니다: {args.file}", file=sys.stderr)
-        return 2
-
-    report = check_events([e.__dict__ for e in events], profile, children=args.children)
-
-    ko_fixed = None
+    # 교정기는 한 번만 올린다 — 형태소 분석기 적재가 무거워서 파일마다 올리면
+    # 회차를 여러 개 돌릴 때 그 비용이 그대로 곱해진다.
+    backend = None
     if args.korean:
         if args.lang != "ko":
             print("한국어 교정 레인은 --lang ko 에서만 씁니다.", file=sys.stderr)
             return 2
         try:
             backend = load_backend(args.ksc_path)
-            ko_fixed, ko_violations = run_korean_pass(events, backend, spacing_mode=args.spacing)
         except CorrectorUnavailable as e:
             # 못 돌렸다는 사실을 숨기지 않는다 — 통과로 보이면 안 된다.
             print(f"한국어 교정 레인을 건너뜁니다: {e}", file=sys.stderr)
-        else:
-            report["violations"].extend(v.to_dict() for v in ko_violations)
-            report["violations"].sort(key=lambda v: (v["event_index"], v["rule_id"]))
 
-    if args.fix:
-        fixed, applied, unfixable = apply_fixes(events, profile)
-        if args.korean and ko_fixed is not None:
-            # 교정기 결과를 규정 자동 교정 위에 얹는다. 순서를 바꾸면 교정기가
-            # 넣은 문장부호를 규정 교정이 다시 걷어내는 왕복이 생긴다.
-            fixed, applied2, _ = apply_fixes(ko_fixed, profile)
-            applied = sorted(set(applied) | set(applied2))
-        out_path = args.out or args.file.with_suffix(".fixed.srt")
-        write_srt(fixed, out_path)
-        report["fixed_file"] = str(out_path)
-        report["applied_fixes"] = applied
-        report["auto_but_unfixable"] = unfixable
+    reports = []
+    for path in files:
+        report = _run_one(path, profile, args, backend)
+        if report is not None:
+            reports.append(report)
+
+    if not reports:
+        return 2
 
     if args.json:
-        print(json.dumps(report, ensure_ascii=False, indent=2))
+        print(json.dumps(reports if len(reports) > 1 else reports[0],
+                         ensure_ascii=False, indent=2))
     else:
-        print(_format_text(report, args.file))
+        for report in reports:
+            print(_format_text(report, Path(report["file"])))
+            if len(reports) > 1:
+                print()
+        if len(reports) > 1:
+            total = sum(len(r["violations"]) for r in reports)
+            clean = sum(1 for r in reports if not r["violations"])
+            print(f"합계: 파일 {len(reports)}개, 위반 {total}건, 위반 없는 파일 {clean}개")
 
-    return 1 if report["violations"] else 0
+    return 1 if any(r["violations"] for r in reports) else 0
 
 
 if __name__ == "__main__":
