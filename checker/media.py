@@ -134,3 +134,23 @@ def detect_speech(video: Path, noise_db: int = -30, min_silence_s: float = 0.25,
     if total and cursor * 1000 < total:
         speech.append((int(cursor * 1000), total))
     return [(a, b) for a, b in speech if b > a]
+
+
+SCENE_TIME = re.compile(r"pts_time:([\d.]+)")
+
+
+def detect_shot_changes(video: Path, sensitivity: float = 0.2) -> list[int]:
+    """장면 전환 시각(ms) 목록.
+
+    민감도는 작업자 자료의 기본값(0.2)을 따른다. 낮을수록 예민하게 잡아서 배우가
+    팔을 올리는 것도 전환으로 보고, 애니메이션은 오히려 높여야 한다고 적혀 있다.
+    SubtitleEdit의 장면 전환 검출도 같은 ffmpeg 필터를 쓴다.
+    """
+    out = subprocess.run(
+        [_find("ffmpeg"), "-hide_banner", "-nostats", "-i", str(video),
+         "-vf", f"select='gt(scene,{sensitivity})',showinfo",
+         "-f", "null", "-"],
+        capture_output=True, text=True, check=False,
+    )
+    times = [int(float(m.group(1)) * 1000) for m in SCENE_TIME.finditer(out.stderr)]
+    return sorted(set(times))

@@ -148,10 +148,20 @@ def _run_one(path: Path, profile: dict, args, backend) -> dict | None:
         except MediaToolUnavailable as e:
             print(f"말소리 검출을 건너뜁니다: {e}", file=sys.stderr)
         else:
+            suggestions = suggest_spotting(events, speech, args._media.fps)
+
+            # 장면 전환은 플랫폼이 적용할 때만 본다(쿠팡은 비적용).
+            if (profile.get("shot_change") or {}).get("applied"):
+                from .media import detect_shot_changes
+                from .timing import suggest_shot_snap
+                shots = detect_shot_changes(args.video)
+                print(f"    장면 전환 {len(shots)}곳", file=sys.stderr)
+                suggestions += suggest_shot_snap(events, shots, args._media.fps)
+
             report["spot_suggestions"] = [
                 {"event_index": s.event_index, "field": s.field_name,
                  "current": s.current, "suggested": s.suggested, "reason": s.reason}
-                for s in suggest_spotting(events, speech, args._media.fps)]
+                for s in suggestions]
 
     if timing is not None:
         report["timing_changes"] = [

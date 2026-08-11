@@ -813,6 +813,35 @@ suggest_spotting([original], speech, fps)
 ok("제안은 원본을 바꾸지 않는다", original.start_ms == 3000 and original.end_ms == 5000)
 
 
+# --- 장면 전환 스냅 ----------------------------------------------------------
+
+from checker.timing import suggest_shot_snap  # noqa: E402
+
+shots = [10000, 20000]
+
+sug = suggest_shot_snap([Event(1, 9800, 12000, "걸침")], shots, fps)
+ok("전환에 어설프게 걸친 인점을 잡는다",
+   sug and sug[0].field_name == "start_ms" and sug[0].suggested == 10000, str(sug))
+ok("딱 붙이라고 말한다", "딱 붙이거나" in sug[0].reason)
+
+ok("이미 붙어 있으면 조용하다",
+   not suggest_shot_snap([Event(1, 10000, 15000, "딱")], shots, fps))
+ok("멀리 떨어져 있으면 조용하다",
+   not suggest_shot_snap([Event(1, 5000, 8000, "멀리")], shots, fps))
+
+sug = suggest_shot_snap([Event(1, 3000, 9700, "아웃점 걸침")], shots, fps)
+ends = [s for s in sug if s.field_name == "end_ms"]
+ok("전환에 걸친 아웃점은 2프레임 앞으로 제안한다",
+   ends and ends[0].suggested < 10000, str(sug))
+
+ok("전환이 없으면 아무 말도 하지 않는다",
+   suggest_shot_snap([Event(1, 0, 3000, "대사")], [], fps) == [])
+
+cp_shot = load_profile_file(Path("rules/coupang/ko-sdh.yaml"))
+ok("쿠팡은 장면 전환 비적용이라 이 검사를 부르지 않는다",
+   cp_shot["shot_change"]["applied"] is False)
+
+
 # --- 결과 ---------------------------------------------------------------
 
 print(f"통과 {PASSED}건")

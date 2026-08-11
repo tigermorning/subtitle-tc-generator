@@ -240,3 +240,58 @@ def suggest_spotting(events: list[Event], speech: list[tuple[int, int]], fps: fl
                 f"말소리 끝 {voice_end}ms의 {LEAD_OUT_FRAMES[0]}~{LEAD_OUT_FRAMES[1]}프레임 뒤"))
 
     return out
+
+
+# 장면 전환 규정(작업자 자료):
+#   인점: 장면 전환에 딱 맞추거나 0.5초 이상 벌리기
+#   아웃점: 장면 전환 -2프레임에 맞추거나 0.5초 이상 벌리기
+#   쿠팡은 비적용
+SHOT_CLEARANCE_MS = 500
+SHOT_OUT_LEAD_FRAMES = 2
+
+
+def suggest_shot_snap(events: list[Event], shots: list[int], fps: float,
+                      clearance_ms: int = SHOT_CLEARANCE_MS) -> list[SpotSuggestion]:
+    """장면 전환에 어설프게 걸친 타임코드를 제안한다.
+
+    규정이 말하는 것은 **어중간하지 말라**는 것이다 — 딱 붙이거나 확실히 떨어뜨리거나.
+    전환에서 `clearance_ms` 안에 있으면서 딱 맞지도 않은 자리만 지적한다.
+
+    쿠팡처럼 장면 전환을 적용하지 않는 곳에서는 이 함수를 부르지 않는다
+    (프로파일의 `shot_change.applied`가 판단한다).
+    """
+    if not shots:
+        return []
+    frame = 1000.0 / fps
+    snap_tolerance = frame           # 한 프레임 안이면 이미 붙은 것으로 본다
+    out: list[SpotSuggestion] = []
+
+    for ev in events:
+        for shot in shots:
+            # 인점: 전환에 딱 붙이거나 0.5초 이상 벌린다
+            delta = ev.start_ms - shot
+            if abs(delta) <= snap_tolerance:
+                break
+            if abs(delta) < clearance_ms:
+                out.append(SpotSuggestion(
+                    ev.index, "start_ms", ev.start_ms, shot,
+                    f"장면 전환 {shot}ms에 {abs(delta)}ms 차로 걸쳤습니다 —"
+                    f" 딱 붙이거나 {clearance_ms}ms 이상 벌립니다"))
+                break
+
+        want_out = None
+        for shot in shots:
+            delta = ev.end_ms - shot
+            target = int(round(shot - SHOT_OUT_LEAD_FRAMES * frame))
+            if abs(ev.end_ms - target) <= snap_tolerance:
+                break
+            if abs(delta) < clearance_ms:
+                want_out = target
+                break
+        if want_out is not None:
+            out.append(SpotSuggestion(
+                ev.index, "end_ms", ev.end_ms, want_out,
+                f"장면 전환에 걸친 아웃점 — 전환 {SHOT_OUT_LEAD_FRAMES}프레임 앞에 맞추거나"
+                f" {clearance_ms}ms 이상 벌립니다"))
+
+    return out
