@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import tempfile
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QThread, Qt, QTimer, Signal
@@ -51,15 +52,28 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("자막 편집기")
         self.resize(1280, 760)
 
+        self._preview_loaded = False
         self.player: Player | None = None
         self.subtitle_path: Path | None = None
         self.model = SubtitleModel()
+        # 편집 중인 내용을 영상에 얹기 위한 임시 파일. **원본과 따로 둔다** —
+        # 미리 보기 때문에 원본이 바뀌면 안 된다.
+        self._preview_path = Path(tempfile.gettempdir()) / "subtitle-editor-preview.srt"
 
         self._build()
         self._build_menu()
 
         # 재생 위치를 따라 표가 움직인다. 자막 작업은 "지금 무엇이 보이나"를
         # 계속 확인하는 일이라 이것이 없으면 눈이 두 곳을 오간다.
+        # 편집할 때마다 파일을 다시 쓰면 타자 한 번에 디스크가 한 번 돈다.
+        # 잠깐 모았다가 한꺼번에 갱신한다.
+        self._preview_timer = QTimer(self)
+        self._preview_timer.setSingleShot(True)
+        self._preview_timer.setInterval(250)
+        self._preview_timer.timeout.connect(self._refresh_preview)
+        self.model.dataChanged.connect(lambda *_: self._preview_timer.start())
+        self.model.modelReset.connect(lambda: self._preview_timer.start())
+
         self._follow = QTimer(self)
         self._follow.setInterval(100)
         self._follow.timeout.connect(self._sync_position)
@@ -144,6 +158,8 @@ class MainWindow(QMainWindow):
         self.player.open(path)
         self.statusBar().showMessage(f"영상: {Path(path).name}  {self.player.fps:.3f}fps"
                                      f" — 파형을 만드는 중입니다...")
+        self._preview_loaded = False
+        self._preview_timer.start()
         self._load_peaks(path)
 
     def open_subtitle(self) -> None:
@@ -157,6 +173,7 @@ class MainWindow(QMainWindow):
         self.subtitle_path = Path(path)
         self.model.replace(events)
         self.waveform.set_events(self.model.events)
+        self._preview_timer.start()
         self.statusBar().showMessage(f"자막 {len(events)}개: {self.subtitle_path.name}")
 
     def save_subtitle(self) -> None:
@@ -189,6 +206,20 @@ class MainWindow(QMainWindow):
             f"파형 준비 완료 — {duration / 60000:.1f}분. "
             "Ctrl+휠로 확대, 자막 가장자리를 끌어 인·아웃을 맞춥니다")
 
+    def _refresh_preview(self) -> None:
+        """편집 중인 자막을 영상에 얹는다."""
+        if not self.player or not self.model.events:
+            return
+        try:
+            write_srt(self.model.events, self._preview_path)
+        except OSError:
+            return
+        if self._preview_loaded:
+            self.player.reload_subtitles()
+        else:
+            self.player.set_subtitles(str(self._preview_path))
+            self._preview_loaded = True
+
     def _seek_to(self, ms: int) -> None:
         if self.player:
             self.player.seek(ms)
@@ -204,6 +235,7 @@ class MainWindow(QMainWindow):
                 self.statusBar().showMessage(
                     f"#{index} {to_timecode(start_ms)} ~ {to_timecode(end_ms)}"
                     f"  ({(end_ms - start_ms) / 1000:.2f}초)")
+                self._preview_timer.start()
                 break
 
     def _select_cue(self, index: int) -> None:

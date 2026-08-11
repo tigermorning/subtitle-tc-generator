@@ -81,6 +81,24 @@ class Player:
         for _ in range(abs(frames)):
             self._mpv.command(command)
 
+    # --- 자막 ---------------------------------------------------------
+    def set_subtitles(self, path: str) -> None:
+        """자막 파일을 영상에 얹는다. 이미 얹혀 있으면 갈아 끼운다.
+
+        **왜 파일로 넘기는가**: mpv의 자막 그리기를 그대로 쓰면 최종 결과와 같은
+        모양으로 보인다 — 줄바꿈, 위치 태그(`{\\an8}`), 글자 크기까지. 우리가
+        직접 글자를 그리면 "편집기에서는 이렇게 보였는데" 하는 차이가 생긴다.
+        """
+        self._mpv.command("sub-remove")
+        self._mpv.command("sub-add", path, "select")
+
+    def reload_subtitles(self) -> None:
+        """같은 파일을 다시 읽는다. 편집한 내용을 곧바로 보여 줄 때 쓴다."""
+        try:
+            self._mpv.command("sub-reload")
+        except Exception:
+            pass
+
     def close(self) -> None:
         try:
             self._mpv.terminate()
