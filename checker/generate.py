@@ -123,7 +123,9 @@ def generate(video: Path, profile: dict, script: Path | None = None,
     stats: dict = {"transcript": len(segments)}
 
     if script:
-        script_lines = read_script(Path(script))
+        # 대본은 워드·PDF로도 온다. 형식은 `script.py`가 가린다.
+        from .script import read_lines
+        script_lines = read_lines(Path(script))
         say(f"스크립트 {len(script_lines)}줄과 대조합니다")
 
         # **대본이 화자명을 주면 우리 표기로 남긴다.** 원문이 `화자1:`로 적었든

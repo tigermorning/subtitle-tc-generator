@@ -375,8 +375,9 @@ class MainWindow(QMainWindow):
             return
         script = None
         if self.kind_box.currentText() == "translation":
+            from checker.script import file_filter
             path, _ = QFileDialog.getOpenFileName(
-                self, "원어 대본 (없으면 취소)", "", "대본 (*.txt *.md);;모든 파일 (*.*)")
+                self, "원어 대본 (없으면 취소)", "", file_filter())
             script = Path(path) if path else None
 
         job = jobs.GenerateJob(Path(self._video_path), self._profile(), script,
@@ -479,6 +480,7 @@ class MainWindow(QMainWindow):
         for title, shortcut, slot in (
                 ("영상 열기...", "Ctrl+O", self.open_video),
                 ("자막 열기...", "Ctrl+Shift+O", self.open_subtitle),
+                ("원어 대본 열기...", "Ctrl+Alt+O", self.open_script),
                 ("자막 저장", "Ctrl+S", self.save_subtitle),
         ):
             action = QAction(title, self)
@@ -528,6 +530,49 @@ class MainWindow(QMainWindow):
         self.waveform.set_events(self.model.events)
         self._preview_timer.start()
         self.statusBar().showMessage(f"자막 {len(events)}개: {self.subtitle_path.name}")
+
+    def open_script(self) -> None:
+        """원어 대본을 원어 칸에 채운다.
+
+        **대본은 자막 파일로 오지 않는다.** 워드·텍스트·PDF로 온다. 자막 형식만
+        열 수 있으면 대본을 쓸 수 없다(사용자 지적 2026-08-12).
+
+        자막이 이미 있으면 순서대로 짝지어 원어 칸에 넣는다. 수가 다르면 **맞는
+        데까지만** 넣고 얼마나 어긋났는지 말한다 — 조용히 밀어 넣으면 엉뚱한 대사가
+        엉뚱한 자막에 붙는다.
+        """
+        from checker.script import ScriptUnavailable, file_filter, read_lines
+
+        path, _ = QFileDialog.getOpenFileName(self, "원어 대본 열기", "", file_filter())
+        if not path:
+            return
+        try:
+            lines = read_lines(Path(path))
+        except ScriptUnavailable as exc:
+            QMessageBox.warning(self, "대본을 읽지 못했습니다", str(exc))
+            return
+        except Exception as exc:
+            QMessageBox.warning(self, "대본을 읽지 못했습니다", f"{type(exc).__name__}: {exc}")
+            return
+
+        if not lines:
+            QMessageBox.warning(self, "대본이 비어 있습니다", Path(path).name)
+            return
+
+        self._script_lines = lines
+        if not self.model.events:
+            self._note(f"대본 {len(lines)}줄을 읽었습니다. "
+                       "영상을 열고 [영상에서 자막 만들기]를 누르면 대조합니다")
+            return
+
+        sources = {event.index: (lines[i].text if i < len(lines) else "")
+                   for i, event in enumerate(self.model.events)}
+        self.model.replace(self.model.events, sources)
+        message = f"대본 {len(lines)}줄을 원어 칸에 넣었습니다"
+        if len(lines) != len(self.model.events):
+            message += (f" — 자막은 {len(self.model.events)}개입니다. "
+                        "수가 달라 뒤로 갈수록 어긋납니다")
+        self._note(message)
 
     def save_subtitle(self) -> None:
         if not self.model.events:

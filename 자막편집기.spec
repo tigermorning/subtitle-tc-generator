@@ -28,7 +28,7 @@ a = Analysis(
     binaries=binaries,
     datas=datas,
     hiddenimports=(collect_submodules("checker") + collect_submodules("app")
-                   + ["mpv", "onnxruntime", "numpy"]),
+                   + ["mpv", "onnxruntime", "numpy", "pypdf"]),
     excludes=["tkinter", "matplotlib", "PySide6.QtWebEngineCore",
               "PySide6.Qt3DCore", "PySide6.QtQuick", "PySide6.QtQml"],
     noarchive=False,

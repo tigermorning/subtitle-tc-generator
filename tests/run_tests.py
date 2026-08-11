@@ -1727,6 +1727,54 @@ else:
     ok("아웃점을 지금 위치로", set_out_point(_points, 1, 3500) and _points[0].end_ms == 3500)
 
 
+# --- 원어 대본 읽기 --------------------------------------------------------
+# 대본은 자막 파일로 오지 않는다. 워드·텍스트·PDF로 온다(사용자 지적 2026-08-12).
+
+import zipfile as _zip  # noqa: E402
+from checker.script import ScriptUnavailable, read_any, read_lines, read_text  # noqa: E402
+
+with _tf3.TemporaryDirectory() as _d:
+    _folder = Path(_d)
+
+    # 한국어 파일은 cp949로 오는 경우가 흔하다.
+    _cp949 = _folder / "cp949.txt"
+    _cp949.write_bytes("첫 대사\n둘째 대사\n".encode("cp949"))
+    ok("cp949 텍스트를 읽는다", read_text(_cp949).startswith("첫 대사"))
+
+    _utf8 = _folder / "utf8.txt"
+    _utf8.write_text("SARAH: Hello there.\n\n(She leaves.)\n\nDAD: Wait.\n",
+                     encoding="utf-8")
+    _lines = read_lines(_utf8)
+    ok("텍스트 대본에서 대사만 딴다", [l.text for l in _lines] == ["Hello there.", "Wait."])
+    ok("화자명을 함께 들고 온다", _lines[0].speaker == "Sarah")
+
+    # 빈 줄이 없는 대본은 한 줄이 한 대사다. 그대로 두면 통째로 한 덩어리가 된다.
+    _dense = _folder / "dense.txt"
+    _dense.write_text("첫 줄\n둘째 줄\n셋째 줄\n", encoding="utf-8")
+    ok("빈 줄이 없으면 줄마다 대사로 본다", len(read_lines(_dense)) == 3)
+
+    # 워드는 zip 안의 XML이다. 표준 라이브러리로 읽는다.
+    _docx = _folder / "script.docx"
+    with _zip.ZipFile(_docx, "w") as _archive:
+        _archive.writestr("word/document.xml",
+                          '<?xml version="1.0"?><w:document xmlns:w="x"><w:body>'
+                          '<w:p><w:r><w:t>NARRATOR: In December 1944.</w:t></w:r></w:p>'
+                          '<w:p><w:r><w:t>The battle begins.</w:t></w:r></w:p>'
+                          '</w:body></w:document>')
+    _from_docx = read_lines(_docx)
+    ok("워드 대본을 읽는다", len(_from_docx) == 2)
+    ok("워드에서도 화자를 뗀다", _from_docx[0].text == "In December 1944.")
+
+    _broken = _folder / "broken.docx"
+    with _zip.ZipFile(_broken, "w") as _archive:
+        _archive.writestr("hello.txt", "not a word file")
+    try:
+        read_any(_broken)
+        ok("워드가 아니면 알려 준다", False)
+    except ScriptUnavailable:
+        ok("워드가 아니면 알려 준다", True)
+
+
 # --- 결과 ---------------------------------------------------------------
 
 print(f"통과 {PASSED}건")
