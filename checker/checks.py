@@ -231,13 +231,18 @@ def _foreign_marker(ev: Event, ctx: dict):
 
 @check("discouraged_sound_ending")
 def _sound_ending(ev: Event, ctx: dict):
+    """지양하는 효과음 어미. **대안을 함께 낸다** — 지적만 하면 "그럼 뭐라고 쓰죠"가 남는다."""
+    from .lexicon import suggest_text
+
     endings = (ctx["profile"].get("sound_effect") or {}).get("discouraged_endings") or []
     out = []
     for inner in BRACKET_RE.findall(strip_tags(ev.text)):
         body = inner.strip().rstrip(".")
         for bad in endings:
             if body.endswith(bad):
-                out.append((None, f"[{inner}]"))
+                marker = f"[{inner}]"
+                hint = suggest_text(marker)
+                out.append((None, f"{marker} — {hint}" if hint else marker))
                 break
     return out
 

@@ -501,6 +501,29 @@ ok("정상 자막은 실무 규칙에도 안 걸린다",
    not {"S18", "S19", "S20", "S21", "S22"} & ids(r), str(ids(r)))
 
 
+# --- 효과음 사전 -----------------------------------------------------------
+
+from checker.lexicon import suggest, suggest_text, _load  # noqa: E402
+
+ok("사전이 로드된다", len(_load()) > 300, str(len(_load())))
+ok("문 소리에 문 관련 후보를 준다",
+   any("문" in t for t in suggest("[문 닫는 소리]")), str(suggest("[문 닫는 소리]")))
+ok("낱말 단위로 견준다 — '닫는'이 '깨닫는'에 걸리지 않는다",
+   "[깨닫는 탄성]" not in suggest("[문 닫는 소리]"))
+ok("조사를 떼고 견준다",
+   any("발소리" in t for t in suggest("[발걸음 소리가 들린다]")),
+   str(suggest("[발걸음 소리가 들린다]")))
+ok("자기 자신은 후보에서 뺀다", "[다급한 발소리]" not in suggest("[다급한 발소리]"))
+ok("맞는 게 없으면 빈 목록", suggest("[알 수 없는 소리]") == [])
+ok("후보 수를 제한한다", len(suggest("[자동차 소리]", limit=2)) <= 2)
+ok("리포트 문구를 만든다", "이렇게 쓸 수 있습니다" in suggest_text("[문 닫는 소리]"))
+ok("후보 없으면 문구도 없다", suggest_text("[알 수 없는 소리]") == "")
+
+r = check_events([ev("[문이 쾅 닫히는 소리]")], ko_sdh)
+detail = " ".join(v["detail"] for v in r["violations"] if v["rule_id"] == "S06")
+ok("지적에 대안이 함께 나온다", "이렇게 쓸 수 있습니다" in detail, detail[:60])
+
+
 # --- 결과 ---------------------------------------------------------------
 
 print(f"통과 {PASSED}건")
