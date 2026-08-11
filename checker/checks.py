@@ -229,6 +229,16 @@ def _lyric_caps(ev: Event, ctx: dict):
     return out
 
 
+def excerpt(event: Event, line_no: int | None, limit: int = 60) -> str:
+    """문제가 난 줄(줄 번호가 없으면 자막 전체)을 리포트에 실을 만큼만 자른다."""
+    if line_no and 1 <= line_no <= len(event.lines):
+        text = event.lines[line_no - 1]
+    else:
+        text = event.text.replace("\n", " / ")
+    text = text.strip()
+    return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
 def run_checks(events: list[Event], profile: dict, children: bool = False):
     """프로파일이 지정한 검사를 이벤트마다 돌린다.
 
@@ -246,7 +256,9 @@ def run_checks(events: list[Event], profile: dict, children: bool = False):
         for name in names:
             doc_fn = DOC_REGISTRY.get(name)
             if doc_fn is not None:
+                by_index = {e.index: e for e in events}
                 for event_index, line_no, detail in doc_fn(events, ctx):
+                    ev = by_index.get(event_index)
                     violations.append(
                         Violation(
                             rule_id=rule["id"],
@@ -256,6 +268,7 @@ def run_checks(events: list[Event], profile: dict, children: bool = False):
                             detail=detail,
                             auto_fixable=bool(rule.get("auto")),
                             line_no=line_no,
+                            text=excerpt(ev, line_no) if ev else "",
                         )
                     )
                 continue
@@ -276,6 +289,7 @@ def run_checks(events: list[Event], profile: dict, children: bool = False):
                             detail=detail,
                             auto_fixable=bool(rule.get("auto")),
                             line_no=line_no,
+                            text=excerpt(ev, line_no),
                         )
                     )
 

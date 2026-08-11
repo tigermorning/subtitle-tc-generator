@@ -51,6 +51,9 @@ class Violation:
     #   rule      — 플랫폼 규정 프로파일
     #   corrector — 한국어 교정기(사전·어문 규범)
     source: str = "rule"
+    # 문제가 난 자막 텍스트. 이것이 없으면 사람이 지적을 확인하러 파일을 다시
+    # 열어야 한다 — 리포트만 보고 판단할 수 있어야 쓸모가 있다.
+    text: str = ""
 
     def to_dict(self) -> dict:
         return asdict(self)

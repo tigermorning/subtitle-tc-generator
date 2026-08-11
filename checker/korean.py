@@ -169,9 +169,10 @@ def run_korean_pass(
                     event_index=event_index,
                     line_no=line_no,
                     message="한국어 교정 제안",
-                    detail=f"{before.strip()!r} -> {after.strip()!r}",
+                    detail=f"-> {after.strip()}",
                     auto_fixable=True,
                     source="corrector",
+                    text=before.strip(),
                 )
             )
 
@@ -193,6 +194,7 @@ def run_korean_pass(
                 detail=detail,
                 auto_fixable=False,
                 source="corrector",
+                text=flag.get("original_text", "").strip(),
             )
         )
 

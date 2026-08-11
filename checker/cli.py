@@ -34,11 +34,22 @@ def _format_text(report: dict, path: Path) -> str:
         mark = "자동" if v["auto_fixable"] else "확인"
         origin = "" if v.get("source", "rule") == "rule" else f" ({v['source']})"
         out.append(f"  [{mark}] {where:>10}  {v['rule_id']} {v['clause']}{origin}")
+        if v.get("text"):
+            out.append(f"              | {v['text']}")
         out.append(f"              {v['message']}")
         if v["detail"]:
-            out.append(f"              -> {v['detail']}")
+            out.append(f"              {v['detail'] if v['detail'].startswith('->') else '-> ' + v['detail']}")
 
     out.append("")
+    if violations:
+        # 규칙별 집계 — 같은 문제가 몇 번 나는지 보여야 어디부터 손댈지 정한다.
+        counts: dict[tuple[str, str], int] = {}
+        for v in violations:
+            counts[(v["rule_id"], v["message"])] = counts.get((v["rule_id"], v["message"]), 0) + 1
+        out.append("  규칙별 집계")
+        for (rule_id, message), n in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0][0])):
+            out.append(f"    {n:>4}건  {rule_id}  {message}")
+        out.append("")
     out.append(f"  위반 {len(violations)}건")
     if report.get("fixed_file"):
         out.append(f"  교정본: {report['fixed_file']}")

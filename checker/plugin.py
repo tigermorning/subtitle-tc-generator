@@ -73,9 +73,11 @@ def _report_text(report: dict, settings: dict) -> str:
         mark = "자동" if v["auto_fixable"] else "확인"
         origin = "" if v.get("source", "rule") == "rule" else f" ({v['source']})"
         lines.append(f"[{mark}] {where} {v['rule_id']} {v['clause']}{origin}")
+        if v.get("text"):
+            lines.append(f"    | {v['text']}")
         lines.append(f"    {v['message']}")
         if v["detail"]:
-            lines.append(f"    -> {v['detail']}")
+            lines.append(f"    {v['detail'] if v['detail'].startswith('->') else '-> ' + v['detail']}")
     if not report["violations"]:
         lines.append("위반 없음")
     lines.append("")
