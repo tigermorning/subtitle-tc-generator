@@ -107,3 +107,19 @@ python -m checker file.srt -l ko -k sdh --korean --ksc-path /path/to/korean-subt
 
 교정기는 kiwipiepy(약 310MB)와 국립국어원 API 키가 필요하다. 교정기 저장소의
 가상환경 파이썬으로 이 검사기를 실행하는 것이 가장 간단하다.
+
+### 자동 교정
+
+`--fix`를 붙이면 기계적으로 고칠 수 있는 것을 고쳐 **새 파일**로 쓴다. 원본은
+그대로 둔다 — 자동 교정이 틀렸을 때 되돌릴 수 있어야 하기 때문이다.
+
+```bash
+python -m checker file.srt -l ko -k sdh --fix            # file.fixed.srt 로 나간다
+python -m checker file.srt -l ko -k sdh --fix -o out.srt
+python -m checker file.srt -l ko -k sdh --fix --korean   # 교정기 결과까지 반영
+```
+
+고치는 것은 `auto: true`인 규칙 중 **고치는 함수가 등록된 것만**이다. 프로파일이
+`auto: true`라고 말해도 기계가 정할 수 없는 자리가 있다(대괄호를 어디서 닫을지는
+사람만 안다). 그런 규칙은 고치지 않고 `자동 표시지만 기계가 못 고치는 것`으로
+따로 출력한다 — 고쳤다고 말하지 않는 것이 중요하다.

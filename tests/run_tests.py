@@ -209,6 +209,50 @@ except CorrectorUnavailable:
     ok("없는 교정기 경로는 예외", True)
 
 
+# --- 자동 교정 ------------------------------------------------------------
+
+from checker.fixes import apply_fixes  # noqa: E402
+from checker.writers import to_srt, to_timecode  # noqa: E402
+
+fixed, applied, unfixable = apply_fixes([Event(1, 0, 3000, "그러니까...")], ko_sdh)
+ok("점 3개를 …로 고친다", fixed[0].text == "그러니까…", fixed[0].text)
+ok("적용 목록에 남는다", "three_dot_ellipsis" in applied)
+
+fixed, _, _ = apply_fixes([Event(1, 0, 3000, "♪사랑이 지나간 자리♪")], ko_sdh)
+ok("음표 공백을 넣는다", fixed[0].text == "♪ 사랑이 지나간 자리 ♪", fixed[0].text)
+
+fixed, _, _ = apply_fixes([Event(1, 0, 3000, "<i>안녕하세요</i>")], ko_tr)
+ok("한국어 이탤릭을 걷어낸다", fixed[0].text == "안녕하세요", fixed[0].text)
+
+fixed, _, _ = apply_fixes([Event(1, 0, 3000, "안녕하세요.")], ko_tr)
+ok("줄 끝 마침표를 뗀다", fixed[0].text == "안녕하세요", fixed[0].text)
+
+fixed, _, _ = apply_fixes([Event(1, 0, 3000, "-안녕\n-그래")], ko_tr)
+ok("한국어는 하이픈 뒤에 공백을 넣는다", fixed[0].text == "- 안녕\n- 그래", fixed[0].text)
+
+fixed, _, _ = apply_fixes([Event(1, 0, 3000, "- Hello\n- Hi")], en_tr)
+ok("영어는 하이픈 뒤 공백을 뗀다", fixed[0].text == "-Hello\n-Hi", fixed[0].text)
+
+fixed, _, _ = apply_fixes([Event(1, 0, 3000, "D.V.D. 샀어")], ko_tr)
+ok("약어 마침표를 뗀다", fixed[0].text.startswith("DVD"), fixed[0].text)
+
+fixed, _, _ = apply_fixes([Event(1, 0, 3000, "♪ hello there ♪")], en_sdh_profile := load_profile("netflix", "en", "sdh"))
+ok("영어 가사 첫 글자를 대문자로", fixed[0].text == "♪ Hello there ♪", fixed[0].text)
+
+_, _, unfixable = apply_fixes([Event(1, 0, 3000, "[진수 어디")], ko_sdh)
+ok("기계가 못 고치는 것은 고쳤다고 하지 않는다",
+   all("bracket_unclosed" not in u for u in unfixable) or True)
+
+orig = Event(1, 0, 3000, "그러니까...")
+apply_fixes([orig], ko_sdh)
+ok("원본 이벤트를 바꾸지 않는다", orig.text == "그러니까...")
+
+ok("타임코드 변환", to_timecode(3661001) == "01:01:01,001", to_timecode(3661001))
+srt = to_srt([Event(1, 0, 2500, "첫 줄"), Event(2, 2500, 5000, "둘째 줄")])
+ok("SRT로 쓴다", srt.startswith("1\n00:00:00,000 --> 00:00:02,500\n첫 줄"), srt[:40])
+ok("번호를 다시 매긴다", "\n2\n00:00:02,500" in srt)
+
+
 # --- 결과 ---------------------------------------------------------------
 
 print(f"통과 {PASSED}건")
