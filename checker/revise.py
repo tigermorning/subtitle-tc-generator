@@ -119,14 +119,16 @@ def revise(events: list[Event], translator, source: dict[int, str] | None = None
     return out, revisions
 
 
-def _too_different(before: str, after: str, limit: float = 1.8) -> bool:
+def _too_different(before: str, after: str, limit: float = 1.5) -> bool:
     """길이가 너무 달라지면 다듬은 것이 아니라 다시 쓴 것이다.
 
     모델이 설명을 덧붙이거나 두 자막을 합쳐 버리는 사고를 막는다.
 
-    한계를 1.8배로 둔다. 처음에 2.5배로 뒀다가 1.77배짜리 덧붙임을 통과시켰다 —
+    한계를 1.5배로 둔다. 2.5배 -> 1.8배로 조였다가 1.77배짜리 덧붙임을 또
+    통과시켰다 —
     **한국어를 한국어로 다듬는 단계**라 길이가 크게 늘 이유가 없다(원어에서 옮기는
     1차와 다르다). 자막은 화면에 맞춰 길이가 정해져 있어 조금만 늘어도 못 쓴다.
+    실제 다듬기는 1.2~1.3배를 넘지 않았다(`진짜야?` -> `진심이야?` 1.25배).
     """
     if not before.strip():
         return False
