@@ -1600,6 +1600,9 @@ except ImportError:
 else:
     import os as _os2
     _os2.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    # **위젯을 만들기 전에 QApplication이 있어야 한다.** 없이 만들면 파이썬이
+    # 조용히 죽는다 — 예외도 안 나고 뒤 시험이 통째로 안 돌았다.
+    _qt_app = QApplication.instance() or QApplication([])
     from app.model import SubtitleModel  # noqa: E402
 
     _app_model = SubtitleModel([Event(1, 1000, 3000, "첫 줄"),
@@ -1612,6 +1615,29 @@ else:
     ok("줄바꿈을 눈에 보이게 둔다", "⏎" in _app_model.data(_app_model.index(1, 4)))
     ok("그 시각의 자막을 찾는다", _app_model.row_for_time(2000) == 0)
     ok("아무것도 없는 시각은 -1", _app_model.row_for_time(4000) == -1)
+
+    # 파형 — 좌표 계산과 가장자리 잡기. 여기가 틀리면 엉뚱한 자막을 끌게 된다.
+    from app.waveform import Waveform  # noqa: E402
+
+    _wave = Waveform()
+    _wave.resize(1000, 160)
+    _wave.ms_per_pixel = 20.0
+    _wave.view_start_ms = 10000
+    ok("화면 좌표를 시각으로", _wave.ms_at(100) == 12000)
+    ok("시각을 화면 좌표로", _wave.x_at(12000) == 100)
+    ok("왕복해도 같다", _wave.ms_at(_wave.x_at(15000)) == 15000)
+
+    _wave.set_events([Event(1, 12000, 14000, "가"), Event(2, 20000, 22000, "나")])
+    _grabbed = _wave._edge_at(_wave.x_at(12000))
+    ok("인점 가장자리를 잡는다", _grabbed and _grabbed[1] == "start")
+    _grabbed = _wave._edge_at(_wave.x_at(14000))
+    ok("아웃점 가장자리를 잡는다", _grabbed and _grabbed[1] == "end")
+    ok("가장자리가 아니면 안 잡는다", _wave._edge_at(_wave.x_at(13000)) is None)
+
+    # 확대해도 보고 있던 자리가 그대로 있어야 한다.
+    _wave.zoom(0.5, anchor_ms=15000)
+    ok("확대해도 보던 자리를 붙잡는다", abs(_wave.ms_at(_wave.x_at(15000)) - 15000) <= 1)
+    ok("너무 작게는 못 줄인다", _wave.ms_per_pixel >= 1.0)
 
 
 # --- 결과 ---------------------------------------------------------------

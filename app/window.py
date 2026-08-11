@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import QObject, QThread, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (
     QFileDialog, QHBoxLayout, QLabel, QMainWindow, QMessageBox, QPushButton,
@@ -19,9 +19,30 @@ from checker.writers import to_timecode, write_srt
 from .model import SubtitleModel
 from .player import Player, PlayerUnavailable
 from .runtime import MPV_MISSING
+from .waveform import Waveform
 
 VIDEO_FILTER = "영상 (*.mp4 *.mkv *.mov *.avi *.ts *.m4v *.webm);;모든 파일 (*.*)"
 SUBTITLE_FILTER = "자막 (*.srt *.vtt);;모든 파일 (*.*)"
+
+
+class PeakWorker(QObject):
+    """파형을 다른 실에서 만든다. 45분짜리를 읽는 동안 화면이 멈추면 안 된다."""
+
+    done = Signal(object, int, int, int)
+    failed = Signal(str)
+
+    def __init__(self, video: str):
+        super().__init__()
+        self.video = video
+
+    def run(self) -> None:
+        try:
+            from .peaks import load
+            peaks, per_peak, rate, duration = load(Path(self.video))
+        except Exception as exc:
+            self.failed.emit(str(exc))
+            return
+        self.done.emit(peaks, per_peak, rate, duration)
 
 
 class MainWindow(QMainWindow):
@@ -67,9 +88,15 @@ class MainWindow(QMainWindow):
         controls.addStretch(1)
         controls.addWidget(self.position_label)
 
+        self.waveform = Waveform()
+        self.waveform.seek_requested.connect(self._seek_to)
+        self.waveform.cue_changed.connect(self._cue_changed)
+        self.waveform.cue_selected.connect(self._select_cue)
+
         left = QVBoxLayout()
         left.addWidget(self.video_area, 1)
         left.addLayout(controls)
+        left.addWidget(self.waveform)
         left_panel = QWidget()
         left_panel.setLayout(left)
 
@@ -115,7 +142,9 @@ class MainWindow(QMainWindow):
                                     f"{MPV_MISSING}\n\n{exc}")
                 return
         self.player.open(path)
-        self.statusBar().showMessage(f"영상: {Path(path).name}  {self.player.fps:.3f}fps")
+        self.statusBar().showMessage(f"영상: {Path(path).name}  {self.player.fps:.3f}fps"
+                                     f" — 파형을 만드는 중입니다...")
+        self._load_peaks(path)
 
     def open_subtitle(self) -> None:
         path, _ = QFileDialog.getOpenFileName(self, "자막 열기", "", SUBTITLE_FILTER)
@@ -127,6 +156,7 @@ class MainWindow(QMainWindow):
             return
         self.subtitle_path = Path(path)
         self.model.replace(events)
+        self.waveform.set_events(self.model.events)
         self.statusBar().showMessage(f"자막 {len(events)}개: {self.subtitle_path.name}")
 
     def save_subtitle(self) -> None:
@@ -140,6 +170,47 @@ class MainWindow(QMainWindow):
             return
         write_srt(self.model.events, Path(path))
         self.statusBar().showMessage(f"저장했습니다: {path}")
+
+    def _load_peaks(self, video: str) -> None:
+        self._peak_thread = QThread(self)
+        self._peak_worker = PeakWorker(video)
+        self._peak_worker.moveToThread(self._peak_thread)
+        self._peak_thread.started.connect(self._peak_worker.run)
+        self._peak_worker.done.connect(self._peaks_ready)
+        self._peak_worker.failed.connect(
+            lambda why: self.statusBar().showMessage(f"파형을 만들지 못했습니다: {why}"))
+        self._peak_worker.done.connect(self._peak_thread.quit)
+        self._peak_worker.failed.connect(self._peak_thread.quit)
+        self._peak_thread.start()
+
+    def _peaks_ready(self, peaks, per_peak, rate, duration) -> None:
+        self.waveform.set_peaks(peaks, per_peak, rate, duration)
+        self.statusBar().showMessage(
+            f"파형 준비 완료 — {duration / 60000:.1f}분. "
+            "Ctrl+휠로 확대, 자막 가장자리를 끌어 인·아웃을 맞춥니다")
+
+    def _seek_to(self, ms: int) -> None:
+        if self.player:
+            self.player.seek(ms)
+        self.waveform.set_position(ms)
+
+    def _cue_changed(self, index: int, start_ms: int, end_ms: int) -> None:
+        """파형에서 끈 결과를 표에도 알린다. 자료는 하나다(같은 Event 객체)."""
+        for row, event in enumerate(self.model.events):
+            if event.index == index:
+                left = self.model.index(row, 1)
+                right = self.model.index(row, 3)
+                self.model.dataChanged.emit(left, right, [Qt.DisplayRole])
+                self.statusBar().showMessage(
+                    f"#{index} {to_timecode(start_ms)} ~ {to_timecode(end_ms)}"
+                    f"  ({(end_ms - start_ms) / 1000:.2f}초)")
+                break
+
+    def _select_cue(self, index: int) -> None:
+        for row, event in enumerate(self.model.events):
+            if event.index == index:
+                self.table.selectRow(row)
+                break
 
     # --- 재생 ---------------------------------------------------------
     def toggle_play(self) -> None:
@@ -171,6 +242,7 @@ class MainWindow(QMainWindow):
         position = self.player.position_ms
         self.position_label.setText(
             f"{to_timecode(position)} / {to_timecode(self.player.duration_ms)}")
+        self.waveform.set_position(position)
         row = self.model.row_for_time(position)
         if row >= 0 and row != self.table.currentIndex().row():
             self.table.selectRow(row)
