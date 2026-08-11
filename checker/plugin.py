@@ -65,7 +65,10 @@ def _load_settings(request: dict) -> dict:
 
 def _report_text(report: dict, settings: dict) -> str:
     profile_name = f"{settings['platform']} {settings['language']} {settings['kind']}"
-    lines = [f"프로파일: {profile_name}", ""]
+    lines = [f"프로파일: {profile_name}"]
+    if report.get("profile_source"):
+        lines.append(f"기준: {report['profile_source']}")
+    lines.append("")
     for v in report["violations"]:
         where = f"#{v['event_index']}"
         if v["line_no"]:

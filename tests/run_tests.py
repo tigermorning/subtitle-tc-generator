@@ -357,6 +357,48 @@ with _tempfile.TemporaryDirectory() as tmp:
        r4["status"] == "error" and "프로파일" in r4["message"], str(r4)[:60])
 
 
+# --- 발주처 프로파일 --------------------------------------------------------
+
+from checker.profile import load_profile_file  # noqa: E402
+
+AGENCY = Path("examples/profiles/agency-sample-ko-translation.yaml")
+agency = load_profile_file(AGENCY)
+
+ok("공식 프로파일을 상속한다", agency["platform"] == "netflix" and agency["kind"] == "translation")
+ok("덮어쓴 값이 이긴다", agency["limits"]["chars_per_line"] == 14)
+ok("안 덮어쓴 값은 상속된다", agency["limits"]["reading_speed_cps"]["adult"] == 12)
+ok("공통 프로파일까지 사슬로 병합된다", agency["limits"]["duration_ms"]["max"] == 7000)
+ok("disable_rules로 상위 규칙을 끈다", all(r["id"] != "T06" for r in agency["rules"]))
+ok("발주처 고유 규칙이 더해진다", any(r["id"] == "A01" for r in agency["rules"]))
+
+r = check_events([ev("그러니까...")], agency)
+ok("끈 규칙은 위반으로 안 뜬다", "T06" not in ids(r))
+
+r = check_events([ev("가나다라마바사아자차카타파하가", end=20000)], agency)
+msg = [v["message"] for v in r["violations"] if v["rule_id"] == "T01"]
+ok("문구의 숫자도 프로파일 값을 따른다", msg and "14자" in msg[0], str(msg))
+
+gap_profile = dict(agency)
+gap_profile["limits"] = dict(agency["limits"], min_gap_ms=100)
+gap_profile["rules"] = agency["rules"] + [
+    {"id": "A02", "clause": "지침 4.1", "check": "gap_too_short", "auto": False,
+     "message": "자막 간 간격이 부족합니다."}]
+r = check_events([{"index": 1, "start_ms": 0, "end_ms": 2000, "text": "첫 줄"},
+                  {"index": 2, "start_ms": 2050, "end_ms": 4000, "text": "둘째 줄"}], gap_profile)
+ok("자막 간 간격을 잰다", "A02" in ids(r))
+r = check_events([{"index": 1, "start_ms": 0, "end_ms": 2000, "text": "첫 줄"},
+                  {"index": 2, "start_ms": 1900, "end_ms": 4000, "text": "둘째 줄"}], gap_profile)
+ok("겹침도 잡는다", any("겹칩니다" in v["detail"] for v in r["violations"]))
+
+ok("넷플릭스에는 간격 규정을 넣지 않았다", "min_gap_ms" not in ko_tr["limits"])
+
+try:
+    load_profile_file(Path("rules/netflix/common.yaml"))
+    ok("common 파일은 직접 검사에 못 쓴다", False, "예외가 나지 않았다")
+except ProfileError:
+    ok("common 파일은 직접 검사에 못 쓴다", True)
+
+
 # --- 결과 ---------------------------------------------------------------
 
 print(f"통과 {PASSED}건")

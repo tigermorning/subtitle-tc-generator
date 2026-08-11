@@ -161,3 +161,27 @@ tools/
 건너뛰었다고 알리고 규정 검사는 계속한다).
 
 바탕화면에서 쓰려면 .bat 파일의 **바로 가기**를 만들어 두면 된다.
+
+### 발주처마다 다른 기준
+
+규정은 절대적 정답이 아니라 **발주처가 요구하는 틀**이다. 같은 넷플릭스 작업이라도
+에이전시가 자기 기준을 얹는다. 그래서 프로파일을 상속해 다른 부분만 덮어쓴다.
+
+```yaml
+extends: ../../rules/netflix/ko-translation.yaml
+source:
+  official: false
+  client: "○○ 에이전시 2026년 자막 지침 v3"
+limits:
+  chars_per_line: 14      # 이 발주처는 14자
+disable_rules: [T06]      # 점 3개 규칙은 끈다
+```
+
+```bash
+python -m checker file.srt --profile my-profiles/agency-ko.yaml
+```
+
+공식 값이 개정되면 상속본도 따라간다. 리포트 머리에 **어떤 기준으로 쟀는지**가
+나온다(문서명·개정일·발주처). 예시: `examples/profiles/agency-sample-ko-translation.yaml`
+
+작업 전에 프로파일부터 맞춰 놓는 것이 순서다 — 틀이 다르면 정답도 다르다.

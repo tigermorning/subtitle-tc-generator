@@ -14,6 +14,7 @@ import sys
 from pathlib import Path
 
 from . import check_events, available_profiles, load_profile, ProfileError
+from .profile import load_profile_file
 from .fixes import apply_fixes
 from .korean import CorrectorUnavailable, load_backend, run_korean_pass
 from .parsers import parse
@@ -23,7 +24,10 @@ SUBTITLE_SUFFIXES = (".srt", ".vtt")
 
 
 def _format_text(report: dict, path: Path) -> str:
+    # 어떤 틀로 쟀는지가 결과만큼 중요하다. 발주처가 다르면 정답도 달라진다.
     out = [f"{path.name} — {report['profile']} {report['kind']}"]
+    if report.get("profile_source"):
+        out.append(f"  기준: {report['profile_source']}")
     violations = report["violations"]
     if not violations:
         out.append("  위반 없음")
@@ -136,6 +140,8 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="checker", description="플랫폼 규정 준수 검사")
     ap.add_argument("targets", nargs="*", type=Path,
                     help="자막 파일 또는 폴더 (.srt / .vtt). 여러 개 줄 수 있다")
+    ap.add_argument("--profile", type=Path,
+                    help="프로파일 파일을 직접 지정한다(에이전시·발주처 전용 기준)")
     ap.add_argument("-p", "--platform", default="netflix")
     ap.add_argument("-l", "--lang", default="ko")
     ap.add_argument("-k", "--kind", choices=["sdh", "translation"], default="translation")
@@ -172,7 +178,8 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     try:
-        profile = load_profile(args.platform, args.lang, args.kind)
+        profile = (load_profile_file(args.profile) if args.profile
+                   else load_profile(args.platform, args.lang, args.kind))
     except ProfileError as e:
         print(f"프로파일 오류: {e}", file=sys.stderr)
         return 2

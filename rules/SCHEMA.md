@@ -65,6 +65,34 @@ source:
 - **규칙 id**: `rules[].id`는 `T##`(번역) / `S##`(SDH). `clause`에 원문 조항 번호를 넣는다. 위반 리포트가 조항을 인용할 수 있어야 한다 — 그게 이 프로젝트의 존재 이유다.
 - **`auto`**: `true`면 자동 교정, `false`면 확인 플래그만. 근거가 간접적인 규칙은 반드시 `false`.
 
-## 5. 미확보 플랫폼
+## 5. SubtitleEdit 환경설정과의 대응
+
+작업자가 SE에서 맞추던 값들이다. 발주처가 요구하는 틀은 결국 이 값들의 묶음이므로
+프로파일이 같은 것을 담아야 한다.
+
+| SE 설정 | 프로파일 키 | 상태 |
+|---|---|---|
+| Single line max length | `limits.chars_per_line` | 있음 |
+| Max number of lines | `limits.max_lines` | 있음 |
+| Min duration (ms) | `limits.duration_ms.min` | 있음 |
+| Max duration (ms) | `limits.duration_ms.max` | 있음 |
+| Max chars/sec | `limits.reading_speed_cps.adult` | 있음 |
+| Optimal chars/sec | `limits.optimal_cps` | 있음(검사는 미구현) |
+| CPS line length strategy | `limits.char_weights` | 있음 |
+| Min gap between lines (ms) | `limits.min_gap_ms` | 있음 |
+| Max words per minute | `limits.words_per_minute` | 있음(검사는 미구현) |
+| Single line max pixel width | `limits.pixel_width` | 있음(검사는 미구현 — 폰트 정보가 필요하다) |
+| Merge lines shorter than (ms) | `limits.merge_shorter_than_ms` | 있음(검사는 미구현) |
+| Dialog style | `dual_speaker.marker` | 있음 |
+| Continuation style | `continuity.*` | 있음(부분) |
+
+**자막 간 간격 주의**: 넷플릭스는 이 규정을 삭제했다(General Requirements change log
+2020-07-24 "Timing and frame gap sections removed"). 그래서 넷플릭스 프로파일에는
+`min_gap_ms`를 넣지 않는다. SubtitleEdit의 2프레임 갭 검사는 옛 판본을 따르고 있다 —
+근거 없는 지적을 그대로 옮기지 않는다. 발주처가 요구하면 그때 프로파일에 넣는다.
+
+값을 담되 검사가 없는 항목은 리포트의 `미구현 검사`로 드러난다. 숨기지 않는다.
+
+## 6. 미확보 플랫폼
 
 디즈니+·쿠팡플레이는 공식 문서를 구하지 못했다. 값을 추측해 채우지 않고 `status: unavailable`로 남긴다. 로더가 이를 만나면 "이 플랫폼은 규정 미확보"라고 사용자에게 알리고 검사를 건너뛴다. **웹에 도는 수치를 채워 넣지 말 것.**

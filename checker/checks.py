@@ -247,6 +247,27 @@ def run_checks(events: list[Event], profile: dict, children: bool = False):
     from .model import Violation
 
     ctx = {"profile": profile, "limits": profile.get("limits") or {}, "children": children}
+
+    limits = ctx["limits"]
+    speeds = limits.get("reading_speed_cps") or {}
+    duration = limits.get("duration_ms") or {}
+    # 문구에 숫자를 박아 두면 발주처가 값을 조였을 때 리포트가 거짓말을 한다.
+    # 프로파일 값으로 채우게 하고, 자리표시자가 없는 문구는 그대로 둔다.
+    fields = {
+        "chars_per_line": limits.get("chars_per_line"),
+        "max_lines": limits.get("max_lines"),
+        "cps_adult": speeds.get("adult"),
+        "cps_children": speeds.get("children"),
+        "cps": speeds.get("children" if children else "adult"),
+        "duration_min_ms": duration.get("min"),
+        "duration_max_ms": duration.get("max"),
+    }
+
+    def render(message: str) -> str:
+        try:
+            return message.format(**fields)
+        except (KeyError, IndexError, ValueError):
+            return message
     violations: list[Violation] = []
     unimplemented: list[str] = []
 
@@ -264,7 +285,7 @@ def run_checks(events: list[Event], profile: dict, children: bool = False):
                             rule_id=rule["id"],
                             clause=rule["clause"],
                             event_index=event_index,
-                            message=rule["message"],
+                            message=render(rule["message"]),
                             detail=detail,
                             auto_fixable=bool(rule.get("auto")),
                             line_no=line_no,
@@ -285,7 +306,7 @@ def run_checks(events: list[Event], profile: dict, children: bool = False):
                             rule_id=rule["id"],
                             clause=rule["clause"],
                             event_index=ev.index,
-                            message=rule["message"],
+                            message=render(rule["message"]),
                             detail=detail,
                             auto_fixable=bool(rule.get("auto")),
                             line_no=line_no,
@@ -336,6 +357,29 @@ def speaker_ids(events: list[Event]) -> list[tuple[str, int, int]]:
 def _base_label(label: str) -> str:
     """뒤에 붙은 번호를 뗀다. `[남자 1]`·`[남자 2]`는 규정이 허용하는 구분이다."""
     return re.sub(r"\s*\d+$", "", label)
+
+
+@doc_check("gap_too_short")
+def _gap(events: list[Event], ctx: dict):
+    """앞 자막이 끝나고 다음이 시작하기까지의 간격.
+
+    넷플릭스는 이 규정을 **삭제했다**(General Requirements change log 2020-07-24
+    "Timing and frame gap sections removed"). 그래서 넷플릭스 프로파일에는 값이
+    없고, 발주처가 요구할 때만 `limits.min_gap_ms`로 켠다. SubtitleEdit의 2프레임
+    갭 검사는 옛 판본 기준이라 지금 넷플릭스에는 근거가 없다.
+    """
+    min_gap = (ctx["limits"] or {}).get("min_gap_ms")
+    if not min_gap:
+        return []
+    out = []
+    ordered = sorted(events, key=lambda e: e.start_ms)
+    for prev, cur in zip(ordered, ordered[1:]):
+        gap = cur.start_ms - prev.end_ms
+        if gap < 0:
+            out.append((cur.index, None, f"앞 자막과 {-gap}ms 겹칩니다"))
+        elif gap < min_gap:
+            out.append((cur.index, None, f"간격 {gap}ms — 최소 {min_gap}ms"))
+    return out
 
 
 @doc_check("speaker_id_inconsistent")

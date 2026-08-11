@@ -31,4 +31,12 @@ def check_events(events: list[dict], profile: dict, children: bool = False) -> d
         violations=violations,
         unimplemented_checks=unimplemented,
     )
-    return report.to_dict()
+    out = report.to_dict()
+    src = profile.get("source") or {}
+    label = src.get("section") or src.get("client") or ""
+    if src.get("revision"):
+        label = f"{label} ({src['revision']} 개정)" if label else f"{src['revision']} 개정"
+    if src.get("client") and src.get("section"):
+        label = f"{label} / 발주처: {src['client']}"
+    out["profile_source"] = label
+    return out
