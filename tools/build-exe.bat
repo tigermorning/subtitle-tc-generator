@@ -29,7 +29,18 @@ if not exist "bin\libmpv-2.dll" (
   exit /b 1
 )
 
-"%PY%" -m PyInstaller --noconfirm --distpath dist --workpath .tmp\build "자막편집기.spec"
+rem The spec file name is non-ASCII, so it must NOT appear in this file.
+rem A single non-ASCII byte shifts cmd's byte-wise parsing and breaks the rest
+rem of the script (seen 2026-08-12: the libmpv check exploded into garbage
+rem commands). Find it at run time instead.
+for %%F in (*.spec) do set "SPEC=%%F"
+if not defined SPEC (
+  echo No .spec file found in %REPO%.
+  pause
+  exit /b 1
+)
+
+"%PY%" -m PyInstaller --noconfirm --distpath dist --workpath .tmp\build "%SPEC%"
 if errorlevel 1 (
   echo Build failed.
   pause
@@ -37,6 +48,6 @@ if errorlevel 1 (
 )
 
 echo.
-echo   Done: dist\자막편집기\자막편집기.exe
+echo   Done. The program is in the dist folder.
 echo.
 pause
