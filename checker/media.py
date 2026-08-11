@@ -154,3 +154,26 @@ def detect_shot_changes(video: Path, sensitivity: float = 0.2) -> list[int]:
     )
     times = [int(float(m.group(1)) * 1000) for m in SCENE_TIME.finditer(out.stderr)]
     return sorted(set(times))
+
+
+VIDEO_SUFFIXES = (".mkv", ".mp4", ".mov", ".avi", ".m4v", ".ts", ".wmv", ".webm")
+
+
+def find_video_for(subtitle: Path) -> Path | None:
+    """자막 옆에서 같은 이름의 영상을 찾는다.
+
+    실무에서 영상과 자막은 한 폴더에 같은 이름으로 있다(`ep01.mkv` / `ep01.srt`).
+    경로를 손으로 넣게 하면 끌어다 놓기 방식에서 못 쓴다.
+
+    `.fixed.srt` 같은 꼬리표가 붙어 있으면 떼고 찾는다.
+    """
+    stem = subtitle.stem
+    for tag in (".fixed", "_ko_TL", "_TL"):
+        if stem.endswith(tag):
+            stem = stem[: -len(tag)]
+    for suffix in VIDEO_SUFFIXES:
+        for name in (subtitle.stem, stem):
+            candidate = subtitle.with_name(name + suffix)
+            if candidate.is_file():
+                return candidate
+    return None

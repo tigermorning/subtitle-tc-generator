@@ -240,6 +240,22 @@ def main(argv: list[str] | None = None) -> int:
     if not args.targets:
         ap.error("자막 파일이나 폴더가 필요합니다 (또는 --list)")
 
+    files = collect_files(args.targets)
+    if not files:
+        print("검사할 자막 파일이 없습니다.", file=sys.stderr)
+        return 2
+
+    # 영상을 안 줬는데 스포팅을 원하면 자막 옆에서 같은 이름을 찾는다.
+    # **영상을 읽기 전에** 찾아야 한다 — 순서가 바뀌면 자동으로 찾은 영상을 못 읽는다.
+    if args.spot and not args.video:
+        from .media import find_video_for
+        guess = find_video_for(files[0])
+        if guess:
+            args.video = guess
+            print(f"영상을 찾았습니다: {guess.name}", file=sys.stderr)
+        else:
+            print("옆에 같은 이름의 영상이 없습니다. --video로 지정하세요.", file=sys.stderr)
+
     media = None
     if args.video:
         from .media import MediaToolUnavailable, probe
@@ -257,10 +273,6 @@ def main(argv: list[str] | None = None) -> int:
                 print("  주의: 프레임레이트가 일정하지 않습니다(화면 녹화물 등)."
                       " 프레임 단위 규정 환산이 어긋날 수 있습니다.", file=sys.stderr)
 
-    files = collect_files(args.targets)
-    if not files:
-        print("검사할 자막 파일이 없습니다.", file=sys.stderr)
-        return 2
     if args.out and len(files) > 1:
         print("-o는 파일 하나일 때만 씁니다.", file=sys.stderr)
         return 2

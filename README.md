@@ -248,3 +248,17 @@ python -m checker file.srt -l ko -k sdh --video ep01.mkv --spot
 
 ffmpeg은 `PATH`나 `FFMPEG_PATH`·`FFPROBE_PATH` 환경변수로 찾는다. 없으면 영상이
 필요 없는 검사는 그대로 돌고 영상 기능만 건너뛴다.
+
+#### 영상 자동 찾기
+
+`--spot`을 쓰면서 `--video`를 안 주면 **자막 옆에서 같은 이름의 영상**을 찾는다
+(`ep01.srt` -> `ep01.mkv`). `.fixed`·`_ko_TL` 같은 꼬리표는 떼고 찾는다.
+그래서 `tools/spot-ko-sdh.bat` 아이콘에 자막만 끌어다 놓으면 된다.
+
+#### ffmpeg 설치
+
+영상 기능(`--video`·`--spot`)에만 필요하다. 없으면 그 기능만 건너뛰고 나머지는 돈다.
+
+- Windows: https://www.gyan.dev/ffmpeg/builds/ 에서 release essentials 를 받아
+  압축을 풀고 `bin` 폴더를 PATH에 넣는다
+- 또는 압축만 풀고 `FFMPEG_PATH`·`FFPROBE_PATH` 환경변수로 실행 파일을 가리킨다
