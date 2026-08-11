@@ -140,8 +140,17 @@ def generate(video: Path, profile: dict, script: Path | None = None,
         stats.update(summary(cues))
         events = _to_events(cues, notes)
     else:
-        events = [Event(i, s.start_ms, s.end_ms, s.text)
-                  for i, s in enumerate(segments, 1)]
+        # **전사 조각을 자막 단위로 다시 묶는다.** whisper는 말이 잠깐 멎을 때마다
+        # 끊지만 사람은 한 호흡을 한 자막에 담는다(`regroup.py` 첫머리에 근거를
+        # 적어 두었다 — 전문가 타임코드와 대조해 값을 골랐다).
+        #
+        # 대본이 있으면 하지 않는다. 그때는 대본의 줄이 곧 자막 단위다.
+        from .regroup import limits_from_profile, merge_cues
+        raw = [Event(i, s.start_ms, s.end_ms, s.text) for i, s in enumerate(segments, 1)]
+        max_ms, max_gap = limits_from_profile(profile)
+        events = merge_cues(raw, max_ms, max_gap)
+        if len(events) != len(raw):
+            say(f"전사 조각 {len(raw)}개를 자막 {len(events)}개로 묶었습니다")
         if profile.get("kind") == "sdh":
             # **화자명은 대본에서 온다.** whisper는 누가 말했는지 구분하지 못한다
             # (화자 분리는 별도 모델이 필요하다). 못 넣은 것을 넣은 척하지 않는다.

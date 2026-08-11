@@ -178,6 +178,14 @@ def converge(events: list[Event], limits: TimingLimits, rounds: int = 3) -> Timi
 LEAD_IN_FRAMES = (2, 3)
 LEAD_OUT_FRAMES = (6, 9)
 
+# 말소리 검출이 문장 끝의 잦아드는 소리를 일찍 자른다는 의심이 있어, 아웃점에
+# 상수 보정(+400ms)을 넣어 봤다가 **뺐다**(2026-08-11). 전문가 타임코드와 대조하니
+# 아웃점 중앙값이 -380ms에서 -354ms로 거의 그대로였다. 우리 자막이 빈틈없이 붙어
+# 있어 늘릴 자리가 없었기 때문이다.
+#
+# 실제로 고친 것은 **전사 조각을 묶는 것**이었다(`regroup.py`). 자막이 줄어 사이가
+# 벌어지자 아웃점이 -226ms까지 따라왔다. 증상이 아니라 원인을 고쳐야 했다.
+
 
 @dataclass
 class SpotSuggestion:
@@ -193,23 +201,47 @@ def apply_spotting(events: list[Event], suggestions: list) -> int:
 
     사람이 잡아 놓은 타임코드에는 쓰지 않는다(`suggest_spotting` 첫머리 참고).
     하지만 **기계가 방금 만든 타임코드**라면 이야기가 다르다 — whisper가 찍은
-    경계도 어차피 추정이고, 말소리 구간과 견줘 다듬는 쪽이 낫다. 훼손할 사람의
-    작업물이 없다.
+    경계도 어차피 추정이고, 말소리 구간과 견줘 다듬는 쪽이 낫다.
 
-    되돌릴 수 없는 조정이 아니다. 뒤이어 `converge`가 규정에 맞게 다시 맞춘다.
+    **이웃을 넘지 않는 조정만 받는다.** 이 가드가 없어 크게 망가진 적이 있다
+    (2026-08-11): 한 말소리 구간에 자막 여러 개가 걸리면 그 자막들이 **전부 같은
+    경계로 스냅되어** 길이 0짜리가 무더기로 생겼다. 206개 중 85개가 길이 0이었다.
+
+        말소리 구간 하나 [23.2s ~ 29.0s]
+        그 안의 자막 여섯 개 -> 모두 23.2~29.0 -> 앞의 다섯 개가 0초로 뭉갬
+
+    말소리 검출은 **구간**을 주지 그 안에서 화자가 몇 번 문장을 끊었는지는 모른다.
+    구간의 첫 자막 인점과 마지막 자막 아웃점만 다듬고, 그 사이 경계는 whisper가
+    들은 대로 둔다.
     """
     by_index = {e.index: e for e in events}
+    ordered = sorted(events, key=lambda e: (e.start_ms, e.index))
+    position = {e.index: i for i, e in enumerate(ordered)}
     changed = 0
+
     for s in suggestions:
         event = by_index.get(s.event_index)
         if event is None or s.suggested == s.current:
             continue
-        if s.field_name == "start_ms" and s.suggested < event.end_ms:
+        i = position[event.index]
+        previous = ordered[i - 1] if i > 0 else None
+        following = ordered[i + 1] if i + 1 < len(ordered) else None
+
+        if s.field_name == "start_ms":
+            # 앞 자막의 아웃점보다 앞으로 가면 두 자막이 겹친다. 자기 아웃점을
+            # 넘어서면 자막이 뒤집힌다.
+            floor = previous.end_ms if previous else 0
+            if not (floor <= s.suggested < event.end_ms):
+                continue
             event.start_ms = s.suggested
-            changed += 1
-        elif s.field_name == "end_ms" and s.suggested > event.start_ms:
+        elif s.field_name == "end_ms":
+            ceiling = following.start_ms if following else s.suggested + 1
+            if not (event.start_ms < s.suggested <= ceiling):
+                continue
             event.end_ms = s.suggested
-            changed += 1
+        else:
+            continue
+        changed += 1
     return changed
 
 

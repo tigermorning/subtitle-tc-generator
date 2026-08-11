@@ -1360,6 +1360,45 @@ ok("어긋난 자막을 보여 준다", "가장 많이 어긋난" in _text)
 ok("빠뜨린 자막을 보여 준다", "그러게요" in _text)
 
 
+# --- 전사 조각 묶기 --------------------------------------------------------
+# whisper는 말이 잠깐 멎을 때마다 끊는다. 사람은 한 호흡을 한 자막에 담는다.
+# 값(4초·250ms)은 전문가 타임코드와 대조해 골랐다 — `regroup.py` 첫머리 참고.
+
+from checker.regroup import limits_from_profile, merge_cues  # noqa: E402
+
+_segs = [Event(1, 0, 1500, "안녕하세요"), Event(2, 1500, 3000, "오늘 날씨가"),
+         Event(3, 5000, 6500, "멀리 떨어진 말")]
+_merged = merge_cues(_segs, 4000, 250)
+ok("붙어 있는 조각을 합친다", len(_merged) == 2)
+ok("합친 텍스트를 이어 붙인다", _merged[0].text == "안녕하세요 오늘 날씨가")
+ok("시간도 이어 붙인다", (_merged[0].start_ms, _merged[0].end_ms) == (0, 3000))
+# 말이 끊긴 자리가 사람도 끊는 자리다.
+ok("간격이 넓으면 합치지 않는다", _merged[1].text == "멀리 떨어진 말")
+ok("번호를 다시 매긴다", [e.index for e in _merged] == [1, 2])
+
+_long = [Event(1, 0, 3500, "긴 말"), Event(2, 3500, 6000, "이어지는 말")]
+ok("합쳐서 상한을 넘으면 합치지 않는다", len(merge_cues(_long, 4000, 250)) == 2)
+ok("상한을 0으로 주면 손대지 않는다", merge_cues(_segs, 0, 250) is _segs)
+
+# **글자 수는 보지 않는다.** 원어 글자 수는 납품물과 무관하다(16자는 한국어 기준).
+_wordy = [Event(1, 0, 1500, "This trial's about banking and coding and transactions"),
+          Event(2, 1500, 3000, "and details that nobody wants to read at all")]
+ok("원어가 길어도 합친다", len(merge_cues(_wordy, 4000, 250)) == 1)
+
+ok("프로파일이 값을 정하지 않으면 기본값", limits_from_profile({}) == (4000, 250))
+ok("프로파일 값이 이긴다",
+   limits_from_profile({"timecode": {"merge_max_ms": 3000}}) == (3000, 250))
+
+# 스포팅이 자막을 뭉개지 않는지. 한 말소리 구간에 여러 자막이 걸릴 때 무너졌다.
+_dense = [Event(1, 1000, 2000, "가"), Event(2, 2000, 3000, "나"), Event(3, 3000, 4000, "다")]
+_spots = [_Spot(1, "end_ms", 2000, 9000), _Spot(2, "start_ms", 2000, 500),
+          _Spot(3, "end_ms", 4000, 4300)]
+_moved = apply_spotting(_dense, _spots)
+ok("뒤 자막을 넘는 아웃점은 받지 않는다", _dense[0].end_ms == 2000)
+ok("앞 자막을 침범하는 인점은 받지 않는다", _dense[1].start_ms == 2000)
+ok("마지막 자막은 늘릴 수 있다", _dense[2].end_ms == 4300 and _moved == 1)
+
+
 # --- 결과 ---------------------------------------------------------------
 
 print(f"통과 {PASSED}건")
