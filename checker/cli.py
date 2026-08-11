@@ -57,8 +57,11 @@ def _format_text(report: dict, path: Path) -> str:
             out.append(f"    {n:>4}건  {rule_id}  {message}")
         out.append("")
     out.append(f"  위반 {len(violations)}건")
+    if report.get("spotting_applied"):
+        out.append(f"  인점·아웃점 {report['spotting_applied']}곳을 말소리에 맞춰 옮겼습니다")
     if report.get("spot_suggestions"):
-        out.append(f"  스포팅 제안 {len(report['spot_suggestions'])}건 (자동 적용 안 함)")
+        applied = "적용함" if report.get("spotting_applied") else "자동 적용 안 함"
+        out.append(f"  스포팅 제안 {len(report['spot_suggestions'])}건 ({applied})")
         for sug in report["spot_suggestions"][:8]:
             out.append(f"    #{sug['event_index']} {sug['field']} "
                        f"{sug['current']} -> {sug['suggested']}ms  ({sug['reason']})")
@@ -215,6 +218,14 @@ def _run_one(path: Path, profile: dict, args, backend) -> dict | None:
                 print(f"    장면 전환 {len(shots)}곳", file=sys.stderr)
                 suggestions += suggest_shot_snap(events, shots, args._media.fps)
 
+            if getattr(args, "fix_spotting", False):
+                from .timing import apply_spotting
+                moved = apply_spotting(events, suggestions)
+                report["spotting_applied"] = moved
+                # 무엇을 덮어썼는지 남긴다. 되돌릴 근거가 있어야 한다.
+                print(f"    인점·아웃점 {moved}곳을 말소리에 맞춰 옮겼습니다",
+                      file=sys.stderr)
+
             report["spot_suggestions"] = [
                 {"event_index": s.event_index, "field": s.field_name,
                  "current": s.current, "suggested": s.suggested, "reason": s.reason}
@@ -331,6 +342,9 @@ def main(argv: list[str] | None = None) -> int:
                     help="영상 파일. 프레임레이트를 자동으로 읽고 --spot에 쓴다(ffmpeg 필요)")
     ap.add_argument("--spot", action="store_true",
                     help="말소리 구간과 견줘 인점·아웃점을 제안한다(자동 교정 아님)")
+    ap.add_argument("--fix-spotting", action="store_true",
+                    help="제안을 **자동으로 반영한다**. 사람이 잡아 놓은 타임코드도 "
+                         "덮어쓰므로, 남이 준 TC 파일에는 쓰지 말 것. --fix와 함께 쓴다")
     ap.add_argument("--fps", type=float, default=23.976,
                     help="영상 프레임레이트. 자막 간격 같은 프레임 단위 규정을 환산한다")
     ap.add_argument("--json", action="store_true", help="JSON으로 출력")

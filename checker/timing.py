@@ -188,6 +188,31 @@ class SpotSuggestion:
     reason: str
 
 
+def apply_spotting(events: list[Event], suggestions: list) -> int:
+    """제안을 타임코드에 반영한다. **생성 경로에서만 쓴다.**
+
+    사람이 잡아 놓은 타임코드에는 쓰지 않는다(`suggest_spotting` 첫머리 참고).
+    하지만 **기계가 방금 만든 타임코드**라면 이야기가 다르다 — whisper가 찍은
+    경계도 어차피 추정이고, 말소리 구간과 견줘 다듬는 쪽이 낫다. 훼손할 사람의
+    작업물이 없다.
+
+    되돌릴 수 없는 조정이 아니다. 뒤이어 `converge`가 규정에 맞게 다시 맞춘다.
+    """
+    by_index = {e.index: e for e in events}
+    changed = 0
+    for s in suggestions:
+        event = by_index.get(s.event_index)
+        if event is None or s.suggested == s.current:
+            continue
+        if s.field_name == "start_ms" and s.suggested < event.end_ms:
+            event.start_ms = s.suggested
+            changed += 1
+        elif s.field_name == "end_ms" and s.suggested > event.start_ms:
+            event.end_ms = s.suggested
+            changed += 1
+    return changed
+
+
 def suggest_spotting(events: list[Event], speech: list[tuple[int, int]], fps: float,
                      tolerance_frames: int = 4) -> list[SpotSuggestion]:
     """말소리 구간과 견줘 인점·아웃점을 제안한다.

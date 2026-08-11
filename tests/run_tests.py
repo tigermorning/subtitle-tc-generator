@@ -1171,6 +1171,33 @@ ok("종류가 어긋나면 경고한다", _warn is not None and "SDH" in _warn)
 ok("맞으면 조용하다", mismatch_warning(_sdh, load_profile("netflix", "ko", "sdh")) is None)
 
 
+# --- 스포팅 자동 적용 -------------------------------------------------------
+# 생성 경로에서는 자동으로 반영한다. 타임코드 자체가 방금 기계가 만든 것이라
+# 훼손할 사람의 작업물이 없다. 검사 경로에서는 --fix-spotting을 켤 때만 한다.
+
+from checker.timing import apply_spotting  # noqa: E402
+
+
+class _Spot:
+    def __init__(self, index, field_name, current, suggested):
+        self.event_index, self.field_name = index, field_name
+        self.current, self.suggested = current, suggested
+
+
+_evs = [Event(1, 1000, 3000, "가"), Event(2, 4000, 6000, "나")]
+n = apply_spotting(_evs, [_Spot(1, "start_ms", 1000, 900), _Spot(1, "end_ms", 3000, 3200)])
+ok("인점을 앞으로 당긴다", _evs[0].start_ms == 900)
+ok("아웃점을 뒤로 민다", _evs[0].end_ms == 3200)
+ok("옮긴 개수를 돌려준다", n == 2)
+
+ok("바뀌지 않는 제안은 세지 않는다",
+   apply_spotting(_evs, [_Spot(2, "start_ms", 4000, 4000)]) == 0)
+# 인점이 아웃점을 넘으면 자막이 뒤집힌다. 그런 제안은 버린다.
+ok("자막을 뒤집는 제안은 버린다",
+   apply_spotting(_evs, [_Spot(2, "start_ms", 4000, 9000)]) == 0 and _evs[1].start_ms == 4000)
+ok("없는 자막 번호는 조용히 넘긴다", apply_spotting(_evs, [_Spot(99, "start_ms", 0, 1)]) == 0)
+
+
 # --- 결과 ---------------------------------------------------------------
 
 print(f"통과 {PASSED}건")

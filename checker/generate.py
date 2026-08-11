@@ -117,6 +117,18 @@ def generate(video: Path, profile: dict, script: Path | None = None,
                     moved.setdefault(new_index, []).append(note)
         notes = [(i, " / ".join(v)) for i, v in sorted(moved.items())]
 
+    # **인점·아웃점을 말소리에 맞춘다.** 작업자 기준: 인점은 목소리 시작 2~3프레임
+    # 전, 아웃점은 끝난 뒤 6~9프레임. whisper가 찍은 경계는 이 여유를 모른다.
+    #
+    # 검사 경로에서는 이 조정을 자동으로 하지 않는다 — 사람이 잡은 타임코드를
+    # 추정값으로 덮어쓰면 싱크가 통째로 어긋나기 때문이다. 여기서는 타임코드 자체가
+    # 방금 기계가 만든 것이라 훼손할 작업물이 없다.
+    from .timing import apply_spotting, suggest_spotting
+    moved = apply_spotting(events, suggest_spotting(events, speech, fps))
+    if moved:
+        say(f"인점·아웃점 {moved}곳을 말소리에 맞춤")
+    stats["spotting_applied"] = moved
+
     result = converge(events, TimingLimits.from_profile(profile, fps=fps))
     say(f"스포팅 {len(result.changes)}곳 조정, 남은 문제 {len(result.unresolved)}건")
     stats.update(cues_out=len(result.events), timing_changes=len(result.changes),
