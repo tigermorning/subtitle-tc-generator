@@ -1,0 +1,118 @@
+"""빈칸을 태운다 — 영상(과 스크립트)에서 자막 초안을 만든다.
+
+지금까지의 모듈들은 **사람이 이미 쓴 자막을 검사**했다. 이 모듈은 그 앞 단계다.
+영상을 넣으면 자막이 나온다.
+
+    SDH        영상            -> 전사 -> 재분할 -> 스포팅 -> 초안
+    번역 자막   영상 + 원어 스크립트 -> 전사 -> 스크립트 대조 -> 재분할 -> 스포팅 -> 초안
+
+**초안이다.** 사람이 고칠 것을 전제로 만든다. 그래서 기계가 자신 없는 자리를
+지우지 않고 남긴다 — `notes.srt`로 따로 내보내 SE에서 원본 옆에 띄워 볼 수 있다.
+
+**단계를 섞지 않는다.** 전사는 글자 수를 무시하고 자유롭게, 재단은 그 뒤에.
+(왜인지는 `resplit.py` 첫머리에 적어 두었다.)
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from pathlib import Path
+
+from .align import AlignedCue, Segment, align, summary
+from .media import detect_speech, probe
+from .model import Event
+from .resplit import resplit_all
+from .timing import TimingLimits, converge
+
+
+@dataclass
+class Draft:
+    events: list[Event]
+    notes: list[tuple[int, str]] = field(default_factory=list)  # (자막 번호, 봐야 할 이유)
+    stats: dict = field(default_factory=dict)
+
+
+def read_script(path: Path) -> list[str]:
+    """원어 스크립트를 줄 단위로 읽는다.
+
+    대본은 형식이 제각각이라 한 줄이 곧 한 대사는 아니다. 빈 줄로 나뉜 덩어리를
+    문단으로 보고, 문단 안의 줄바꿈은 이어 붙인다 — 대본의 줄바꿈은 종이 폭 때문에
+    생긴 것이지 대사가 끊긴 자리가 아니다.
+    """
+    text = path.read_text(encoding="utf-8", errors="replace").replace("\r\n", "\n")
+    blocks = [b.strip() for b in text.split("\n\n")]
+    lines: list[str] = []
+    for block in blocks:
+        joined = " ".join(l.strip() for l in block.split("\n") if l.strip())
+        if joined:
+            lines.append(joined)
+    return lines
+
+
+def generate(video: Path, profile: dict, script: Path | None = None,
+             language: str = "auto", model: str | None = None,
+             fps: float | None = None, use_gpu: bool = True,
+             keep_transcript: Path | None = None, progress=None) -> Draft:
+    """영상에서 자막 초안을 만든다."""
+    from .transcribe import transcribe   # ffmpeg이 없어도 이 모듈은 import 되게
+
+    say = progress or (lambda _m: None)
+    video = Path(video)
+
+    media = probe(video)
+    if fps is None:
+        fps = media.fps or 23.976
+    say(f"영상: {media.duration_ms / 1000:.0f}초, {fps:.3f}fps")
+
+    segments = transcribe(video, language=language, model=model,
+                          use_gpu=use_gpu, progress=say, keep=keep_transcript)
+    if not segments:
+        return Draft([], [], {"transcript": 0})
+
+    notes: list[tuple[int, str]] = []
+    stats: dict = {"transcript": len(segments)}
+
+    if script:
+        lines = read_script(Path(script))
+        say(f"스크립트 {len(lines)}줄과 대조합니다")
+        cues = align(segments, lines)
+        stats.update(summary(cues))
+        events = _to_events(cues, notes)
+    else:
+        events = [Event(i, s.start_ms, s.end_ms, s.text)
+                  for i, s in enumerate(segments, 1)]
+
+    speech = detect_speech(video, duration_ms=media.duration_ms)
+    before = len(events)
+    events = resplit_all(events, profile, speech)
+    say(f"자막 {before}개를 의미 단위로 다시 나눠 {len(events)}개")
+
+    result = converge(events, TimingLimits.from_profile(profile, fps=fps))
+    say(f"스포팅 {len(result.changes)}곳 조정, 남은 문제 {len(result.unresolved)}건")
+    stats.update(cues_out=len(result.events), timing_changes=len(result.changes),
+                 timing_unresolved=len(result.unresolved))
+
+    return Draft(result.events, notes, stats)
+
+
+def _to_events(cues: list[AlignedCue], notes: list[tuple[int, str]]) -> list[Event]:
+    """대조 결과를 자막으로. 봐야 할 자리는 번호를 적어 둔다.
+
+    소리를 못 찾은 스크립트 줄은 **길이 0으로 남긴다**. 지우면 사람이 빠진 줄을
+    영영 모르고, 아무 데나 시간을 주면 틀린 자막이 완성본처럼 보인다.
+    """
+    events: list[Event] = []
+    for i, cue in enumerate(cues, 1):
+        events.append(Event(i, cue.start_ms, cue.end_ms, cue.text))
+        if cue.needs_review:
+            notes.append((i, cue.note))
+    return events
+
+
+def notes_srt(draft: Draft) -> str:
+    """봐야 할 자리를 자막 파일로. SE 번역 모드로 초안 옆에 띄우면 그 자리로 바로 간다."""
+    from .writers import to_srt
+    by_index = dict(draft.notes)
+    return to_srt([Event(ev.index, ev.start_ms, ev.end_ms,
+                         by_index.get(ev.index, "·"))
+                   for ev in draft.events])

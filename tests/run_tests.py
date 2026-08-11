@@ -948,6 +948,56 @@ out = resplit_all([Event(1, 0, 6000, "안녕하세요. 오늘 날씨가 좋습�
 ok("번호를 다시 매긴다", [e.index for e in out] == list(range(1, len(out) + 1)))
 
 
+# --- 전사 읽기와 생성 파이프라인 -----------------------------------------
+# 전사 자체는 기계와 모델에 달려 있어 시험으로 붙잡을 수 없다. 전사 **결과를
+# 읽는 부분**과 그 뒤 단계를 잡는다.
+
+from checker.transcribe import _parse_srt  # noqa: E402
+from checker.generate import Draft, _to_events, notes_srt, read_script  # noqa: E402
+
+SAMPLE_SRT = """1
+00:00:00,000 --> 00:00:04,560
+동기화 설명을 좀 드리겠습니다
+
+2
+00:00:04,560 --> 00:00:06,800
+그 기본강의에서
+살짝 들으셨을텐데
+"""
+
+segs = _parse_srt(SAMPLE_SRT)
+ok("전사 SRT를 읽는다", len(segs) == 2)
+ok("타임코드를 밀리초로 읽는다", segs[0].start_ms == 0 and segs[0].end_ms == 4560)
+ok("여러 줄 자막을 붙여 읽는다", segs[1].text == "그 기본강의에서\n살짝 들으셨을텐데")
+
+dotted = _parse_srt("1\n00:00:01.500 --> 00:00:02.250\n네\n")
+ok("점으로 찍힌 타임코드도 읽는다", dotted and dotted[0].start_ms == 1500)
+ok("쓰레기 줄은 건너뛴다", _parse_srt("\n\n쓰레기\n\n1\n잘못된 타임코드\n말\n\n") == [])
+
+import tempfile as _tf3  # noqa: E402
+with _tf3.TemporaryDirectory() as _d:
+    _sp = Path(_d) / "script.txt"
+    _sp.write_text("Hello there,\nold friend.\n\nHow have you been?\n", encoding="utf-8")
+    # 대본의 줄바꿈은 종이 폭 때문이지 대사가 끊긴 자리가 아니다.
+    ok("스크립트는 문단을 한 대사로 읽는다",
+       read_script(_sp) == ["Hello there, old friend.", "How have you been?"])
+
+_cues = align([Segment(0, 1000, "hello there")], ["Hello there.", "Where have you been?"])
+_notes: list = []
+_events = _to_events(_cues, _notes)
+ok("소리를 못 찾은 스크립트 줄을 지우지 않는다", len(_events) == 2)
+ok("소리 없는 줄은 길이 0으로 남는다", _events[1].start_ms == _events[1].end_ms)
+ok("그 자리를 봐야 할 곳으로 표시한다", any(i == 2 for i, _ in _notes))
+
+_draft = Draft([Event(1, 0, 1000, "가"), Event(2, 1000, 2000, "나")],
+               notes=[(2, "스크립트에 없는 대사입니다")])
+_out = notes_srt(_draft)
+ok("노트에 봐야 할 이유가 들어간다", "스크립트에 없는" in _out)
+ok("깨끗한 줄은 조용히 채운다", "·" in _out)
+# 번호가 어긋나면 SE에서 짝이 맞지 않는다.
+ok("자막 수만큼 노트를 낸다", _out.count("-->") == 2)
+
+
 # --- 결과 ---------------------------------------------------------------
 
 print(f"통과 {PASSED}건")

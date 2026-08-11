@@ -211,6 +211,50 @@ def _run_one(path: Path, profile: dict, args, backend) -> dict | None:
     return report
 
 
+def _generate_mode(args, ap) -> int:
+    """영상 -> 자막 초안. 검사 경로와 섞지 않는다 — 입력도 출력도 다르다."""
+    from .generate import generate, notes_srt
+    from .media import MediaToolUnavailable
+
+    if not args.video:
+        ap.error("--generate에는 --video가 필요합니다")
+    if not args.video.is_file():
+        ap.error(f"영상을 찾지 못했습니다: {args.video}")
+
+    profile = (load_profile_file(args.profile) if args.profile
+               else load_profile(args.platform, args.lang, args.kind))
+    print(f"프로파일: {profile.get('platform')} {profile.get('language')} "
+          f"{profile.get('kind')}")
+
+    try:
+        draft = generate(args.video, profile, script=args.script,
+                         language=args.whisper_lang, model=args.whisper_model,
+                         fps=None, use_gpu=not args.cpu, progress=print)
+    except MediaToolUnavailable as exc:
+        print(f"[오류] {exc}")
+        return 2
+
+    if not draft.events:
+        print("말소리를 찾지 못했습니다.")
+        return 1
+
+    out = args.out or args.video.with_suffix(".draft.srt")
+    write_srt(draft.events, out)
+    print(f"\n자막 초안을 저장했습니다: {out}  (자막 {len(draft.events)}개)")
+
+    if draft.notes:
+        notes_path = out.with_suffix(".notes.srt")
+        notes_path.write_text(notes_srt(draft), encoding="utf-8")
+        print(f"봐야 할 자리 {len(draft.notes)}곳: {notes_path}")
+        print("  SE에서 초안을 연 뒤 [파일 - 원본 자막 열기]로 이 파일을 얹으면 "
+              "나란히 보입니다.")
+
+    print("\n초안입니다. 사람이 보고 고치는 것을 전제로 만들었습니다. "
+          "이어서 검사를 돌리려면:")
+    print(f"  checker \"{out}\" -p {args.platform} -k {args.kind} --korean")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     _force_utf8_output()
     ap = argparse.ArgumentParser(prog="checker", description="플랫폼 규정 준수 검사")
@@ -248,7 +292,25 @@ def main(argv: list[str] | None = None) -> int:
                          "원본 옆에 띄워 영상을 보며 확인할 수 있다")
     ap.add_argument("--report", type=Path,
                     help="리포트를 파일로도 남긴다(화면 출력은 그대로 나온다)")
+    gen = ap.add_argument_group(
+        "자막 만들기", "검사가 아니라 **생성**이다. --video만 주면 SDH 초안, "
+                    "--script를 함께 주면 원어 대조까지 한다")
+    gen.add_argument("--generate", action="store_true",
+                     help="영상에서 자막 초안을 만든다(whisper 전사 -> 재분할 -> 스포팅)")
+    gen.add_argument("--script", type=Path,
+                     help="원어 스크립트. 전사와 대조해 텍스트를 정한다. "
+                          "어느 쪽도 정답으로 두지 않고 어긋난 자리는 표시한다")
+    gen.add_argument("--whisper-model",
+                     help="ggml 모델 경로(기본: WHISPER_MODEL 환경변수 또는 models/ 폴더의 "
+                          "가장 큰 것). large-v3-turbo 권장")
+    gen.add_argument("--whisper-lang", default="auto",
+                     help="말소리 언어(ko, en, auto…). 아는 값을 주면 정확해진다")
+    gen.add_argument("--cpu", action="store_true",
+                     help="GPU를 쓰지 않는다(느리다). 기본은 GPU")
     args = ap.parse_args(argv)
+
+    if args.generate:
+        return _generate_mode(args, ap)
 
     if args.list:
         for prof in available_profiles():
