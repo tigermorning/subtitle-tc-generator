@@ -89,7 +89,12 @@ class Player:
         모양으로 보인다 — 줄바꿈, 위치 태그(`{\\an8}`), 글자 크기까지. 우리가
         직접 글자를 그리면 "편집기에서는 이렇게 보였는데" 하는 차이가 생긴다.
         """
-        self._mpv.command("sub-remove")
+        # **자막이 하나도 없을 때 `sub-remove`는 예외를 던진다**(실측: SystemError).
+        # 그대로 두면 뒤의 `sub-add`까지 못 가서 자막이 조용히 안 뜬다.
+        try:
+            self._mpv.command("sub-remove")
+        except Exception:
+            pass
         self._mpv.command("sub-add", path, "select")
 
     def reload_subtitles(self) -> None:

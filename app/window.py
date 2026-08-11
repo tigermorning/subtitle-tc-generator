@@ -214,11 +214,16 @@ class MainWindow(QMainWindow):
             write_srt(self.model.events, self._preview_path)
         except OSError:
             return
-        if self._preview_loaded:
-            self.player.reload_subtitles()
-        else:
-            self.player.set_subtitles(str(self._preview_path))
-            self._preview_loaded = True
+        try:
+            if self._preview_loaded:
+                self.player.reload_subtitles()
+            else:
+                self.player.set_subtitles(str(self._preview_path))
+                self._preview_loaded = True
+        except Exception as exc:
+            # **조용히 실패하지 않는다.** 자막이 안 뜨는데 이유를 모르면 사람이
+            # 프로그램을 탓하게 된다(실제로 그랬다).
+            self.statusBar().showMessage(f"영상에 자막을 얹지 못했습니다: {exc}")
 
     def _seek_to(self, ms: int) -> None:
         if self.player:
