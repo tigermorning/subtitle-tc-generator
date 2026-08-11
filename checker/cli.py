@@ -28,6 +28,8 @@ def _format_text(report: dict, path: Path) -> str:
     out = [f"{path.name} — {report['profile']} {report['kind']}"]
     if report.get("profile_source"):
         out.append(f"  기준: {report['profile_source']}")
+    if report.get("profile_warning"):
+        out.append(f"  ⚠ {report['profile_warning']}")
     violations = report["violations"]
     if not violations:
         out.append("  위반 없음")
@@ -140,6 +142,12 @@ def _run_one(path: Path, profile: dict, args, backend) -> dict | None:
     report = check_events([e.__dict__ for e in events], profile,
                           children=args.children, fps=args.fps)
     report["file"] = str(path)
+
+    # 프로파일을 잘못 고르면 지적이 통째로 뒤집힌다. 자막 표기로 유추해 어긋나면 알린다.
+    from .detect import mismatch_warning
+    warning = mismatch_warning(events, profile)
+    if warning:
+        report["profile_warning"] = warning
     if getattr(args, "spot", False) and getattr(args, "_media", None):
         from .media import MediaToolUnavailable, detect_speech
         from .timing import suggest_spotting

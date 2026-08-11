@@ -842,6 +842,40 @@ ok("쿠팡은 장면 전환 비적용이라 이 검사를 부르지 않는다",
    cp_shot["shot_change"]["applied"] is False)
 
 
+# --- 플랫폼 유추 -------------------------------------------------------------
+
+from checker.detect import detect_platform, mismatch_warning  # noqa: E402
+
+coupang_style = [Event(1, 0, 4000, "(철수) 안녕하세요"),
+                 Event(2, 5000, 8000, "(영희) [작게] 그래..."),
+                 Event(3, 9000, 12000, "(철수) 어디 가?")]
+netflix_style = [Event(1, 0, 4000, "[철수/작게] 안녕하세요"),
+                 Event(2, 5000, 8000, "[영희/영어] 그래…"),
+                 Event(3, 9000, 12000, "[잔잔한 음악]")]
+disney_style = [Event(1, 0, 4000, "[철수가 작게] 안녕하세요"),
+                Event(2, 5000, 8000, "[♪ 잔잔한 음악]"),
+                Event(3, 9000, 12000, "이제 O됐네")]
+
+ok("소괄호 화자명은 쿠팡으로 본다", detect_platform(coupang_style)[0].platform == "coupang")
+ok("슬래시 화자명은 넷플릭스로 본다", detect_platform(netflix_style)[0].platform == "netflix")
+ok("서술형·음표·O 삐는 디즈니로 본다", detect_platform(disney_style)[0].platform == "disney",
+   str(detect_platform(disney_style)[:2]))
+ok("근거를 남긴다", detect_platform(coupang_style)[0].evidence)
+
+ok("화자명이 없으면 함부로 단정하지 않는다",
+   not detect_platform([Event(1, 0, 3000, "그냥 대사입니다")]))
+
+warn = mismatch_warning(coupang_style, load_profile_file(Path("rules/netflix/ko-sdh-practice.yaml")))
+ok("프로파일이 어긋나면 경고한다", warn and "coupang" in warn, str(warn))
+ok("경고에 근거가 들어간다", "소괄호" in warn)
+
+ok("맞는 프로파일이면 조용하다",
+   mismatch_warning(coupang_style, load_profile_file(Path("rules/coupang/ko-sdh.yaml"))) is None)
+ok("근거가 약하면 말하지 않는다",
+   mismatch_warning([Event(1, 0, 3000, "그래…")],
+                    load_profile_file(Path("rules/coupang/ko-sdh.yaml"))) is None)
+
+
 # --- 결과 ---------------------------------------------------------------
 
 print(f"통과 {PASSED}건")

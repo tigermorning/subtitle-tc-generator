@@ -42,7 +42,11 @@ if not defined SKIP_KOREAN if defined KSC_PATH if /i "%LANG%"=="ko" set "KO=--ko
 set "REPORT=%~dp1checker-report.txt"
 
 echo.
-echo   profile: %PLATFORM% %LANG% %KIND% %EXTRA%
+if defined PROFILE (
+  echo   profile: %PROFILE% %EXTRA%
+) else (
+  echo   profile: %PLATFORM% %LANG% %KIND% %EXTRA%
+)
 echo   report:  %REPORT%
 echo.
 
@@ -51,7 +55,11 @@ rem morphological analyzer, and a window with no output is indistinguishable fro
 rem hung one. The checker prints progress as it goes and writes the report itself
 rem via --report.
 pushd "%REPO%"
-"%PY%" -m checker %* -p %PLATFORM% -l %LANG% -k %KIND% %KO% %EXTRA% --report "%REPORT%"
+if defined PROFILE (
+  "%PY%" -m checker %* --profile "%REPO%\%PROFILE%" -l %LANG% %KO% %EXTRA% --report "%REPORT%"
+) else (
+  "%PY%" -m checker %* -p %PLATFORM% -l %LANG% -k %KIND% %KO% %EXTRA% --report "%REPORT%"
+)
 set "RC=%ERRORLEVEL%"
 popd
 

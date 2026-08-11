@@ -262,3 +262,38 @@ ffmpeg은 `PATH`나 `FFMPEG_PATH`·`FFPROBE_PATH` 환경변수로 찾는다. 없
 - Windows: https://www.gyan.dev/ffmpeg/builds/ 에서 release essentials 를 받아
   압축을 풀고 `bin` 폴더를 PATH에 넣는다
 - 또는 압축만 풀고 `FFMPEG_PATH`·`FFPROBE_PATH` 환경변수로 실행 파일을 가리킨다
+
+### 프로파일을 잘못 고르면 알려 준다
+
+OTT마다 화자명·어조·음악·삐 처리 표기가 다르다. 그래서 자막만 보고도 어느 플랫폼
+작업물인지 유추할 수 있다.
+
+```
+쿠팡      (철수)          소괄호 화자명
+넷플릭스   [철수/작게]      슬래시로 나눈 대괄호
+디즈니     [철수가 작게]    서술형 대괄호, [♪ 음악], O 삐 처리
+```
+
+고른 프로파일과 자막의 표기가 어긋나면 리포트 머리에 경고가 나온다.
+
+```
+⚠ 자막 표기는 coupang 쪽으로 보이는데 netflix 프로파일로 검사했습니다.
+  근거: 소괄호 화자명 (철수), 점 셋 말줄임표. 프로파일을 확인하세요.
+```
+
+**확정하지 않는다.** 근거가 약하면 아무 말도 하지 않는다 — 애매한 근거로 사람을
+흔들면 오히려 프로파일을 잘못 바꾸게 된다.
+
+### 아이콘에 플랫폼이 드러난다
+
+```
+netflix-ko-sdh-check.bat / -fix.bat / -spot.bat
+netflix-ko-translation-check.bat / -fix.bat / -spot.bat
+netflix-ko-sdh-practice-check.bat     공식 규정 + 실무 관행
+netflix-en-translation-check.bat
+coupang-ko-sdh-check.bat / -fix.bat
+disney-ko-sdh-check.bat / -fix.bat
+```
+
+번역 자막은 아직 넷플릭스만 있다. 디즈니·쿠팡의 번역 자막 규정은 확보하지 못했다
+— 실무 자료가 SDH 기준이었다. 추측해 만들지 않는다.
