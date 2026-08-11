@@ -1,0 +1,6 @@
+.venv/
+__pycache__/
+.omc/
+bin/
+obj/
+node_modules/
