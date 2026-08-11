@@ -195,7 +195,8 @@ def generate(video: Path, profile: dict, script: Path | None = None,
     # 추정값으로 덮어쓰면 싱크가 통째로 어긋나기 때문이다. 여기서는 타임코드 자체가
     # 방금 기계가 만든 것이라 훼손할 작업물이 없다.
     from .timing import apply_spotting, suggest_spotting
-    moved = apply_spotting(events, suggest_spotting(events, speech, fps))
+    moved = apply_spotting(events, suggest_spotting(events, speech, fps,
+                                                   detector=how))
     if moved:
         say(f"인점·아웃점 {moved}곳을 말소리에 맞춤")
     stats["spotting_applied"] = moved

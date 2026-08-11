@@ -175,24 +175,31 @@ def converge(events: list[Event], limits: TimingLimits, rounds: int = 3) -> Timi
 #   아웃점: 보이스 끝난 후 0.2~0.3초 이내(6~9프레임)
 #   음성이 겹치면 다음 화자의 인점 우선
 #   아웃점 규칙보다 Minimum Duration이 우선
-LEAD_IN_FRAMES = (2, 3)
-LEAD_OUT_FRAMES = (6, 9)
+# **여유 값은 검출기에 딸린 값이다.** 작업자 기준(인점은 목소리 시작 2~3프레임 전,
+# 아웃점은 끝난 뒤 6~9프레임)은 *사람이 듣는 말의 경계*를 기준으로 한 것이고,
+# 검출기가 그 경계를 어디로 잡느냐는 방법마다 다르다. 같은 규정을 지키려면 검출기가
+# 어긋나는 만큼을 여유로 되돌려야 한다.
+#
+# 정답을 아는 합성 오디오로 재 보니 VAD는 말 시작을 거의 정확히 잡았다
+# (오차 +4~+11ms, 흩어짐 ±10~19ms — 한 프레임보다 작다). 음량 검출은 숨소리에
+# 먼저 반응해 일찍 잡고, 말끝은 일찍 자른다.
+#
+# 그래서 검출기별로 값을 따로 둔다. 전문가 정답 1편과 연습 자료 2편에서 100ms 안에
+# 드는 자막 수로 골랐다(2026-08-11):
+#
+#     인점 여유   0프레임 206  1프레임 206  2프레임 204  3프레임 186  5프레임 98
+#     아웃 여유   3프레임 123  6프레임 102  9프레임  64  12프레임  57
+#
+# 음량 쪽 값은 그대로 둔다 — 그 값으로 잰 결과가 이미 있고, 검출기가 다르면 근거도
+# 다시 세워야 한다.
+LEADS = {
+    "loudness": {"in": (2, 3), "out": (6, 9), "tail": 6},
+    "vad": {"in": (1, 2), "out": (3, 4), "tail": 0},
+}
 
-# **말소리 검출은 말이 끝나기 전에 끝났다고 말한다.** 음량이 기준이라 문장 끝의
-# 잦아드는 소리를 침묵으로 본다. 검출 기준을 -20dB로 올린 뒤로는 더 그렇다.
-#
-# 처음에는 이 보정을 -30dB 기준에 얹어 봤다가 뺐다 — 아웃점이 -380ms에서 -354ms로
-# 거의 그대로였기 때문이다. 자막이 빈틈없이 붙어 있어 늘릴 자리가 없었다. 전사
-# 조각을 묶고(`regroup.py`) 검출 기준을 올린 뒤에야 이 보정이 값을 한다.
-#
-#     보정 없음(6프레임)   아웃점 중앙 -448ms, 100ms 안 10개
-#     +6프레임             아웃점 중앙 -323ms, 100ms 안 14개   <- 이 값
-#     +12프레임            아웃점 중앙 -236ms, 100ms 안 12개 (지나쳐 늘어난다)
-#
-# **규정을 바꾼 것이 아니다.** 작업자 기준(아웃점은 목소리가 끝난 뒤 6~9프레임)은
-# 사람이 듣는 말 끝을 기준으로 한 것이고, 이 값은 검출기가 일찍 자르는 만큼을
-# 되돌리는 보정이다. 둘은 다른 자리를 잰다.
-SPEECH_TAIL_FRAMES = 6
+LEAD_IN_FRAMES = LEADS["loudness"]["in"]
+LEAD_OUT_FRAMES = LEADS["loudness"]["out"]
+SPEECH_TAIL_FRAMES = LEADS["loudness"]["tail"]
 
 
 @dataclass
@@ -254,7 +261,8 @@ def apply_spotting(events: list[Event], suggestions: list) -> int:
 
 
 def suggest_spotting(events: list[Event], speech: list[tuple[int, int]], fps: float,
-                     tolerance_frames: int = 4) -> list[SpotSuggestion]:
+                     tolerance_frames: int = 4,
+                     detector: str = "loudness") -> list[SpotSuggestion]:
     """말소리 구간과 견줘 인점·아웃점을 제안한다.
 
     **자동으로 고치지 않는다.** 말소리 검출은 음량 기준이라 배경음악이 크면 경계가
@@ -265,6 +273,8 @@ def suggest_spotting(events: list[Event], speech: list[tuple[int, int]], fps: fl
     """
     if not speech:
         return []
+    leads = LEADS.get(detector, LEADS["loudness"])
+    lead_in, lead_out, tail = leads["in"], leads["out"], leads["tail"]
     frame = 1000.0 / fps
     tolerance = tolerance_frames * frame
     out: list[SpotSuggestion] = []
@@ -288,13 +298,13 @@ def suggest_spotting(events: list[Event], speech: list[tuple[int, int]], fps: fl
         if next_start is not None:
             voice_end = min(voice_end, next_start)
 
-        want_start = voice_start - LEAD_IN_FRAMES[1] * frame
+        want_start = voice_start - lead_in[1] * frame
         if abs(ev.start_ms - want_start) > tolerance:
             out.append(SpotSuggestion(
                 ev.index, "start_ms", ev.start_ms, int(round(want_start)),
-                f"말소리 시작 {voice_start}ms의 {LEAD_IN_FRAMES[0]}~{LEAD_IN_FRAMES[1]}프레임 앞"))
+                f"말소리 시작 {voice_start}ms의 {lead_in[0]}~{lead_in[1]}프레임 앞"))
 
-        want_end = voice_end + (SPEECH_TAIL_FRAMES + LEAD_OUT_FRAMES[0]) * frame
+        want_end = voice_end + (tail + lead_out[0]) * frame
         if next_start is not None:
             # 여유 프레임을 더한 뒤에도 다음 인점을 넘지 않게 한다.
             # 간격 확보는 converge()가 따로 본다.
@@ -302,7 +312,7 @@ def suggest_spotting(events: list[Event], speech: list[tuple[int, int]], fps: fl
         if abs(ev.end_ms - want_end) > tolerance:
             out.append(SpotSuggestion(
                 ev.index, "end_ms", ev.end_ms, int(round(want_end)),
-                f"말소리 끝 {voice_end}ms의 {LEAD_OUT_FRAMES[0]}~{LEAD_OUT_FRAMES[1]}프레임 뒤"))
+                f"말소리 끝 {voice_end}ms의 {lead_out[0]}~{lead_out[1]}프레임 뒤"))
 
     return out
 
