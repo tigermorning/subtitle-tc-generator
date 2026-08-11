@@ -348,8 +348,10 @@ class MainWindow(QMainWindow):
                             self.kind_box.currentText())
 
     def _corrector_path(self) -> str | None:
-        import os
-        return os.environ.get("KSC_PATH")
+        """교정기 자리. 옆에 있으면 그냥 쓴다 — 설정을 만들게 하지 않는다."""
+        from checker.korean import find_corrector
+        found = find_corrector()
+        return str(found) if found else None
 
     def _busy(self, busy: bool, what: str = "") -> None:
         import time

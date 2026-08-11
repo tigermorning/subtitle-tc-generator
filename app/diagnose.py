@@ -88,12 +88,13 @@ def collect() -> list[dict]:
         out.append(_line("번역(로컬 모델)", False, how=str(exc).splitlines()[0]))
 
     # --- 한국어 교정기 --------------------------------------------------
-    root = os.environ.get("KSC_PATH")
-    if root and (Path(root) / "subtitle_corrector").is_dir():
-        out.append(_line("한국어 교정기", True, root))
-    else:
-        out.append(_line("한국어 교정기", False,
-                         how="KSC_PATH 환경변수로 교정기 폴더를 알려 주세요"))
+    try:
+        from checker.korean import find_corrector
+        found = find_corrector()
+    except Exception:
+        found = None
+    out.append(_line("한국어 교정기", found, found,
+                     "편집기 폴더 옆에 두거나 KSC_PATH로 알려 주세요"))
     return out
 
 

@@ -125,6 +125,37 @@ def _corrector_options(root_path, profile: dict | None) -> dict:
     return options
 
 
+def find_corrector(explicit: str | None = None) -> Path | None:
+    """한국어 교정기를 찾는다.
+
+    **환경변수를 손으로 넣게 하지 않는다.** 옆에 있으면 그냥 쓴다 — ffmpeg·모델을
+    찾는 방식과 같다. 사람이 설정을 만들어야 도는 구조는 결국 안 쓰인다.
+    """
+    from .paths import user_data
+
+    # **사람이 콕 집어 준 자리는 그것만 본다.** 틀렸으면 다른 것을 몰래 쓰지 않고
+    # 없다고 한다 — 쓰는 사람은 자기가 지정한 것이 도는 줄 안다.
+    named = explicit or os.environ.get("KSC_PATH")
+    if named:
+        path = Path(named)
+        return path if (path / "subtitle_corrector").is_dir() else None
+
+    candidates = []
+    here = Path(__file__).resolve().parent.parent
+    beside_exe = Path(sys.executable).resolve().parent
+    for base in (here.parent, beside_exe.parent, beside_exe,
+                 Path.home() / "Documents", user_data()):
+        candidates.append(base / "korean-subtitle-corrector")
+
+    for candidate in candidates:
+        if not candidate:
+            continue
+        path = Path(candidate)
+        if (path / "subtitle_corrector").is_dir():
+            return path
+    return None
+
+
 def _load_corrector_env(root_path: Path) -> None:
     """교정기의 `.env`를 읽어 환경에 올린다.
 
@@ -160,12 +191,12 @@ def load_backend(corrector_path: str | None = None):
       flags 는 {"line_index": int, "original_text": str,
                 "suggested_fix": str, "reason": str} 목록
     """
-    root = corrector_path or os.environ.get("KSC_PATH")
-    if not root:
+    found = find_corrector(corrector_path)
+    if not found:
         raise CorrectorUnavailable(
-            "교정기 경로를 모릅니다. KSC_PATH 환경변수나 --ksc-path로 지정하세요."
+            "교정기를 찾지 못했습니다. 편집기 폴더 옆에 두거나 KSC_PATH로 알려 주세요."
         )
-    root_path = Path(root).expanduser().resolve()
+    root_path = found.expanduser().resolve()
     if not (root_path / "subtitle_corrector").is_dir():
         raise CorrectorUnavailable(f"교정기가 없습니다: {root_path}")
 
