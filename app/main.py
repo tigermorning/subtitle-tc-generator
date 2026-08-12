@@ -34,13 +34,27 @@ def main() -> int:
             pass
         return 0
 
+    from PySide6.QtCore import QTimer
     from PySide6.QtWidgets import QApplication
+    from .log import write as log
     from .window import MainWindow
 
     application = QApplication(sys.argv)
     application.setApplicationName("자막 및 TC 생성기")
     window = MainWindow()
     window.show()
+
+    # **번역 서버를 미리 챙긴다.** Ollama는 트레이에서 닫으면 그대로 없어지고, 그
+    # 상태로 번역을 누르면 "찾지 못했습니다"만 뜬다. 창을 띄운 **뒤에** 부르므로
+    # 시작이 느려지지 않고, 기다리지도 않는다(`wait_seconds=0`).
+    def _wake_translator() -> None:
+        try:
+            from checker.translate import ensure_server
+            ensure_server(progress=window._note)
+        except Exception as exc:      # 번역은 선택 기능이다. 여기서 죽으면 안 된다
+            log(f"번역 서버 준비 실패(무시): {type(exc).__name__}: {exc}")
+
+    QTimer.singleShot(0, _wake_translator)
     return application.exec()
 
 

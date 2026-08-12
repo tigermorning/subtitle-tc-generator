@@ -58,7 +58,9 @@ class GenerateJob(Job):
             from checker.generate import generate
             translator = None
             if self.translate:
-                from checker.translate import make_translator
+                from checker.translate import ensure_server, make_translator
+                # 여기서는 **기다린다.** 어차피 몇 분 걸리는 일이라 몇 초는 싸다.
+                ensure_server(progress=self.say, wait_seconds=20)
                 translator = make_translator()
             draft = generate(self.video, self.profile, script=self.script,
                              language=self.language, translator=translator,
@@ -116,6 +118,8 @@ class TranslateJob(Job):
             from checker.translate import (Glossary, make_translator, to_events,
                                            translate_events)
 
+            from checker.translate import ensure_server
+            ensure_server(progress=self.say, wait_seconds=20)
             translator = make_translator()
             glossary = Glossary.from_profile(self.profile)
             if self.knp:

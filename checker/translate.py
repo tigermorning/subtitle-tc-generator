@@ -23,6 +23,7 @@ import json
 import os
 import re
 import subprocess
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
@@ -229,6 +230,96 @@ def _windows_user_paths(pattern: str) -> list[str]:
     """WSL에서 Windows 사용자 폴더를 훑는다. 사용자 이름이 리눅스 쪽과 다를 수 있다."""
     import glob
     return glob.glob(pattern.replace("{user}", "*"))
+
+
+# ---------------------------------------------------------------- 서버 챙기기
+#
+# **왜 프로그램이 직접 챙기나.** Ollama는 설치할 때 Windows 시작 폴더에 바로가기를
+# 넣지만, 사용자가 트레이에서 닫으면 그대로 없어진다. 그 상태로 번역을 누르면
+# "Ollama를 찾지 못했습니다"만 뜬다 — 고칠 방법을 알아도 번거롭고, 모르면 막힌다.
+#
+# 그래서 **없으면 띄운다.** 다만 두 자리에서 성격을 다르게 한다.
+#
+#   프로그램 시작    띄우고 기다리지 않는다. 시작이 느려지면 안 된다
+#   번역 직전        준비될 때까지 잠깐 기다린다. 어차피 몇 분 걸리는 일이다
+
+# 트레이 앱이 서버를 관리한다. `ollama.exe serve`를 직접 띄우면 트레이 없이 서버만
+# 남아, 사용자가 그것을 끌 방법이 없다. Windows 시작 바로가기도 이 파일을 가리킨다.
+_APP_EXE_NAMES = ("ollama app.exe", "ollama.exe")
+
+
+def server_running(timeout: float = 1.5) -> bool:
+    """서버가 응답하는가. **빨리 답한다** — 시작 경로에서 부르므로 오래 끌면 안 된다."""
+    for host in OllamaTranslator._candidates():
+        try:
+            with urllib.request.urlopen(f"{host}/api/tags", timeout=timeout):
+                return True
+        except Exception:
+            continue
+    return False
+
+
+def find_app() -> str | None:
+    """트레이 앱(없으면 ollama.exe) 자리. 못 찾으면 None — 예외를 올리지 않는다."""
+    import shutil
+
+    for name in _APP_EXE_NAMES:
+        found = shutil.which(name)
+        if found:
+            return found
+    user = os.environ.get("WSL_USER") or os.environ.get("USER") or ""
+    for pattern in OllamaCliTranslator.WINDOWS_PATHS:
+        for candidate in ({pattern.format(user=user)} | set(_windows_user_paths(pattern))):
+            path = Path(candidate)
+            if not path.is_file():
+                continue
+            # 같은 폴더의 트레이 앱을 먼저 쓴다.
+            app = path.with_name("ollama app.exe")
+            return str(app if app.is_file() else path)
+    return None
+
+
+def ensure_server(progress=None, wait_seconds: float = 0.0) -> bool:
+    """서버가 없으면 띄운다. 이미 돌고 있으면 아무것도 하지 않는다.
+
+    `wait_seconds`가 0이면 띄우기만 하고 바로 돌아온다(시작 경로). 값을 주면 그만큼
+    응답을 기다린다(번역 직전).
+
+    **어떤 경우에도 예외를 올리지 않는다.** 번역은 선택 기능이고, Ollama가 없다고
+    프로그램이 못 뜨면 안 된다. 못 띄웠으면 거짓을 돌려주고 이유는 `progress`로 알린다.
+    """
+    say = progress or (lambda _m: None)
+    if server_running():
+        return True
+
+    exe = find_app()
+    if not exe:
+        say("Ollama를 찾지 못해 번역 서버를 띄우지 못했습니다(번역만 안 됩니다).")
+        return False
+
+    try:
+        # 창을 띄우지 않고, 우리 프로그램이 끝나도 살아 있게 떼어 놓는다.
+        flags = 0
+        for name in ("CREATE_NO_WINDOW", "DETACHED_PROCESS"):
+            flags |= getattr(subprocess, name, 0)
+        subprocess.Popen([exe], creationflags=flags, close_fds=True)
+        say(f"번역 서버(Ollama)를 띄웠습니다: {Path(exe).name}")
+    except Exception as exc:
+        say(f"번역 서버를 띄우지 못했습니다({type(exc).__name__}). 번역만 안 됩니다.")
+        return False
+
+    if wait_seconds <= 0:
+        return False        # 띄웠지만 아직 준비됐다고 말할 수는 없다
+
+    # 모델을 올리는 것이 아니라 서버가 뜨는 것만 기다린다 — 보통 1~3초다.
+    deadline = time.monotonic() + wait_seconds
+    while time.monotonic() < deadline:
+        if server_running():
+            say("번역 서버가 준비됐습니다.")
+            return True
+        time.sleep(0.5)
+    say(f"번역 서버가 {wait_seconds:.0f}초 안에 준비되지 않았습니다.")
+    return False
 
 
 def make_translator(model: str | None = None, prefer_cli: bool | None = None):
