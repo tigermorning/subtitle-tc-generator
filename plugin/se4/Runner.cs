@@ -70,9 +70,13 @@ namespace Nikse.SubtitleEdit.PluginLogic
             }
 
             // 흔히 두는 자리. 사용자가 옮겼으면 못 찾고, 그러면 물어본다.
+            // 옛 이름(subtitle-editor)도 계속 본다 — 저장소 이름을 자막 및 TC 생성기로
+            // 바꿨지만(2026-08-12) 이미 그 이름으로 받아 둔 사람이 깨지면 안 된다.
             var docs = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
             foreach (var guess in new[]
                      {
+                         Path.Combine(docs, "subtitle-tc-generator"),
+                         Path.Combine(docs, "GitHub", "subtitle-tc-generator"),
                          Path.Combine(docs, "subtitle-editor"),
                          Path.Combine(docs, "GitHub", "subtitle-editor"),
                      })

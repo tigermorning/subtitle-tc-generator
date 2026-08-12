@@ -68,7 +68,7 @@ SDK를 요구하지 않는 값이 그 불편보다 크다.
 
 | 무엇 | 어떻게 |
 |---|---|
-| 검사기 저장소 | `CHECKER_REPO` -> ini -> `내 문서\subtitle-editor` -> 물어본다 |
+| 검사기 저장소 | `CHECKER_REPO` -> ini -> `내 문서\subtitle-tc-generator`(옛 이름 `subtitle-editor`도 본다) -> 물어본다 |
 | 파이썬 | `CHECKER_PYTHON` -> 교정기 `.venv` -> PATH |
 | ffmpeg | PATH -> winget 폴더 -> **SE가 딸려 보내는 것** |
 | whisper 모델 | `WHISPER_MODEL` -> `models/`의 가장 큰 것 |

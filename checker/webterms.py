@@ -30,7 +30,8 @@ from dataclasses import dataclass
 
 API = "https://en.wikipedia.org/w/api.php"
 # 위키미디어는 정체를 밝히지 않는 요청을 막는다(403). 무엇이 부르는지 밝힌다.
-USER_AGENT = "subtitle-editor/0.1 (local subtitle tool; https://github.com/tigermorning/subtitle-editor)"
+USER_AGENT = ("subtitle-tc-generator/0.1 (local subtitle tool; "
+              "https://github.com/tigermorning/subtitle-tc-generator)")
 
 
 @dataclass
