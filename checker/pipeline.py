@@ -63,6 +63,17 @@ def _silent(_message: str) -> None:
     """진행 상황을 아무데도 안 보낸다. 어댑터가 콜백을 안 주면 이것을 쓴다."""
 
 
+def _edits(before: list[Event], after: list[Event]) -> list[dict]:
+    """무엇이 어떻게 바뀌었는지 줄 단위로 남긴다.
+
+    **몇 곳 고쳤다는 숫자만으로는 부족하다.** 검사가 맨 끝으로 가면 자동으로 고친
+    위반은 리포트에서 사라진다 — 사라진 자리에 이 목록이 들어가야 사용자가 도구가
+    한 일을 되짚을 수 있다. 규칙 이름만 남기면 어느 줄이 바뀌었는지 알 수 없다.
+    """
+    return [{"event_index": a.index, "before": a.text, "after": b.text}
+            for a, b in zip(before, after) if a.text != b.text]
+
+
 # ---------------------------------------------------------------- 단계 결과
 
 @dataclass
@@ -106,26 +117,33 @@ def stage_generate(video: Path, profile: dict, *, script: Path | None = None,
 # ---------------------------------------------------------------- 단계 ② 한국어 교정
 
 def stage_korean(events: list[Event], profile: dict | None = None, *,
-                 corrector_path: str | None = None, spacing_mode: str = "principle",
+                 corrector_path: str | None = None, backend=None,
+                 spacing_mode: str = "principle",
                  progress: Progress | None = None) -> StageResult:
     """한국어 교정기를 붙인다. 자막 문법은 교정기에 넘기지 않는다(`korean.py`).
 
     **교정기를 못 찾으면 예외를 올리지 않고 `notes`에 적어 돌려준다.** 어댑터가 그
     사실을 사용자에게 보이면 되고, 나머지 단계는 계속 돌아야 한다.
+
+    `backend`를 넘기면 그것을 쓴다. 형태소 분석기 적재가 1~2분이라 **파일마다 다시
+    올리면 그 비용이 파일 수만큼 곱해진다** — 여러 파일을 도는 어댑터는 한 번 올려
+    넘긴다.
     """
     say = progress or _silent
-    try:
-        say("한국어 교정기를 부릅니다...")
-        backend = load_backend(corrector_path)
-    except CorrectorUnavailable as exc:
-        return StageResult(events=list(events),
-                           notes=[f"한국어 교정 레인 건너뜀: {exc}"])
+    if backend is None:
+        try:
+            say("한국어 교정기를 부릅니다...")
+            backend = load_backend(corrector_path)
+        except CorrectorUnavailable as exc:
+            return StageResult(events=list(events),
+                               notes=[f"한국어 교정 레인 건너뜀: {exc}"])
 
     fixed, violations = run_korean_pass(events, backend, spacing_mode=spacing_mode,
                                        profile=profile)
-    changed = sum(1 for a, b in zip(events, fixed) if a.text != b.text)
-    return StageResult(events=list(fixed), changed=changed,
-                       violations=[v.to_dict() for v in violations])
+    edits = _edits(events, fixed)
+    return StageResult(events=list(fixed), changed=len(edits),
+                       violations=[v.to_dict() for v in violations],
+                       extra={"edits": edits})
 
 
 # ---------------------------------------------------------------- 단계 ③ 규정 자동교정
@@ -136,9 +154,10 @@ def stage_fixes(events: list[Event], profile: dict, *, job_rules=None,
     say = progress or _silent
     say("규정 자동 교정 중...")
     fixed, applied, unfixable = apply_fixes(events, profile, job_rules)
-    changed = sum(1 for a, b in zip(events, fixed) if a.text != b.text)
-    return StageResult(events=list(fixed), changed=changed,
-                       extra={"applied": applied, "unfixable": unfixable})
+    edits = _edits(events, fixed)
+    return StageResult(events=list(fixed), changed=len(edits),
+                       extra={"applied": applied, "unfixable": unfixable,
+                              "edits": edits})
 
 
 # ---------------------------------------------------------------- 단계 ④ 규정 검사
@@ -163,6 +182,11 @@ class CorrectOptions:
 
     korean: bool = False
     corrector_path: str | None = None
+    backend: object | None = None       # 이미 올린 교정기를 물려준다(적재 비용 절약)
+    # **교정문을 자막에 얹을지.** 끄면 지적만 모으고 글자는 그대로 둔다. 파일을 쓰지
+    # 않는 검사에서 필요하다 — 얹어 놓고 검사하면 리포트가 사용자가 가진 자막이
+    # 아니라 "고쳤다면 됐을 것"을 설명하게 된다.
+    apply_korean: bool = True
     spacing_mode: str = "principle"
     apply_fixes: bool = True
     children: bool = False
@@ -184,18 +208,25 @@ def correct_and_check(events: list[Event], profile: dict, options: CorrectOption
     current = list(events)
     korean_changed = fix_changed = 0
 
+    korean_edits: list[dict] = []
+    fix_edits: list[dict] = []
+
     if options.korean:
         result = stage_korean(current, profile, corrector_path=options.corrector_path,
+                              backend=options.backend,
                               spacing_mode=options.spacing_mode, progress=say)
-        current, korean_changed = result.events, result.changed
         korean_violations = result.violations
         notes += result.notes
+        if options.apply_korean:
+            current, korean_changed = result.events, result.changed
+            korean_edits = result.extra.get("edits", [])
 
     applied = unfixable = None
     if options.apply_fixes:
         result = stage_fixes(current, profile, job_rules=options.job_rules, progress=say)
         current, fix_changed = result.events, result.changed
         applied, unfixable = result.extra["applied"], result.extra["unfixable"]
+        fix_edits = result.extra["edits"]
 
     checked = stage_check(current, profile, children=options.children, fps=options.fps,
                           busy_spans=options.busy_spans, job_rules=options.job_rules,
@@ -213,7 +244,12 @@ def correct_and_check(events: list[Event], profile: dict, options: CorrectOption
         changed=sum(1 for a, b in zip(events, current) if a.text != b.text),
         extra={"report": checked.extra["report"], "applied": applied,
                "unfixable": unfixable, "korean_changed": korean_changed,
-               "fix_changed": fix_changed},
+               "fix_changed": fix_changed,
+               # 처음 것과 마지막 것을 견주어 낸다. 두 단계의 목록을 이어 붙이면
+               # 같은 줄이 두 번 나오고, 한국어 교정이 넣은 글자를 규정 교정이 다시
+               # 걷어낸 자리는 '바뀌었다'고 잘못 적힌다.
+               "edits": _edits(events, current),
+               "korean_edits": korean_edits, "fix_edits": fix_edits},
     )
 
 

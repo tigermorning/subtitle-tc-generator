@@ -1903,17 +1903,6 @@ with _tf3.TemporaryDirectory() as _d:
     _os3.environ.pop("SUBTITLE_EDITOR_HOME", None)
 
 
-# --- 결과 ---------------------------------------------------------------
-
-print(f"통과 {PASSED}건")
-if FAILED:
-    print(f"실패 {len(FAILED)}건")
-    for f in FAILED:
-        print("  -", f)
-    sys.exit(1)
-print("전부 통과")
-
-
 # --- 일을 다른 실에서 돌릴 때 객체가 사라지지 않는지 ---------------------------
 # **2026-08-12 실사용 사고.** [자막 만들기]가 16분간 아무 일도 하지 않았다. 상태줄은
 # "만드는 중입니다..."에서 멈추고, 로그에 한 줄도 안 늘고, ffprobe·ffmpeg·ollama 어느
@@ -1956,3 +1945,105 @@ else:
     ok("일 참조를 버려도 실행된다", "ran" in _ran, str(_ran))
     ok("끝나면 done 콜백이 온다", "done" in _ran, str(_ran))
     ok("끝난 일은 보관 목록에서 빠진다", len(_jobs._ALIVE) == 0, str(len(_jobs._ALIVE)))
+
+
+# --- 교정과 검사의 순서 -----------------------------------------------------
+# **검사는 맨 끝이다.** 원본만 검사하면 교정이 만든 새 위반을 못 본다. 아래가 실제
+# 그런 경우다 — `불`을 `달러`로 고치면 한 글자가 늘어 줄 길이 한계를 넘는다.
+#
+# 결과 출력은 이 아래에 둔다. 위로 올려 두었다가 마지막에 붙인 시험 셋이 **실패해도
+# 보고되지 않는 상태**로 한동안 있었다.
+
+from checker.model import Event as _PEvent  # noqa: E402
+from checker.pipeline import (CorrectOptions as _POpts,  # noqa: E402
+                             correct_and_check as _pcheck)
+
+_pprof = load_profile("netflix", "ko", "sdh")
+_pline = "3천 불 " + "가" * 12          # 15.5자 -> 고치면 16.5자 (한계 16자)
+_pevents = [_PEvent(1, 1000, 5000, _pline)]
+
+_before = check_events([e.__dict__ for e in _pevents], _pprof, fps=23.976)
+ok("고치기 전에는 길이 위반이 없다", "S01" not in ids(_before))
+ok("고치기 전에는 화폐 표기가 걸린다", "C30" in ids(_before))
+
+_after = _pcheck(_pevents, _pprof, _POpts(apply_fixes=True, fps=23.976))
+_aids = {v["rule_id"] for v in _after.violations}
+ok("교정이 만든 길이 위반을 잡는다", "S01" in _aids, str(sorted(_aids)))
+ok("고쳐진 위반은 목록에서 빠진다", "C30" not in _aids, str(sorted(_aids)))
+ok("교정본이 결과로 나온다", _after.events[0].text == "3천 달러 " + "가" * 12,
+   _after.events[0].text)
+# 입력을 건드리지 않는다 — 어댑터가 원본을 다시 쓸 수 있어야 한다.
+ok("입력 자막은 그대로다", _pevents[0].text == _pline)
+
+# 무엇을 고쳤는지 줄 단위로 남는다. 규칙 이름만으로는 되짚을 수 없다.
+_pedits = _after.extra["edits"]
+ok("고친 자리를 줄 단위로 남긴다", len(_pedits) == 1 and _pedits[0]["event_index"] == 1,
+   str(_pedits))
+ok("고치기 전 글자도 남긴다", _pedits[0]["before"] == _pline, str(_pedits))
+
+# 교정을 끄면 원본을 설명한다 — 파일을 쓰지 않는 검사에서 그래야 한다.
+_off = _pcheck(_pevents, _pprof, _POpts(apply_fixes=False, fps=23.976))
+ok("교정을 끄면 원본을 검사한다", "C30" in {v["rule_id"] for v in _off.violations})
+ok("교정을 끄면 고친 자리가 없다", _off.extra["edits"] == [])
+
+# 한국어 교정 레인: 지적은 받되 글자는 그대로 두는 모드. `apply_korean=False`는
+# 파일을 쓰지 않는 검사에서 쓴다 — 교정문을 얹고 검사하면 리포트가 사용자가 가진
+# 자막이 아니라 '고쳤다면 됐을 것'을 설명한다.
+_kevents = [_PEvent(1, 1000, 4000, "[진수] 어디 갔었어?")]
+
+_kon = _pcheck(_kevents, _pprof, _POpts(korean=True, backend=fake_backend,
+                                        apply_korean=True, apply_fixes=False,
+                                        fps=23.976))
+ok("교정문을 얹으면 글자가 바뀐다", "갔었어요" in _kon.events[0].text,
+   _kon.events[0].text)
+ok("얹은 자리를 센다", _kon.extra["korean_changed"] == 1,
+   str(_kon.extra["korean_changed"]))
+
+_koff = _pcheck(_kevents, _pprof, _POpts(korean=True, backend=fake_backend,
+                                         apply_korean=False, apply_fixes=False,
+                                         fps=23.976))
+ok("얹지 않으면 글자는 그대로", _koff.events[0].text == _kevents[0].text,
+   _koff.events[0].text)
+ok("얹지 않아도 지적은 온다",
+   {"K01", "K02"} <= {v["rule_id"] for v in _koff.violations},
+   str(sorted({v["rule_id"] for v in _koff.violations})))
+ok("얹지 않으면 고친 자리가 없다", _koff.extra["korean_edits"] == [],
+   str(_koff.extra["korean_edits"]))
+
+# **CLI가 실제로 어긋나 있던 자리다.** `correct_and_check`는 처음부터 순서가 맞았고,
+# 원본을 검사한 뒤 따로 고쳐 쓰던 쪽이 CLI였다. 그래서 여기서 한 번 더 잰다.
+import io as _pio  # noqa: E402
+import json as _pjson  # noqa: E402
+import tempfile as _ptf  # noqa: E402
+from contextlib import redirect_stdout as _predirect  # noqa: E402
+
+with _ptf.TemporaryDirectory() as _pd:
+    _ppath = Path(_pd) / "grow.srt"
+    _ppath.write_text(f"1\n00:00:01,000 --> 00:00:05,000\n{_pline}\n",
+                      encoding="utf-8")
+    _pbuf = _pio.StringIO()
+    with _predirect(_pbuf):
+        cli_main([str(_ppath), "-p", "netflix", "-l", "ko", "-k", "sdh",
+                  "--fix", "--json"])
+    _preport = _pjson.loads(_pbuf.getvalue())
+    _pids = {v["rule_id"] for v in _preport["violations"]}
+    ok("CLI 리포트가 교정본을 설명한다", "S01" in _pids and "C30" not in _pids,
+       str(sorted(_pids)))
+    ok("CLI가 고친 자리를 남긴다",
+       [c["event_index"] for c in _preport["text_changes"]] == [1],
+       str(_preport.get("text_changes")))
+    # 리포트가 설명하는 자막과 실제로 나간 파일이 같아야 한다.
+    ok("리포트와 나간 파일이 같다",
+       (Path(_pd) / "grow.fixed.srt").read_text(encoding="utf-8").splitlines()[2]
+       == "3천 달러 " + "가" * 12)
+
+
+# --- 결과 ---------------------------------------------------------------
+
+print(f"통과 {PASSED}건")
+if FAILED:
+    print(f"실패 {len(FAILED)}건")
+    for f in FAILED:
+        print("  -", f)
+    sys.exit(1)
+print("전부 통과")

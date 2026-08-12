@@ -13,10 +13,9 @@ import json
 import sys
 from pathlib import Path
 
-from . import check_events, available_profiles, load_profile, ProfileError
+from . import available_profiles, load_profile, ProfileError
 from .profile import load_profile_file
-from .fixes import apply_fixes
-from .korean import CorrectorUnavailable, load_backend, run_korean_pass
+from .korean import CorrectorUnavailable, load_backend
 from .parsers import parse
 from .writers import write_review_srt, write_srt
 
@@ -108,6 +107,17 @@ def _format_text(report: dict, path: Path) -> str:
         out.append(f"  교정본: {report['fixed_file']}")
         if report["applied_fixes"]:
             out.append(f"  적용한 자동 교정: {', '.join(report['applied_fixes'])}")
+        # 검사는 교정한 자막을 설명하므로 고쳐진 위반은 위 목록에 없다. 무엇을
+        # 고쳤는지는 여기서 본다.
+        changes = report.get("text_changes") or []
+        if changes:
+            source = (f", 한국어 교정 {report['korean_changed']}곳 포함"
+                      if report.get("korean_changed") else "")
+            out.append(f"  글자를 고친 자막 {len(changes)}개{source}")
+            for c in changes[:8]:
+                out.append(f"    #{c['event_index']} {c['before']} -> {c['after']}")
+            if len(changes) > 8:
+                out.append(f"    … 외 {len(changes) - 8}개")
         if report["auto_but_unfixable"]:
             # 고쳤다고 말하지 않는다.
             out.append("  자동 표시지만 기계가 못 고치는 것: "
@@ -210,31 +220,9 @@ def _run_one(path: Path, profile: dict, args, backend) -> dict | None:
         "move_to": getattr(args, "collision_move_to", None),
     })
 
-    report = check_events([e.__dict__ for e in events], profile,
-                          children=args.children, fps=args.fps,
-                          busy_spans=busy_spans, job_rules=rules)
-    report["file"] = str(path)
-    if locked:
-        report["timecodes_locked"] = True
-
-    note = rules.undecided_note()
-    if note:
-        report["job_note"] = note
-
-    # 영상 근거는 자동 교정에 쓰지 않는다. 사람이 볼 수 있게 따로 낸다.
-    if busy_spans:
-        from .position import suggest_positions
-        guesses = [s for s in suggest_positions(events, profile, busy_spans, rules)
-                   if not s.certain]
-        if guesses:
-            report["position_suggestions"] = [
-                {"event_index": s.event_index, "reason": s.reason} for s in guesses]
-
-    # 프로파일을 잘못 고르면 지적이 통째로 뒤집힌다. 자막 표기로 유추해 어긋나면 알린다.
-    from .detect import mismatch_warning
-    warning = mismatch_warning(events, profile)
-    if warning:
-        report["profile_warning"] = warning
+    # **스포팅은 검사보다 먼저다.** 타임코드를 옮기는 유일한 자리이므로, 뒤에 두면
+    # 검사가 옮겨지기 전의 타임코드를 설명하게 된다.
+    spot_suggestions = spotting_applied = None
     if getattr(args, "spot", False) and getattr(args, "_media", None):
         from .media import MediaToolUnavailable, detect_speech
         from .timing import suggest_spotting
@@ -255,20 +243,71 @@ def _run_one(path: Path, profile: dict, args, backend) -> dict | None:
 
             if getattr(args, "fix_spotting", False) and not args.lock_timecodes:
                 from .timing import apply_spotting
-                moved = apply_spotting(events, suggestions)
-                report["spotting_applied"] = moved
+                spotting_applied = apply_spotting(events, suggestions)
                 # 무엇을 덮어썼는지 남긴다. 되돌릴 근거가 있어야 한다.
-                print(f"    인점·아웃점 {moved}곳을 말소리에 맞춰 옮겼습니다",
-                      file=sys.stderr)
+                print(f"    인점·아웃점 {spotting_applied}곳을 말소리에 맞춰 "
+                      f"옮겼습니다", file=sys.stderr)
 
-            report["spot_suggestions"] = [
-                {"event_index": s.event_index, "field": s.field_name,
-                 "current": s.current, "suggested": s.suggested, "reason": s.reason}
-                for s in suggestions]
+            spot_suggestions = suggestions
 
+    # ------------------------------------------------------------ 교정과 검사
+    # **순서는 `pipeline`이 정한다.** 어댑터마다 순서가 다르면 같은 자막에 다른
+    # 리포트가 나온다 — 실제로 그랬다(교정이 만든 새 위반을 검사가 못 봤다).
+    #
+    # `--fix`가 없으면 파일을 쓰지 않으므로 교정문을 자막에 얹지 않는다. 얹고 검사하면
+    # 리포트가 사용자가 가진 파일이 아니라 '고쳤다면 됐을 것'을 설명한다.
+    from .pipeline import CorrectOptions, correct_and_check
+    result = correct_and_check(events, profile, CorrectOptions(
+        korean=backend is not None,
+        backend=backend,
+        apply_korean=bool(args.fix),
+        spacing_mode=args.spacing,
+        apply_fixes=bool(args.fix),
+        children=args.children,
+        fps=args.fps,
+        busy_spans=busy_spans,
+        job_rules=rules,
+    ))
+    fixed = result.events
+    report = result.extra["report"]
+    report["violations"] = result.violations
+    report["file"] = str(path)
+    if locked:
+        report["timecodes_locked"] = True
+    for note in result.notes:
+        print(f"    {note}", file=sys.stderr)
+
+    note = rules.undecided_note()
+    if note:
+        report["job_note"] = note
+
+    if spotting_applied is not None:
+        report["spotting_applied"] = spotting_applied
+    if spot_suggestions is not None:
+        report["spot_suggestions"] = [
+            {"event_index": s.event_index, "field": s.field_name,
+             "current": s.current, "suggested": s.suggested, "reason": s.reason}
+            for s in spot_suggestions]
+
+    # 영상 근거는 자동 교정에 쓰지 않는다. 사람이 볼 수 있게 따로 낸다.
+    if busy_spans:
+        from .position import suggest_positions
+        guesses = [s for s in suggest_positions(fixed, profile, busy_spans, rules)
+                   if not s.certain]
+        if guesses:
+            report["position_suggestions"] = [
+                {"event_index": s.event_index, "reason": s.reason} for s in guesses]
+
+    # 프로파일을 잘못 고르면 지적이 통째로 뒤집힌다. 자막 표기로 유추해 어긋나면 알린다.
+    from .detect import mismatch_warning
+    warning = mismatch_warning(fixed, profile)
+    if warning:
+        report["profile_warning"] = warning
+
+    # 검토용 자막은 **리포트가 설명하는 그 자막**에 지적을 얹는다.
     if getattr(args, "review_srt", False):
         review_path = path.with_suffix(".review.srt")
-        write_review_srt(events, report["violations"], review_path)
+        write_review_srt(fixed, report["violations"], review_path)
         report["review_file"] = str(review_path)
 
     if timing is not None:
@@ -278,12 +317,6 @@ def _run_one(path: Path, profile: dict, args, backend) -> dict | None:
             for c in timing.changes]
         report["timing_unresolved"] = [
             {"event_index": i, "message": m} for i, m in timing.unresolved]
-
-    ko_fixed = None
-    if backend is not None:
-        ko_fixed, ko_violations = run_korean_pass(events, backend, spacing_mode=args.spacing, profile=profile)
-        report["violations"].extend(v.to_dict() for v in ko_violations)
-        report["violations"].sort(key=lambda v: (v["event_index"], v["rule_id"]))
 
     if getattr(args, "translate", False) and not getattr(args, "generate", False):
         # **받은 TC에 번역만 얹는 작업.** 실무에서 가장 흔한 형태다
@@ -335,12 +368,8 @@ def _run_one(path: Path, profile: dict, args, backend) -> dict | None:
             report["lock_violation"] = problem
 
     if args.fix:
-        fixed, applied, unfixable = apply_fixes(events, profile, rules)
-        if ko_fixed is not None:
-            # 교정기 결과를 규정 자동 교정 위에 얹는다. 순서를 바꾸면 교정기가
-            # 넣은 문장부호를 규정 교정이 다시 걷어내는 왕복이 생긴다.
-            fixed, applied2, _ = apply_fixes(ko_fixed, profile, rules)
-            applied = sorted(set(applied) | set(applied2))
+        # 교정은 이미 `correct_and_check`가 끝냈다(한국어 -> 규정 -> 검사). 여기서는
+        # 쓰기만 한다 — 두 번 고치면 검사가 설명한 자막과 파일이 달라진다.
         # 고정하기로 했으면 **쓰기 전에** 확인한다. 쓰고 나서 알면 늦다.
         if original_tc is not None:
             problem = _assert_timecodes_unchanged(
@@ -353,8 +382,12 @@ def _run_one(path: Path, profile: dict, args, backend) -> dict | None:
         out_path = args.out or path.with_suffix(".fixed.srt")
         write_srt(fixed, out_path)
         report["fixed_file"] = str(out_path)
-        report["applied_fixes"] = applied
-        report["auto_but_unfixable"] = unfixable
+        report["applied_fixes"] = result.extra["applied"]
+        report["auto_but_unfixable"] = result.extra["unfixable"]
+        # 자동으로 고친 위반은 검사에서 사라진다. 어느 줄을 어떻게 고쳤는지는
+        # 여기에 남는다 — 규칙 이름만 있으면 되짚을 수 없다.
+        report["text_changes"] = result.extra["edits"]
+        report["korean_changed"] = result.extra["korean_changed"]
 
     return report
 
