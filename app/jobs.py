@@ -79,23 +79,27 @@ class CheckJob(Job):
 
     def run(self) -> None:
         def work():
-            from checker import check_events
-            from checker.fixes import apply_fixes
             from checker.model import Event
+            from checker.pipeline import CorrectOptions, correct_and_check
 
             events = [Event(e.index, e.start_ms, e.end_ms, e.text) for e in self.events]
-            if self.korean and self.corrector_path:
-                from checker.korean import load_backend, run_korean_pass
-                self.say("한국어 교정기를 부릅니다...")
-                backend = load_backend(self.corrector_path)
-                events, _ = run_korean_pass(events, backend, profile=self.profile)
-            if self.fix:
-                self.say("규정 자동 교정 중...")
-                events, applied, _ = apply_fixes(events, self.profile, self.job_rules)
-            self.say("검사 중...")
-            report = check_events([e.__dict__ for e in events], self.profile,
-                                  job_rules=self.job_rules)
-            return events, report["violations"]
+            # 단계 순서를 여기서 정하지 않는다 — `pipeline`이 정한다. 전에는 이 파일이
+            # 자기 순서를 갖고 있어서 SE 플러그인과 다른 리포트가 나왔다. 그리고
+            # **한국어 위반을 버리고 있었다**(`events, _ = run_korean_pass`) — 그래서
+            # 화면에 한국어 확인 항목이 한 건도 뜨지 않았다.
+            result = correct_and_check(
+                events, self.profile,
+                CorrectOptions(
+                    korean=bool(self.korean and self.corrector_path),
+                    corrector_path=self.corrector_path,
+                    apply_fixes=bool(self.fix),
+                    job_rules=self.job_rules,
+                ),
+                progress=self.say,
+            )
+            for note in result.notes:
+                self.say(note)
+            return result.events, result.violations
         self._guarded(work)
 
 

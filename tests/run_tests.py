@@ -351,6 +351,18 @@ with _tempfile.TemporaryDirectory() as tmp:
     req3 = dict(req); req3["subtitle"] = {"subRip": ""}
     ok("빈 자막은 오류로", plugin_run(req3)["status"] == "error")
 
+    # **응답 스키마를 못박는다.** SE와의 계약(API_VERSION=1)이므로 리팩터로 키가
+    # 빠지거나 이름이 바뀌면 플러그인이 조용히 깨진다. 값이 아니라 키 집합을 본다.
+    ok("응답 키 집합이 계약과 같다",
+       set(resp) == {"status", "message", "settings", "settingsVersion",
+                     "undoDescription", "subtitle"}, str(sorted(resp)))
+    ok("settingsVersion을 돌려준다", resp["settingsVersion"] == 1)
+    ok("자막 응답 형식이 SubRip", resp["subtitle"]["format"] == "SubRip")
+    ok("설정 키가 빠지지 않는다",
+       set(resp2["settings"]) >= {"platform", "language", "kind", "applyFixes",
+                                  "korean", "kscPath", "spacing", "children"},
+       str(sorted(resp2["settings"])))
+
     req4 = dict(req); req4["settings"] = {"platform": "disney", "language": "en", "kind": "sdh"}
     r4 = plugin_run(req4)
     ok("없는 프로파일은 오류로 알린다",

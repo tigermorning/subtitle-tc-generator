@@ -18,10 +18,9 @@ import sys
 import traceback
 from pathlib import Path
 
-from . import check_events, load_profile, ProfileError
-from .fixes import apply_fixes
-from .korean import CorrectorUnavailable, load_backend, run_korean_pass
+from . import load_profile, ProfileError
 from .model import Event
+from .pipeline import CorrectOptions, correct_and_check
 from .parsers import parse_text
 from .writers import to_srt
 
@@ -123,31 +122,24 @@ def run(request: dict) -> dict:
     except ProfileError as e:
         return {"status": "error", "message": f"프로파일 오류: {e}"}
 
-    report = check_events(
-        [e.__dict__ for e in events], profile, children=bool(settings.get("children"))
+    # **오케스트레이션을 여기서 하지 않는다.** 단계 순서는 `pipeline`이 정한다 —
+    # 전에는 이 파일과 `cli.py`·`app/jobs.py`가 각자 순서를 정해서 같은 자막에
+    # 입구마다 다른 리포트가 나왔다.
+    result = correct_and_check(
+        events, profile,
+        CorrectOptions(
+            korean=bool(settings.get("korean")),
+            corrector_path=settings.get("kscPath") or None,
+            spacing_mode=settings.get("spacing", "principle"),
+            apply_fixes=bool(settings.get("applyFixes")),
+            children=bool(settings.get("children")),
+        ),
     )
-
-    notes: list[str] = []
-    ko_fixed = None
-    if settings.get("korean"):
-        try:
-            backend = load_backend(settings.get("kscPath") or None)
-            ko_fixed, ko_violations = run_korean_pass(
-                events, backend, spacing_mode=settings.get("spacing", "principle")
-            )
-        except CorrectorUnavailable as e:
-            # 못 돌렸다는 사실을 사용자에게 알린다. 통과로 보이면 안 된다.
-            notes.append(f"한국어 교정 레인 건너뜀: {e}")
-        else:
-            report["violations"].extend(v.to_dict() for v in ko_violations)
-            report["violations"].sort(key=lambda v: (v["event_index"], v["rule_id"]))
-
-    fixed_events = events
-    fixed_count = 0
-    if settings.get("applyFixes"):
-        base = ko_fixed if ko_fixed is not None else events
-        fixed_events, _applied, _unfixable = apply_fixes(base, profile)
-        fixed_count = sum(1 for a, b in zip(events, fixed_events) if a.text != b.text)
+    report = result.extra["report"]
+    report["violations"] = result.violations
+    notes = list(result.notes)
+    fixed_events = result.events
+    fixed_count = sum(1 for a, b in zip(events, fixed_events) if a.text != b.text)
 
     report_path = None
     data_dir = request.get("pluginDataDirectory") or request.get("tempDirectory")

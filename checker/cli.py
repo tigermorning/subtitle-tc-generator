@@ -592,22 +592,31 @@ def _generate_mode(args, ap) -> int:
             "move_to": args.collision_move_to,
         })
 
-        if args.korean and args.lang == "ko":
-            try:
-                backend = load_backend(args.ksc_path)
-            except CorrectorUnavailable as exc:
-                print(f"한국어 교정기를 쓰지 못합니다: {exc}", file=sys.stderr)
-            else:
-                print("한국어 교정기로 다듬는 중입니다...")
-                events, ko_violations = run_korean_pass(
-                    events, backend, spacing_mode=args.spacing, profile=profile)
+        # 단계 순서를 여기서 정하지 않는다 — `pipeline`이 정한다. 그리고 전에는
+        # 한국어 위반(`ko_violations`)을 받아 놓고 쓰지 않아 **화면에 한 건도 뜨지
+        # 않았다.** 이제 규정 위반과 한 목록으로 합쳐 나온다.
+        from .pipeline import CorrectOptions, correct_and_check
 
-        events, applied, unfixable = apply_fixes(events, profile, rules)
+        result = correct_and_check(
+            events, profile,
+            CorrectOptions(
+                korean=bool(args.korean and args.lang == "ko"),
+                corrector_path=args.ksc_path,
+                spacing_mode=args.spacing,
+                apply_fixes=True,
+                children=args.children,
+                job_rules=rules,
+            ),
+            progress=lambda m: print(m),
+        )
+        for note in result.notes:
+            print(note, file=sys.stderr)
+        events = result.events
+        applied = result.extra["applied"] or []
+        unfixable = result.extra["unfixable"] or []
         if applied:
             print(f"규정 자동 교정: {', '.join(applied)}")
-        report = check_events([e.__dict__ for e in events], profile,
-                              children=args.children, fps=None, job_rules=rules)
-        left = report["violations"]
+        left = result.violations
         print(f"검사 결과 남은 지적 {len(left)}건"
               + (" — 사람이 봐야 하는 것들입니다" if left else ""))
         if left:
