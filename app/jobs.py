@@ -48,10 +48,15 @@ class GenerateJob(Job):
     """영상에서 자막을 만든다. 결과는 Event 목록."""
 
     def __init__(self, video: Path, profile: dict, script: Path | None,
-                 language: str, translate: bool, speech: str = "auto"):
+                 language: str, translate: bool, speech: str = "auto",
+                 work_beside: Path | None = None):
         super().__init__()
         self.video, self.profile, self.script = video, profile, script
         self.language, self.translate, self.speech = language, translate, speech
+        # **생성 결과가 안 남으면 창이 닫히는 순간 통째로 사라진다.** 실사용에서
+        # 6.5분 영상 210개를 만들어 놓고 UI가 멈춰 그대로 잃었다(2026-08-12).
+        # 전사·번역이 가장 비싼 단계라 여기가 남길 값이 제일 크다.
+        self.work_beside = work_beside
 
     def run(self) -> None:
         def work():
@@ -66,6 +71,22 @@ class GenerateJob(Job):
                              language=self.language, translator=translator,
                              speech_method=self.speech,
                              progress=self.say)
+            # **화면에 넘기기 전에 남긴다.** 화면 쪽에서 문제가 나도 결과는 살아 있다.
+            if self.work_beside:
+                try:
+                    from checker.work import Work
+
+                    keep = Work.beside(self.work_beside)
+                    keep.save("01-generate", draft.events,
+                              extra={"notes": len(draft.notes),
+                                     **(getattr(draft, "stats", None) or {})})
+                    sources = getattr(draft, "sources", None)
+                    if sources:
+                        keep.save_source(sources)
+                    self.say(f"만든 자막을 남겼습니다: {keep.root.name}")
+                except Exception as exc:
+                    # 남기기가 본 작업을 죽이지 않는다.
+                    self.say(f"남기지 못했습니다: {exc}")
             return draft
         self._guarded(work)
 

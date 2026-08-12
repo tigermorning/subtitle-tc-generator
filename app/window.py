@@ -89,6 +89,8 @@ class MainWindow(QMainWindow):
         self.model.dataChanged.connect(lambda *_: self._preview_timer.start())
         self.model.modelReset.connect(lambda: self._preview_timer.start())
 
+        # **멈춰 있을 때는 느리게 돈다.** 재생 위치가 안 바뀌는데 mpv에 계속 묻는 것은
+        # UI 실을 공짜로 쓰는 일이다. 재생 중에만 촘촘히 본다.
         self._follow = QTimer(self)
         self._follow.setInterval(100)
         self._follow.timeout.connect(self._sync_position)
@@ -541,7 +543,10 @@ class MainWindow(QMainWindow):
 
         job = jobs.GenerateJob(Path(self._video_path), self._profile(), script,
                                self.language_box.currentText(),
-                               self.translate_check.isChecked())
+                               self.translate_check.isChecked(),
+                               # **영상 옆에 남긴다.** 자막을 아직 저장하지 않았으므로
+                               # 자막 경로가 없다 — 생성은 영상에서 시작한다.
+                               work_beside=Path(self._video_path))
 
         # **어느 경로로 도는지 먼저 말한다.** 대본이 있으면 "전사가 왜 필요한가"라는
         # 의문이 생기는데, 전사는 글자를 얻으려는 것이 아니라 **타임코드를 잡고 대본에
@@ -1242,6 +1247,19 @@ class MainWindow(QMainWindow):
         box.setInformativeText("바꾸려면 [작업 기준...] 창의 '단축키' 탭에서 고칩니다.")
         box.exec()
 
+    def resizeEvent(self, event) -> None:
+        """창 크기가 바뀌면 자막 크기를 다시 맞춘다.
+
+        전에는 100ms 시계가 이 일을 했다. mpv 왕복을 초당 20번 UI 실에서 기다리는
+        셈이었고, 자막 작업은 창을 자주 바꾸지도 않는다.
+        """
+        super().resizeEvent(event)
+        if self.player and not getattr(self.player, "closed", False):
+            try:
+                self.player.fit_subtitle_scale()
+            except Exception:
+                pass
+
     def keyPressEvent(self, event) -> None:
         if event.key() == Qt.Key_Space:
             self.toggle_play()
@@ -1262,9 +1280,20 @@ class MainWindow(QMainWindow):
         if getattr(self.player, "closed", False):
             self._follow.stop()
             return
-        # 창 크기가 바뀌면 영상이 차지하는 비율도 바뀐다. 자막 크기를 따라 맞춘다.
-        self.player.fit_subtitle_scale()
+        # **크기 맞추기를 여기서 하지 않는다.** `fit_subtitle_scale`은 mpv에 동기
+        # 왕복을 두 번 하는데(osd-dimensions 읽기 + sub-scale 쓰기), 이 시계는
+        # 100ms마다 울린다 — 초당 20번을 UI 실에서 기다린 것이다. 그런데 이 함수의
+        # 독스트링은 "**창 크기가 바뀔 때마다** 다시 불러야 한다"고 적고 있다.
+        # 그래서 `resizeEvent`로 옮겼다(2026-08-12 AppHangB1 조사).
         position = self.player.position_ms
+        # 멈춰 있으면 다음 울림을 늦춘다. 재생을 시작하면 다시 촘촘해진다.
+        try:
+            paused = bool(self.player.paused)
+        except Exception:
+            paused = False
+        want = 500 if paused else 100
+        if self._follow.interval() != want:
+            self._follow.setInterval(want)
         self.position_label.setText(
             f"{to_timecode(position)} / {to_timecode(self.player.duration_ms)}")
         self.waveform.set_position(position)

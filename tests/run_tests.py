@@ -2943,6 +2943,46 @@ ok("조사하지 않았음을 밝힌다", any("증명하지 못" in n for n in _
    str(_chres.notes))
 
 
+# --- UI 실에서 mpv를 붙잡지 않는다 (AppHangB1 조사) ---------------------------
+# **2026-08-12 실사용 사고.** 6.5분 영상에서 자막 210개를 만들어 놓고 UI가 멈췄다
+# (Windows 이벤트 로그 `AppHangB1`). Qt 쪽은 재 보니 전부 10ms 미만이었고
+# (model.replace 8.9ms, 파형 10.0ms, 지적표 9.0ms), 남는 것은 **UI 실에서 도는 동기
+# mpv 왕복**이었다.
+#
+# `_sync_position`은 100ms마다 울리는데 `fit_subtitle_scale()`이 mpv에 왕복을 두 번
+# 한다(osd-dimensions 읽기 + sub-scale 쓰기). 초당 20번을 UI 실에서 기다린 셈이다.
+# 그런데 그 함수의 독스트링은 "**창 크기가 바뀔 때마다** 다시 불러야 한다"고 적고 있다.
+
+import inspect as _uinspect  # noqa: E402
+
+try:
+    from app import window as _uw  # noqa: E402
+except ImportError:
+    ok("100ms 시계가 크기 맞추기를 하지 않는다 (PySide6 없어 건너뜀)", True)
+else:
+    _sync_src = _uinspect.getsource(_uw.MainWindow._sync_position)
+    # 주석에 이름이 적혀 있으므로 **호출**을 본다.
+    ok("100ms 시계가 크기 맞추기를 하지 않는다",
+       "self.player.fit_subtitle_scale()" not in _sync_src)
+    # 창 크기가 바뀔 때 해야 한다 — 안 하면 레터박스에서 자막이 규격보다 커진다.
+    ok("창 크기가 바뀔 때 맞춘다",
+       "self.player.fit_subtitle_scale()"
+       in _uinspect.getsource(_uw.MainWindow.resizeEvent))
+    # 멈춰 있으면 mpv에 덜 묻는다. 위치가 안 바뀌는데 계속 묻는 것은 UI 실을 공짜로
+    # 쓰는 일이다.
+    ok("멈춰 있으면 시계를 늦춘다", "setInterval" in _sync_src)
+
+    # **생성 결과를 화면에 넘기기 전에 남긴다.** 안 남기면 창이 닫히는 순간 통째로
+    # 사라진다 — 실제로 210개를 그렇게 잃었다.
+    from app import jobs as _uj  # noqa: E402
+
+    _gen_src = _uinspect.getsource(_uj.GenerateJob)
+    ok("생성 결과를 남긴다", "01-generate" in _gen_src)
+    ok("남기기가 본 작업을 죽이지 않는다", "남기지 못했습니다" in _gen_src)
+    ok("생성이 work 경로를 받는다",
+       "work_beside" in _uinspect.signature(_uj.GenerateJob.__init__).parameters)
+
+
 # --- 결과 ---------------------------------------------------------------
 
 print(f"통과 {PASSED}건")
