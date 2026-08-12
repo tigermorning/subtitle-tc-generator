@@ -28,3 +28,6 @@ models/*.bin
 dist/
 bin/*.dll
 *.spec.bak
+.msg  
+.msg
+.cmsg
