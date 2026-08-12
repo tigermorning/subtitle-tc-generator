@@ -2882,6 +2882,67 @@ with _t17tf.TemporaryDirectory() as _wkd:
     ok("아무것도 없으면 last가 빈 값", _wk.Work(Path(_wkd) / "없음").last() == ("", []))
 
 
+# --- 단계를 줄기별로 갈라 그린다 ----------------------------------------------
+# 사용자 요구: "①②③이 눈에 보이게, 하나의 애매한 [자막 만들기] 안에 숨기지 말고."
+# 번역 자막과 한국어 자막이 거치는 단계가 다르므로 줄을 갈라야 한다.
+
+from checker.pipeline import TRACKS as _TRACKS, stages_of as _stages_of  # noqa: E402
+
+ok("줄기가 넷", [k for k, _ in _TRACKS] == ["source", "translate", "korean", "tool"],
+   str([k for k, _ in _TRACKS]))
+ok("번역 줄기가 ①②③",
+   [s.id for s in _stages_of("translate")] == ["translate", "revise", "polish"],
+   str([s.id for s in _stages_of("translate")]))
+ok("한국어 줄기가 ②③",
+   [s.id for s in _stages_of("korean")] == ["korean", "check"],
+   str([s.id for s in _stages_of("korean")]))
+ok("자막을 바꾸지 않는 것은 조사 줄기",
+   {s.id for s in _stages_of("tool")} == {"terms", "characters"},
+   str({s.id for s in _stages_of("tool")}))
+ok("모든 단계가 줄기에 속한다",
+   all(s.track in {k for k, _ in _TRACKS} for s in _pl.STAGES))
+# **회차를 사람이 정하는 단계는 감수뿐이다.** 화면이 이 표시로 회차 선택을 붙인다.
+ok("회차를 정하는 단계는 감수뿐", [s.id for s in _pl.STAGES if s.rounds] == ["revise"],
+   str([s.id for s in _pl.STAGES if s.rounds]))
+ok("단계마다 설명이 있다", all(len(s.note) > 20 for s in _pl.STAGES))
+
+# ③ 윤문·QA는 **어댑터가 아니라 파이프라인이** 순서를 잇는다.
+_polprof = load_profile("netflix", "ko", "translation")
+
+
+class _PolishSpy:
+    def __init__(self):
+        self.systems = []
+
+    def ask(self, system, prompt):
+        self.systems.append(system)
+        return "\n".join(f"{line.strip().split('.')[0]}. 다듬음"
+                         for line in prompt.splitlines()
+                         if line.strip().split(".")[0].strip().isdigit())
+
+
+_polspy = _PolishSpy()
+_polres = _pl.stage_polish([_PEvent(1, 0, 4000, "그러니까...")], _polprof,
+                           translator=_polspy, fps=23.976)
+# 윤문 프롬프트를 쓴다 — 감수가 아니다(뜻은 ②에서 맞췄다).
+ok("윤문 프롬프트로 돈다", "자막답게" in _polspy.systems[0], _polspy.systems[0][:40])
+ok("윤문 뒤에 검사가 돈다", "report" in _polres.extra)
+ok("윤문 내역을 낸다", "revisions" in _polres.extra)
+# 윤문이 글자를 바꾸므로 검사는 그 뒤여야 한다 — 윤문이 만든 위반을 원본 검사로는
+# 못 본다. 여기서는 `...`이 자동 교정되어 사라진 것으로 확인한다.
+ok("윤문 결과에 자동 교정이 얹힌다", "..." not in _polres.events[0].text,
+   _polres.events[0].text)
+
+# 캐릭터 단계도 파이프라인에 있다. **위키를 주지 않으면 밖으로 나가지 않는다.**
+_chres = _pl.stage_characters([_PEvent(1, 0, 2000, "[민수] 여기 있습니다")])
+ok("인물을 뽑는다", _chres.extra["counts"]["total"] == 1, str(_chres.extra["counts"]))
+ok("자막을 바꾸지 않는다", _chres.events[0].text == "[민수] 여기 있습니다")
+ok("위키를 안 주면 조사하지 않는다", _chres.extra["research"] is None)
+# 조사하지 않았다는 사실을 숨기지 않는다.
+ok("조사하지 않았음을 밝힌다", any("증명하지 못" in n for n in _chres.notes),
+   str(_chres.notes))
+
+
 # --- 결과 ---------------------------------------------------------------
 
 print(f"통과 {PASSED}건")

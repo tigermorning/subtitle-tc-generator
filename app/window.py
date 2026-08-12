@@ -232,20 +232,70 @@ class MainWindow(QMainWindow):
         bar.addAction(settings_action)
         bar.addSeparator()
 
-        # **버튼을 `STAGES`에서 만든다.** 목록이 유일한 사실이고 화면은 그것을 그린다 —
-        # 번역 QA 같은 단계를 붙일 때 `pipeline.STAGES`에 한 줄만 더하면 된다.
-        from checker.pipeline import STAGES
+        # **단계를 줄기별로 갈라 그린다.** 한 줄에 다 늘어놓으면 무엇을 언제 눌러야
+        # 하는지 알 수 없다 — 번역 자막과 한국어 자막이 거치는 단계가 다르다.
+        # 목록(`pipeline.STAGES`)이 유일한 사실이고 화면은 그것을 그린다.
+        from checker.pipeline import STAGES, TRACKS, stages_of
 
         slots = {"generate": self.run_generate, "korean": self.run_korean,
                  "check": self.run_check, "translate": self.run_translate,
-                 "terms": self.run_terms}
+                 "revise": self.run_revise, "polish": self.run_polish,
+                 "terms": self.run_terms, "characters": self.run_characters}
+
+        panel = QWidget()
+        rows = QVBoxLayout(panel)
+        rows.setContentsMargins(6, 4, 6, 4)
+        rows.setSpacing(2)
+
         self.stage_actions: dict = {}
-        for stage in STAGES:
-            action = QAction(stage.label, self)
-            action.setToolTip(stage.note)
-            action.triggered.connect(slots[stage.id])
-            bar.addAction(action)
-            self.stage_actions[stage.id] = action
+        self.stage_buttons: dict = {}
+        self.track_notes: dict = {}
+        for key, title in TRACKS:
+            stages = stages_of(key)
+            if not stages:
+                continue
+            line = QHBoxLayout()
+            line.setSpacing(4)
+            head = QLabel(f"<b>{title}</b>")
+            head.setMinimumWidth(46)
+            line.addWidget(head)
+            for stage in stages:
+                button = QPushButton(stage.label)
+                button.setToolTip(stage.note)
+                button.clicked.connect(slots[stage.id])
+                line.addWidget(button)
+                self.stage_buttons[stage.id] = button
+                # 단축키·메뉴에서도 부를 수 있게 동작을 함께 만든다.
+                action = QAction(stage.label, self)
+                action.setToolTip(stage.note)
+                action.triggered.connect(slots[stage.id])
+                self.stage_actions[stage.id] = action
+                # **회차를 사람이 정한다.** 하드코딩하지 않기로 한 것이 화면까지 온다.
+                if stage.rounds:
+                    line.addWidget(QLabel("회차"))
+                    self.rounds_box = QComboBox()
+                    self.rounds_box.addItems(["1", "2", "3", "4", "5"])
+                    self.rounds_box.setCurrentText("2")
+                    self.rounds_box.setToolTip(
+                        "감수를 몇 회까지 돌지. 잠잠해지면 상한 전에 멈추고, "
+                        "왜 멈췄는지 진행 기록에 남습니다.")
+                    line.addWidget(self.rounds_box)
+            line.addStretch(1)
+            rows.addLayout(line)
+            # **직전 단계 결과를 버튼 옆에 남긴다.** 단계 사이에 사람이 검토해야 하고,
+            # 무엇이 바뀌었는지 안 보이면 검토할 수 없다.
+            note = QLabel("")
+            note.setStyleSheet("color: #888;")
+            note.setWordWrap(True)
+            rows.addWidget(note)
+            self.track_notes[key] = note
+
+        dock = QDockWidget("작업 단계", self)
+        dock.setObjectName("stages")
+        dock.setWidget(panel)
+        self.addDockWidget(Qt.TopDockWidgetArea, dock)
+        self.stage_dock = dock
+
         # 옛 이름을 쓰던 자리가 남아 있어도 깨지지 않게 한다.
         self.pipeline_buttons = list(self.stage_actions.values())
         self._refresh_stages()
@@ -557,15 +607,28 @@ class MainWindow(QMainWindow):
             action.setEnabled(ok)
             # 끈 이유를 도구설명으로 보인다. 눌러 보고 팝업으로 알게 되는 것보다 낫다.
             action.setToolTip(stage.note if ok else f"{why}\n\n{stage.note}")
+            button = getattr(self, "stage_buttons", {}).get(stage.id)
+            if button is not None:
+                button.setEnabled(ok)
+                button.setToolTip(stage.note if ok else f"{why}\n\n{stage.note}")
 
-    def _apply_stage_result(self, events, violations, label: str) -> None:
-        """단계 결과를 화면에 반영한다. 세 단계가 같은 뒷처리를 한다."""
+    def _apply_stage_result(self, events, violations, label: str,
+                            track: str = "", detail: str = "") -> None:
+        """단계 결과를 화면에 반영한다. 여러 단계가 같은 뒷처리를 한다."""
         self.model.replace(events)
         self.waveform.set_events(self.model.events)
         self._preview_timer.start()
         self._show_violations(violations)
         self.statusBar().showMessage(f"{label} — 남은 지적 {len(violations)}건")
+        self._stage_note(track, f"{label} · 지적 {len(violations)}건"
+                         + (f" · {detail}" if detail else ""))
         self._refresh_stages()
+
+    def _stage_note(self, track: str, text: str) -> None:
+        """줄기 옆에 직전 결과를 적는다. **단계 사이 검토가 되려면 보여야 한다.**"""
+        label = getattr(self, "track_notes", {}).get(track)
+        if label is not None:
+            label.setText(text)
 
     def run_korean(self) -> None:
         """② 한국어 교정. **규정 검사와 갈라 놓았다** — 전에는 한 버튼이 둘을 했고,
@@ -582,7 +645,8 @@ class MainWindow(QMainWindow):
         job = jobs.CheckJob(self.model.events, self._profile(), fix=False,
                             korean=True, corrector_path=path)
         self._start(job,
-                    lambda r: self._apply_stage_result(r[0], r[1], "한국어 교정 완료"),
+                    lambda r: self._apply_stage_result(r[0], r[1], "② 한국어 교정 완료",
+                                                      track="korean"),
                     "한국어 교정 중입니다...")
 
     def run_check(self) -> None:
@@ -593,7 +657,8 @@ class MainWindow(QMainWindow):
         job = jobs.CheckJob(self.model.events, self._profile(), fix=True,
                             korean=False, corrector_path=None)
         self._start(job,
-                    lambda r: self._apply_stage_result(r[0], r[1], "규정 검사 완료"),
+                    lambda r: self._apply_stage_result(r[0], r[1], "③ 자막 QA 완료",
+                                                      track="korean"),
                     "규정 검사 중입니다...")
 
     def run_translate(self) -> None:
@@ -604,8 +669,10 @@ class MainWindow(QMainWindow):
         knp = find_for(self.subtitle_path) if self.subtitle_path else None
         # **번역 전 글자가 원어다.** 지금 잡아 두지 않으면 되돌릴 수도, 견줄 수도 없다.
         sources = self.model.remember_sources()
+        # **1차만 한다.** 감수·윤문은 ②③ 버튼이 맡는다 — 한 버튼이 1차부터 3차까지
+        # 다 하면 단계 사이에 사람이 검토할 자리가 없다.
         job = jobs.TranslateJob(self.model.events, self._profile(),
-                                passes=3 if self.translate_check.isChecked() else 1,
+                                passes=1,
                                 knp=knp,
                                 # **설정이 죽어 있었다.** `translate_model`은 설정
                                 # 화면에 있는데 아무도 읽지 않아, 사용자가 모델을
@@ -620,7 +687,11 @@ class MainWindow(QMainWindow):
             self.waveform.set_events(self.model.events)
             self._preview_timer.start()
             self.statusBar().showMessage(
-                f"번역했습니다 — 타임코드는 그대로입니다({len(events)}개)")
+                f"1차 번역했습니다 — 타임코드는 그대로입니다({len(events)}개)")
+            self._stage_note("translate",
+                             f"① 1차 번역 끝 · 자막 {len(events)}개"
+                             + (f" · 확인이 필요한 자리 {len(notes)}곳" if notes else "")
+                             + " → 다음은 [② 번역 감수]")
             # **감수가 무엇을 바꿨는지 보여 준다.** 전에는 버렸다 — 2차가 1차보다 늘
             # 나은 것은 아니므로 사람이 되돌릴 근거를 봐야 한다.
             if revisions:
@@ -635,6 +706,112 @@ class MainWindow(QMainWindow):
                      "detail": n["note"], "auto_fixable": False} for n in notes])
 
         self._start(job, done, "한국어로 옮기는 중입니다...")
+
+    def _revise_common(self, stage_id: str, rounds: int, first_role: str,
+                       label: str, step_prefix: str) -> None:
+        """② 감수와 ③ 윤문이 같은 일을 한다 — 회차와 역할만 다르다."""
+        self._note(f"[{label}] 눌림")
+        if not self._stage_guard(stage_id):
+            return
+        from checker.knp import find_for
+
+        # **원어가 없으면 오역을 볼 수 없다.** 감수 프롬프트가 원문을 함께 보여 주는
+        # 것이 그 단계의 요점이므로, 없으면 한국어만 보고 다듬는 윤문이 된다.
+        sources = dict(self.model.sources)
+        if first_role == "감수" and not sources:
+            self._note("원어가 없어 오역 대조 없이 돕니다. 1차 번역을 이 프로그램에서 "
+                       "돌렸으면 원어가 남아 있습니다.")
+        job = jobs.ReviseJob(
+            self.model.events, self._profile(), sources, rounds,
+            first_role=first_role,
+            knp=find_for(self.subtitle_path) if self.subtitle_path else None,
+            model=getattr(self, "_prefs", {}).get("translate_model"),
+            cast=getattr(self, "_cast", None),
+            work_beside=self.subtitle_path, step_prefix=step_prefix)
+
+        def done(result):
+            events, revisions, stopped = result
+            self.model.replace(events, sources or None)
+            self.waveform.set_events(self.model.events)
+            self._preview_timer.start()
+            self.statusBar().showMessage(f"{label} — {len(revisions)}곳 고쳤습니다")
+            # **바꾼 내역을 보여 준다.** 다음 회차가 늘 나은 것은 아니므로 사람이
+            # 되돌릴 근거를 봐야 한다.
+            for rev in revisions[:12]:
+                self._note(f"  #{rev.index} {rev.stage} {rev.before} -> {rev.after}")
+            if len(revisions) > 12:
+                self._note(f"  … 외 {len(revisions) - 12}곳")
+            self._stage_note("translate", f"{label} 끝 · {len(revisions)}곳 고침 · {stopped}")
+            self._refresh_stages()
+
+        self._start(job, done, f"{label} 중입니다...")
+
+    def run_revise(self) -> None:
+        """② 번역 감수. **회차를 사람이 정한다** — 하드코딩하지 않기로 한 것이 화면까지 온다."""
+        rounds = int(getattr(self, "rounds_box", None).currentText()
+                     if getattr(self, "rounds_box", None) else 2)
+        self._revise_common("revise", rounds, "감수", "② 번역 감수", "03-revise")
+
+    def run_polish(self) -> None:
+        """③ 자막 윤문·QA. 윤문 한 번 뒤에 한국어 교정과 규정 검사를 이어서 돈다.
+
+        **글자 수를 여기서 맞춘다.** 앞 단계에서 맞추면 뜻이 먼저 깎인다
+        (`CLAUDE.md` §1: 글자 수는 마지막이다).
+        """
+        self._note("[③ 자막 윤문·QA] 눌림")
+        if not self._stage_guard("polish"):
+            return
+        from checker.knp import find_for
+
+        sources = dict(self.model.sources)
+        job = jobs.PolishJob(
+            self.model.events, self._profile(), sources,
+            corrector_path=self._corrector_path(),
+            knp=find_for(self.subtitle_path) if self.subtitle_path else None,
+            model=getattr(self, "_prefs", {}).get("translate_model"),
+            cast=getattr(self, "_cast", None),
+            work_beside=self.subtitle_path)
+
+        def done(result):
+            events, violations, revisions = result
+            for rev in revisions[:12]:
+                self._note(f"  #{rev.index} {rev.stage} {rev.before} -> {rev.after}")
+            if len(revisions) > 12:
+                self._note(f"  … 외 {len(revisions) - 12}곳")
+            # **순서는 `stage_polish`가 정했다.** 윤문 -> 한국어 교정 -> 규정 검사를
+            # 여기서 잇지 않는다 — 어댑터가 순서를 가지면 CLI와 갈라진다.
+            self._apply_stage_result(events, violations, "③ 자막 윤문·QA 완료",
+                                     track="translate",
+                                     detail=f"{len(revisions)}곳 고침")
+
+        self._start(job, done, "③ 자막 윤문·QA 중입니다...")
+
+    def run_characters(self) -> None:
+        """캐릭터 분석 문서. **KNP와 다른 문서다** — 말투와 인물 관계를 통일한다."""
+        self._note("[캐릭터 문서] 눌림")
+        if not self._stage_guard("characters"):
+            return
+        base = self.subtitle_path or Path("캐릭터.srt")
+        out = base.with_suffix(".characters.tsv")
+        job = jobs.CharactersJob(self.model.events, out,
+                                 work_title=base.stem)
+
+        def done(result):
+            people, counts, tsv, md = result
+            from checker import characters as ch
+
+            stats = ch.summarize(people)
+            self.statusBar().showMessage(
+                f"인물 {stats['total']}명 — 표 {tsv.name}, 문서 {md.name}")
+            self._stage_note("tool",
+                             f"인물 {stats['total']}명 · 말투를 재지 못한 인물 "
+                             f"{stats['tone_unknown']}명 · 관계가 빈 인물 "
+                             f"{stats['no_relation']}명 — 표의 '말투 지정' 칸을 채우면 "
+                             f"감수가 그대로 쓰고 자막 QA가 검사합니다")
+            # 표에 담긴 말투 지정을 바로 쓸 수 있게 물려 둔다.
+            self._cast = {p.name: p.declared_tone for p in people if p.declared_tone}
+
+        self._start(job, done, "등장인물을 뽑는 중입니다...")
 
     def run_terms(self) -> None:
         self._note("[용어표] 눌림")

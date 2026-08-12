@@ -177,6 +177,146 @@ class TranslateJob(Job):
         self._guarded(work)
 
 
+class ReviseJob(Job):
+    """이미 번역된 자막을 감수·윤문한다. 결과는 (자막, 바뀐 내역, 멈춘 이유).
+
+    **1차 번역과 갈라 놓았다.** 한 버튼이 1차부터 3차까지 다 하면 단계 사이에 사람이
+    검토할 자리가 없다 — 사용자 요구가 "단계를 독립적으로 돌리고 사이에 검토"였다.
+    """
+
+    def __init__(self, events, profile: dict, sources: dict, rounds: int,
+                 first_role: str = "감수", knp: Path | None = None,
+                 model: str | None = None, cast: dict | None = None,
+                 work_beside: Path | None = None, step_prefix: str = "03-revise"):
+        super().__init__()
+        self.events, self.profile, self.sources = events, profile, sources
+        self.rounds, self.first_role = rounds, first_role
+        self.knp, self.model, self.cast = knp, model, cast
+        self.work_beside, self.step_prefix = work_beside, step_prefix
+
+    def run(self) -> None:
+        def work():
+            from checker.model import Event
+            from checker.pipeline import stage_revise
+            from checker.translate import Glossary, ensure_server, make_translator
+
+            ensure_server(progress=self.say, wait_seconds=20)
+            translator = make_translator(self.model)
+            glossary = Glossary.from_profile(self.profile)
+            if self.knp:
+                self.say(f"KNP에서 용어 {glossary.merge_knp(self.knp)}개")
+
+            work = None
+            if self.work_beside:
+                from checker.work import Work
+                work = Work.beside(self.work_beside)
+
+            events = [Event(e.index, e.start_ms, e.end_ms, e.text) for e in self.events]
+            result = stage_revise(
+                events, self.profile, translator=translator, source=self.sources,
+                glossary=glossary, rounds=self.rounds, first_role=self.first_role,
+                cast=self.cast,
+                on_round=((lambda label, role, evs, changed:
+                           work.save(f"{self.step_prefix}-{label}", evs,
+                                     model=translator.model,
+                                     extra={"changed": changed, "role": role}))
+                          if work else None),
+                progress=self.say)
+            for row in result.extra["rounds"]:
+                self.say(f"{row['stage']}({row['role']}) {row['changed']}곳 고침")
+            self.say(result.extra["stopped_because"])
+            return (result.events, result.extra["revisions"],
+                    result.extra["stopped_because"])
+        self._guarded(work)
+
+
+class PolishJob(Job):
+    """③ 자막 윤문·QA. 결과는 (자막, 위반, 바뀐 내역).
+
+    **순서를 여기서 정하지 않는다.** `stage_polish`가 윤문 -> 한국어 교정 -> 규정 검사를
+    잇는다 — 전에 이 파일이 자기 순서를 갖고 있어서 CLI와 갈라졌다.
+    """
+
+    def __init__(self, events, profile: dict, sources: dict,
+                 corrector_path: str | None = None, knp: Path | None = None,
+                 model: str | None = None, cast: dict | None = None,
+                 job_rules=None, work_beside: Path | None = None):
+        super().__init__()
+        self.events, self.profile, self.sources = events, profile, sources
+        self.corrector_path, self.knp = corrector_path, knp
+        self.model, self.cast, self.job_rules = model, cast, job_rules
+        self.work_beside = work_beside
+
+    def run(self) -> None:
+        def work():
+            from checker.model import Event
+            from checker.pipeline import stage_polish
+            from checker.translate import Glossary, ensure_server, make_translator
+
+            ensure_server(progress=self.say, wait_seconds=20)
+            translator = make_translator(self.model)
+            glossary = Glossary.from_profile(self.profile)
+            if self.knp:
+                self.say(f"KNP에서 용어 {glossary.merge_knp(self.knp)}개")
+
+            keep = None
+            if self.work_beside:
+                from checker.work import Work
+                keep = Work.beside(self.work_beside)
+
+            events = [Event(e.index, e.start_ms, e.end_ms, e.text) for e in self.events]
+            result = stage_polish(
+                events, self.profile, translator=translator, source=self.sources,
+                glossary=glossary, cast=self.cast, korean=bool(self.corrector_path),
+                corrector_path=self.corrector_path, job_rules=self.job_rules,
+                on_round=((lambda label, role, evs, changed:
+                           keep.save(f"04-polish-{label}", evs,
+                                     model=translator.model,
+                                     extra={"changed": changed, "role": role}))
+                          if keep else None),
+                progress=self.say)
+            for note in result.notes:
+                self.say(note)
+            if keep:
+                keep.save("05-final", result.events,
+                          extra={"violations": len(result.violations)})
+            return result.events, result.violations, result.extra["revisions"]
+        self._guarded(work)
+
+
+class CharactersJob(Job):
+    """캐릭터 분석 문서를 만든다. 결과는 (인물 목록, 집계, 표 경로, 문서 경로).
+
+    **KNP 시트와 다른 문서다.** 외부 조사는 `wiki`를 줄 때만 돈다 — 나가는 것은
+    작품 제목과 인물 이름뿐이고 대사는 어떤 경우에도 나가지 않는다.
+    """
+
+    def __init__(self, events, out: Path, wiki: str = "", work_title: str = "",
+                 limit: int = 0):
+        super().__init__()
+        self.events, self.out = events, out
+        self.wiki, self.work_title, self.limit = wiki, work_title, limit
+
+    def run(self) -> None:
+        def work():
+            from checker import characters
+
+            from checker.pipeline import stage_characters
+
+            result = stage_characters(self.events, wiki=self.wiki,
+                                      work_title=self.work_title, limit=self.limit,
+                                      progress=self.say)
+            people, counts = result.extra["people"], result.extra["counts"]
+            for note in result.notes:
+                self.say(note)
+            md = self.out.with_suffix(".md")
+            self.out.write_text(characters.to_tsv(people), encoding="utf-8-sig")
+            md.write_text(characters.to_markdown(people, counts, self.work_title),
+                          encoding="utf-8")
+            return people, counts, self.out, md
+        self._guarded(work)
+
+
 class TermsJob(Job):
     """용어를 뽑아 조사한다. 결과는 (용어 목록, 저장한 파일)."""
 

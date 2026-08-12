@@ -173,7 +173,8 @@ def stage_revise(events: list[Event], profile: dict, *, translator,
                  source: dict[int, str] | None = None, glossary=None,
                  rounds: int = 1, first_round: int = 2, max_rounds: int = 0,
                  settle_at: int = 0, cast: dict[str, str] | None = None,
-                 on_round=None, progress: Progress | None = None) -> StageResult:
+                 first_role: str = "감수", on_round=None,
+                 progress: Progress | None = None) -> StageResult:
     """감수를 돈다. **회차를 하드코딩하지 않고, 멈춘 이유를 기록한다.**
 
     전에는 두 어댑터가 각자 `("2차", "3차")[:passes - 1]`을 적어 두어 3차를 넘길 수
@@ -210,7 +211,9 @@ def stage_revise(events: list[Event], profile: dict, *, translator,
 
     for n in range(limit):
         label = f"{first_round + n}차"
-        role = "감수" if n == 0 else "윤문"
+        # 첫 회차의 역할을 부르는 쪽이 정할 수 있다 — 윤문만 한 번 더 돌리는 자리가
+        # 있다(③ 자막 윤문·QA).
+        role = first_role if n == 0 else "윤문"
         say(f"{label} ({role})")
         current, revisions = revise(current, translator, source=source,
                                     glossary=glossary, stage=label, role=role,
@@ -277,6 +280,80 @@ def stage_backtranslate(events: list[Event], profile: dict | None = None, *,
     return StageResult(events=list(events),
                        extra={"back": back, "diverged": diverged, "worst": picked,
                               "summary": stats})
+
+
+def stage_polish(events: list[Event], profile: dict, *, translator,
+                 source: dict[int, str] | None = None, glossary=None,
+                 cast: dict[str, str] | None = None, korean: bool = False,
+                 corrector_path: str | None = None, backend=None,
+                 job_rules=None, children: bool = False, fps: float | None = None,
+                 on_round=None, progress: Progress | None = None) -> StageResult:
+    """③ 자막 윤문·QA — 윤문 한 번, 그다음 한국어 교정과 규정 검사.
+
+    **어댑터가 이 순서를 갖지 않게 여기에 둔다.** GUI가 "윤문 뒤에 검사를 부른다"를
+    자기 코드로 갖고 있으면 CLI와 갈라진다 — 그것이 이 모듈이 생긴 이유다.
+
+    **글자 수를 여기서 맞춘다**(`CLAUDE.md` §1: 글자 수는 마지막이다). 앞 단계에서
+    맞추면 뜻이 먼저 깎인다.
+
+    윤문이 글자를 바꾸므로 **검사는 그 뒤여야 한다** — 윤문이 만든 규정 위반을
+    원본 검사로는 못 본다.
+    """
+    say = progress or _silent
+    polished = stage_revise(events, profile, translator=translator, source=source,
+                            glossary=glossary, rounds=1, first_role="윤문",
+                            cast=cast, on_round=on_round, progress=say)
+    checked = correct_and_check(
+        polished.events, profile,
+        CorrectOptions(korean=korean, corrector_path=corrector_path, backend=backend,
+                       apply_fixes=True, children=children, fps=fps,
+                       job_rules=job_rules, cast=cast),
+        progress=say)
+    return StageResult(
+        events=checked.events,
+        notes=checked.notes,
+        violations=checked.violations,
+        changed=len(_edits(events, checked.events)),
+        extra={**checked.extra,
+               "revisions": polished.extra["revisions"],
+               "rounds": polished.extra["rounds"]},
+    )
+
+
+def stage_characters(events: list[Event], profile: dict | None = None, *,
+                     wiki: str = "", work_title: str = "", limit: int = 0,
+                     with_image: bool = True,
+                     progress: Progress | None = None) -> StageResult:
+    """캐릭터 분석 문서를 만든다. 자막을 건드리지 않는다 — 표와 문서만 낸다.
+
+    **KNP 시트와 다른 문서다**(`stage_terms`가 그쪽). KNP는 고유명사 표기를, 이것은
+    말투와 인물 관계를 통일한다.
+
+    `wiki`를 줄 때만 밖으로 조회한다. 나가는 것은 **작품 제목과 인물 이름뿐**이고
+    대사는 어떤 경우에도 나가지 않는다(규칙 6).
+    """
+    from . import characters
+
+    say = progress or _silent
+    people, counts = characters.extract(events)
+    say(f"인물 {counts['total']}명 · 화자 표시가 붙은 자막 {counts['tagged_events']}개")
+    if counts["untagged_events"]:
+        # 못 센 것을 숨기지 않는다.
+        say(f"화자를 모르는 자막 {counts['untagged_events']}개는 집계에서 뺐습니다")
+
+    info = None
+    notes: list[str] = []
+    if wiki:
+        say(f"밖에서 조사합니다({wiki}) — 작품 제목과 인물 이름만 나갑니다")
+        info = characters.research(people, wiki, work_title, limit=limit,
+                                  with_image=with_image, progress=say)
+    else:
+        notes.append("성격·사진은 자막이 증명하지 못합니다. 위키를 지정하면 조사합니다.")
+
+    return StageResult(events=list(events), notes=notes,
+                       extra={"people": people, "counts": counts,
+                              "summary": characters.summarize(people),
+                              "research": info})
 
 
 def stage_terms(events: list[Event], profile: dict | None = None, *,
@@ -484,6 +561,15 @@ class Stage:
     requires: tuple[str, ...] = ()
     needs_video: bool = False
     note: str = ""
+    # **어느 줄기에 속하는가.** 번역 자막과 한국어 자막은 거치는 단계가 다르다.
+    # 화면이 이 값으로 줄을 갈라 그린다 — 한 줄에 다 늘어놓으면 무엇을 언제 눌러야
+    # 하는지 알 수 없다(사용자 요구: "①②③이 눈에 보이게").
+    #   source    소재를 만드는 단계 (두 줄기 공통)
+    #   translate 번역 줄기
+    #   korean    한국어 줄기
+    #   tool      자막을 바꾸지 않는 조사 도구
+    track: str = "tool"
+    rounds: bool = False        # 회차를 사람이 정하는 단계인가
 
     def available(self, *, has_subtitle: bool, has_video: bool = False,
                   done: set[str] | None = None) -> tuple[bool, str]:
@@ -511,20 +597,45 @@ class Stage:
 # 작업자가 이미 만들어진 자막을 받아 교정만 하는 경우가 실무에서 가장 흔하다
 # (`CLAUDE.md` §8).
 STAGES: tuple[Stage, ...] = (
-    Stage("generate", "① 자막 만들기", needs_video=True,
+    Stage("generate", "자막 만들기", track="source", needs_video=True,
           note="영상에서 전사·타임코드·초벌 자막을 만든다. **교정은 하지 않는다** — "
-               "초안을 사람이 먼저 보게 한다."),
-    Stage("korean", "② 한국어 교정",
+               "초안을 사람이 먼저 보게 한다. 두 줄기의 출발점이다."),
+
+    # --- 번역 줄기 -------------------------------------------------------
+    # 작업자 자료 569~579행이 나눠 놓은 그대로다. **볼 것이 단계마다 다르다.**
+    Stage("translate", "① 1차 번역", track="translate",
+          note="오역 없이 옮긴다. 투박한 한국어는 괜찮다 — 다듬는 것은 ②③이다. "
+               "**타임코드를 건드리지 않는다.** 시각이 잡힌 원어 자막을 받았으면 "
+               "[자막 열기]로 열고 이것부터 쓰면 전사를 통째로 건너뛴다."),
+    Stage("revise", "② 번역 감수", track="translate", rounds=True,
+          note="오역·용어·맥락·말투를 본다. 캐릭터 문서를 주면 정한 말투대로 쓴다. "
+               "회차를 정할 수 있고, 잠잠해지면 상한 전에 멈춘다."),
+    Stage("polish", "③ 자막 윤문·QA", track="translate",
+          note="말맛·간결·문장부호를 다듬고, 한국어 교정과 규정 검사를 이어서 돈다. "
+               "**글자 수는 여기서 맞춘다** — 앞 단계에서 맞추면 뜻이 먼저 깎인다."),
+
+    # --- 한국어 줄기 -----------------------------------------------------
+    Stage("korean", "② 한국어 교정", track="korean",
           note="맞춤법·띄어쓰기를 국립국어원 근거로 본다. 자동 교정과 확인 항목이 갈린다."),
-    Stage("check", "③ 규정 검사",
+    Stage("check", "③ 자막 QA", track="korean",
           note="발주처 규정 위반을 센다. 자막이 바뀌면 다시 돌려야 한다."),
-    Stage("translate", "번역",
-          note="원어를 한국어 초벌로 옮긴다. **타임코드를 건드리지 않는다** — "
-               "시각이 이미 잡힌 원어 자막을 받았으면 [자막 열기]로 열고 이것을 "
-               "쓰면 된다. 전사를 통째로 건너뛴다."),
-    Stage("terms", "용어표",
-          note="대본에서 고유명사·약어를 뽑아 조사한다. 자막을 바꾸지 않는다."),
+
+    # --- 도구 (자막을 바꾸지 않는다) -------------------------------------
+    Stage("terms", "용어표", track="tool",
+          note="대본에서 고유명사·약어를 뽑아 조사한다. KNP 시트에 붙일 표로 낸다."),
+    Stage("characters", "캐릭터 문서", track="tool",
+          note="등장인물·말투·관계를 뽑는다. **KNP와 다른 문서다** — 여러 작업자가 "
+               "나누어 할 때 말투를 맞추는 데 쓴다."),
 )
+
+
+def stages_of(track: str) -> tuple[Stage, ...]:
+    """한 줄기의 단계만. 화면이 줄을 갈라 그릴 때 쓴다."""
+    return tuple(s for s in STAGES if s.track == track)
+
+
+TRACKS = (("source", "소재"), ("translate", "번역"), ("korean", "한국어"),
+          ("tool", "조사"))
 
 
 def stage_by_id(stage_id: str) -> Stage | None:
