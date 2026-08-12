@@ -2539,6 +2539,95 @@ ok("감수 프롬프트에만 인물 말투가 붙는다",
    "민수: 합니다체" in _spy.systems[0] and "민수: 합니다체" not in _spy.systems[-1])
 
 
+# --- 오역 검증 (층 1: 역번역 없이) --------------------------------------------
+# 백로그에 이 넷을 "확정"이라고 적었는데 **둘은 확정이 아니다.** 짓다가 드러났다:
+#   확정  화자 표시 — 개수가 다르면 구조가 깨졌다
+#   확정  용어      — 통일표가 정답을 정해 준다
+#   추정  부정      — `I don't know` -> `몰라요`. 부정 표시 없이 부정한다
+#   추정  숫자      — `in 5 minutes` -> `곧`. 자막은 숫자를 버리기도 한다
+# 그래서 전부 **플래그로만** 낸다. 규정 위반 목록에 섞지 않는다(규칙 4).
+
+from checker import mistranslation as _mt  # noqa: E402
+from checker.translate import Glossary as _Glossary  # noqa: E402
+
+
+def _flag_kind(source, target, glossary=None):
+    found = _mt.scan([_PEvent(1, 0, 1000, target)], {1: source}, glossary)
+    return found[0].kind if found else None
+
+
+for _src, _tgt, _want in [
+    # 부정 — 가장 치명적이다. 뜻이 정반대로 뒤집힌다.
+    ("I never said I'd go alone", "혼자 가겠다고 했어요", "negation"),
+    ("I don't know", "몰라요", None),               # 표시 없이 부정 — 걸리면 안 된다
+    ("There is nothing here", "여기 아무것도 없어요", None),
+    ("He didn't come", "오지 않았어요", None),
+    # 숫자 — 한 음절 한자 수사 때문에 처음에 검사가 아예 돌지 않았다.
+    ("Wait 5 minutes", "잠깐만요", "number"),        # `만`이 걸리면 안 된다
+    ("Wait 5 minutes", "5분 기다려요", None),
+    ("Wait 5 minutes", "다섯 시간 기다려요", None),   # 고유어 수사
+    ("Wait 5 minutes", "오 분 기다려요", None),       # 한자 수사 + 단위
+    ("It was 30 years ago", "삼십 년 전이었어요", None),   # 두 음절 한자 수사
+    ("It was 30 years ago", "오래전이었어요", "number"),
+    # 단위 변환은 정상이다(작업자 자료 146행: 화자 국적을 따져 단위를 다룬다).
+    ("It costs 3 dollars", "3천 원입니다", None),
+    # 화자 표시 — 구조라 확정이다. 이름이 한국어로 바뀌는 것은 정상이다.
+    ("[Sarah] Come in", "들어오세요", "speaker"),
+    ("[Sarah] Come in", "[사라] 들어오세요", None),
+]:
+    ok(f"오역 플래그: {_src[:22]} -> {_tgt[:14]}", _flag_kind(_src, _tgt) == _want,
+       f"{_flag_kind(_src, _tgt)} (기대 {_want})")
+
+ok("통일표를 어기면 잡는다",
+   _flag_kind("We reached Bastogne", "바스통에 도착했습니다",
+              _Glossary({"Bastogne": "바스토뉴"})) == "glossary")
+ok("통일표를 지키면 안 잡는다",
+   _flag_kind("We reached Bastogne", "바스토뉴에 도착했습니다",
+              _Glossary({"Bastogne": "바스토뉴"})) is None)
+
+# 확정을 먼저 보여 준다 — 사람이 위에서부터 처리하면 값이 큰 것부터 처리된다.
+_mtevs = [_PEvent(1, 0, 1000, "혼자 가겠다고 했어요"),      # 추정(부정)
+          _PEvent(2, 1000, 2000, "들어오세요")]             # 확정(화자 표시)
+_mtflags = _mt.scan(_mtevs, {1: "I never said I'd go alone", 2: "[Sarah] Come in"})
+ok("확정을 먼저 낸다", [f.certain for f in _mtflags] == [True, False],
+   str([(f.kind, f.certain) for f in _mtflags]))
+ok("집계가 확정·추정을 가른다",
+   _mt.summarize(_mtflags) == {"total": 2, "by_kind": {"speaker": 1, "negation": 1},
+                               "certain": 1, "estimated": 1},
+   str(_mt.summarize(_mtflags)))
+# 원문이 없는 자막은 견줄 수 없다. 넘긴다.
+ok("원문이 없으면 넘긴다", _mt.scan([_PEvent(9, 0, 1000, "아무 말")], {}) == [])
+
+
+class _LeakyTranslator:
+    """일부러 부정과 숫자를 흘리는 흉내."""
+
+    def ask(self, system, prompt):
+        out = []
+        for line in prompt.splitlines():
+            head = line.strip().split(".")[0].strip()
+            if head == "1":
+                out.append("1. 혼자 가겠다고 했어요")
+            elif head == "2":
+                out.append("2. 잠깐만요")
+        return "\n".join(out)
+
+
+_mtresult = _pl.stage_translate(
+    [_PEvent(1, 0, 2000, "I never said I'd go alone"),
+     _PEvent(2, 2000, 4000, "Wait 5 minutes")],
+    _trprof, translator=_LeakyTranslator())
+ok("1차 직후에 검증이 돈다",
+   {f.kind for f in _mtresult.extra["flags"]} == {"negation", "number"},
+   str([f.kind for f in _mtresult.extra["flags"]]))
+# **플래그는 위반이 아니다.** 규정 위반 목록에 들어가면 위반 건수가 거짓이 된다.
+ok("플래그를 위반에 섞지 않는다", _mtresult.violations == [], str(_mtresult.violations))
+ok("검증을 끌 수 있다",
+   _pl.stage_translate([_PEvent(1, 0, 2000, "I never said I'd go alone")],
+                       _trprof, translator=_LeakyTranslator(),
+                       verify=False).extra["flags"] == [])
+
+
 # --- 결과 ---------------------------------------------------------------
 
 print(f"통과 {PASSED}건")

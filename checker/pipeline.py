@@ -117,7 +117,8 @@ def stage_generate(video: Path, profile: dict, *, script: Path | None = None,
 # ---------------------------------------------------------------- 번역과 감수
 
 def stage_translate(events: list[Event], profile: dict, *, translator,
-                    glossary=None, progress: Progress | None = None) -> StageResult:
+                    glossary=None, verify: bool = True,
+                    progress: Progress | None = None) -> StageResult:
     """1차 번역. **받은 타임코드를 그대로 물려받고 확인한다.**
 
     작업자 자료 190행: "TC 작업이 되어 온 파일에 내가 번역만 한 경우는 TC를 절대
@@ -141,6 +142,18 @@ def stage_translate(events: list[Event], profile: dict, *, translator,
             "message": "번역이 타임코드를 바꿨습니다. 결과를 쓰지 마세요.",
         })
 
+    # **오역 검증은 1차 직후에만 뜻이 있다.** 1차는 압축하지 않기로 했으므로 이때
+    # 빠진 숫자·부정은 옮기지 않은 것일 가능성이 높다. 3차를 지난 자막에 같은 검사를
+    # 걸면 정상적인 압축을 오역으로 부른다(`in 5 minutes` -> `곧 가요`).
+    flags = []
+    if verify:
+        from .mistranslation import scan, summarize
+        flags = scan(translated, {e.index: e.text for e in events}, glossary)
+        if flags:
+            counts = summarize(flags)
+            say(f"확인이 필요한 자리 {counts['total']}곳 "
+                f"(확정 {counts['certain']} · 추정 {counts['estimated']})")
+
     return StageResult(
         events=translated,
         changed=len(_edits(events, translated)),
@@ -149,7 +162,10 @@ def stage_translate(events: list[Event], profile: dict, *, translator,
         # (빈칸은 지나치지만 원문은 눈에 띈다) — 그 자리를 여기로 낸다.
         extra={"cues": cues,
                "notes_by_index": [{"event_index": c.index, "note": c.note}
-                                  for c in cues if c.note]},
+                                  for c in cues if c.note],
+               # 플래그는 **위반이 아니다.** 규정 위반 목록에 섞지 않는다 — 부정·숫자는
+               # 추정이고, 추정으로 자동 교정을 하면 틀렸을 때 원인을 못 찾는다(규칙 4).
+               "flags": flags},
     )
 
 

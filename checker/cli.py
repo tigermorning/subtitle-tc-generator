@@ -63,6 +63,23 @@ def _format_text(report: dict, path: Path) -> str:
         if notes:
             out.append(f"    확인이 필요한 자리 {len(notes)}곳: "
                        + ", ".join(f"#{n['event_index']}" for n in notes[:8]))
+    if report.get("mistranslation_flags"):
+        flags = report["mistranslation_flags"]
+        counts = report.get("mistranslation_summary") or {}
+        out.append(f"  1차 번역에서 확인이 필요한 자리 {len(flags)}곳 "
+                   f"(확정 {counts.get('certain', 0)} · 추정 {counts.get('estimated', 0)}) "
+                   f"— 규정 위반이 아닙니다")
+        labels = {"speaker": "화자 표시", "glossary": "용어", "negation": "부정",
+                  "number": "숫자"}
+        for flag in flags[:10]:
+            mark = "확정" if flag["certain"] else "추정"
+            out.append(f"    [{mark}] #{flag['event_index']} "
+                       f"{labels.get(flag['kind'], flag['kind'])} — {flag['reason']}")
+            if flag.get("source"):
+                out.append(f"           원문 {flag['source'][:60]}")
+                out.append(f"           번역 {flag['target'][:60]}")
+        if len(flags) > 10:
+            out.append(f"    … 외 {len(flags) - 10}곳")
     if report.get("timecodes_locked"):
         out.append("  타임코드 고정: 받은 타임코드를 그대로 둡니다(나누기·수렴·스포팅 안 함)")
     if report.get("lock_violation"):
@@ -391,6 +408,11 @@ def _run_one(path: Path, profile: dict, args, backend) -> dict | None:
                                 glossary=glossary, progress=say)
         translated = first.events
         report["translation_notes"] = first.extra["notes_by_index"]
+        # **위반이 아니라 플래그다.** 부정·숫자는 추정이므로 지적 목록에 섞지 않는다.
+        if first.extra.get("flags"):
+            from .mistranslation import summarize as _flag_summary
+            report["mistranslation_flags"] = [f.to_dict() for f in first.extra["flags"]]
+            report["mistranslation_summary"] = _flag_summary(first.extra["flags"])
 
         # **회차는 인자다.** 전에는 `("2차", "3차")[:passes - 1]`을 여기와 GUI에 각각
         # 적어 두어 3차를 넘길 수 없었다.
