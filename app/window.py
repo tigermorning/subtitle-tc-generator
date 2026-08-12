@@ -478,6 +478,16 @@ class MainWindow(QMainWindow):
                                self.language_box.currentText(),
                                self.translate_check.isChecked())
 
+        # **어느 경로로 도는지 먼저 말한다.** 대본이 있으면 "전사가 왜 필요한가"라는
+        # 의문이 생기는데, 전사는 글자를 얻으려는 것이 아니라 **타임코드를 잡고 대본에
+        # 없는 대사를 찾으려는 것**이다(`checker/align.py` 서두). 그 사실을 알려 주면
+        # 기다리는 이유가 납득된다.
+        if script:
+            self._note("대본과 전사를 대조합니다 — 전사는 타임코드를 잡고 "
+                       "대본에 없는 대사를 찾는 데 씁니다. 어긋난 자리는 표시해 드립니다.")
+        else:
+            self._note("대본이 없으므로 전사한 글자로 자막을 만듭니다 (SDH 경로).")
+
         # **얼마나 걸릴지 미리 말해 준다.** 모르면 멈춘 줄 안다. 전사는 실측
         # 20배속쯤이고, 번역은 자막 수에 비례해 그보다 훨씬 느리다.
         minutes = ((self.player.duration_ms if self.player else 0) or 0) / 60000
@@ -492,6 +502,21 @@ class MainWindow(QMainWindow):
             self.waveform.set_events(self.model.events)
             self._preview_timer.start()
             notes = len(draft.notes)
+
+            # **대조 결과를 말한다.** `align.summary()`가 이미 세어 놓는데 화면에
+            # 나오지 않고 있었다. 대본이 일부 빠지는 일이 흔하므로(사용자 확인
+            # 2026-08-12) **무엇이 빠져 있었나가 곧 손볼 목록**이다.
+            st = getattr(draft, "stats", None) or {}
+            if st.get("from_transcript") or st.get("no_audio"):
+                parts = []
+                if st.get("from_script"):
+                    parts.append(f"대본에서 {st['from_script']}개")
+                if st.get("from_transcript"):
+                    parts.append(f"대본에 없어 전사로 채운 것 {st['from_transcript']}개")
+                if st.get("no_audio"):
+                    parts.append(f"대본에 있는데 소리가 없는 것 {st['no_audio']}개")
+                self._note("대조 결과 — " + ", ".join(parts))
+
             self.statusBar().showMessage(
                 f"자막 {len(draft.events)}개를 만들었습니다"
                 + (f" — 봐야 할 자리 {notes}곳" if notes else ""))
