@@ -183,10 +183,23 @@ class TermsJob(Job):
         self._guarded(work)
 
 
-def start(job: Job, on_done, on_message, on_failed) -> QThread:
-    """일을 다른 실에서 시작한다. 실을 돌려주므로 부르는 쪽이 붙잡고 있어야 한다.
+# 돌고 있는 실과 **일 객체**를 여기서 붙잡는다. 아래 이유로 둘 다 필요하다.
+_ALIVE: list[tuple[QThread, "Job"]] = []
 
-    붙잡지 않으면 파이썬이 실을 거둬 가면서 프로그램이 죽는다.
+
+def start(job: Job, on_done, on_message, on_failed) -> QThread:
+    """일을 다른 실에서 시작한다.
+
+    **실과 일 객체를 둘 다 붙잡아야 한다.** 실만 붙잡으면 파이썬이 `Job`을 거둬 가고,
+    그러면 `thread.started`에 연결한 슬롯이 사라져 **아무 일도 없이 조용히 끝난다** —
+    예외도, `failed` 신호도 없다. `moveToThread`는 소유권을 넘기지 않는다.
+
+    2026-08-12 실사용에서 이것이 실제로 났다. [자막 만들기]를 누르면 상태줄이
+    "만드는 중입니다..."에서 16분간 멈춰 있었고, 로그에 한 줄도 안 늘고, ffprobe·
+    ffmpeg·ollama 어느 것도 뜨지 않고, CPU는 10초에 0.5초만 썼다. 부르는 쪽
+    (`window._start`)이 `job`을 지역 변수로 두고 실만 보관했기 때문이다.
+
+    끝나면 목록에서 뺀다 — 안 그러면 오래 쓰는 동안 계속 쌓인다.
     """
     thread = QThread()
     job.moveToThread(thread)
@@ -196,5 +209,16 @@ def start(job: Job, on_done, on_message, on_failed) -> QThread:
     job.failed.connect(on_failed)
     job.finished.connect(thread.quit)
     job.failed.connect(thread.quit)
+
+    held = (thread, job)
+    _ALIVE.append(held)
+
+    def _release() -> None:
+        # 실이 실제로 끝난 뒤에 놓는다. `finished` 신호에서 바로 놓으면 실이 아직
+        # 정리 중이라 같은 사고가 다시 난다.
+        if held in _ALIVE:
+            _ALIVE.remove(held)
+
+    thread.finished.connect(_release)
     thread.start()
     return thread

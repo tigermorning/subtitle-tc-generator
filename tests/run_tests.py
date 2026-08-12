@@ -1914,3 +1914,45 @@ if FAILED:
 print("전부 통과")
 
 
+# --- 일을 다른 실에서 돌릴 때 객체가 사라지지 않는지 ---------------------------
+# **2026-08-12 실사용 사고.** [자막 만들기]가 16분간 아무 일도 하지 않았다. 상태줄은
+# "만드는 중입니다..."에서 멈추고, 로그에 한 줄도 안 늘고, ffprobe·ffmpeg·ollama 어느
+# 것도 뜨지 않고, CPU는 10초에 0.5초만 썼다. 예외도 실패 신호도 없었다.
+#
+# 원인: 부르는 쪽이 `job`을 지역 변수로 두고 실만 보관해서, 파이썬이 `Job`을 거둬 가고
+# `thread.started`에 연결한 슬롯이 사라졌다. `moveToThread`는 소유권을 넘기지 않는다.
+#
+# 이 시험은 **참조를 일부러 버린다.** GUI가 없어도 도는 자리에서만 돌린다.
+try:
+    from PySide6.QtWidgets import QApplication  # noqa: E402
+except ImportError:
+    ok("일 객체 보관 (PySide6 없어 건너뜀)", True)
+else:
+    import gc as _gc  # noqa: E402
+    import os as _osq  # noqa: E402
+    _osq.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtCore import QEventLoop, QTimer  # noqa: E402
+    from app import jobs as _jobs  # noqa: E402
+
+    _app = QApplication.instance() or QApplication([])
+    _ran: list[str] = []
+
+    class _Tiny(_jobs.Job):
+        def run(self):
+            self._guarded(lambda: _ran.append("ran") or "result")
+
+    def _start_and_drop():
+        _job = _Tiny()                     # 지역 변수 — 사고 당시와 같은 상황
+        _jobs.start(_job, lambda r: _ran.append("done"), lambda m: None,
+                    lambda w: _ran.append("failed"))
+        # 참조가 여기서 사라진다
+
+    _start_and_drop()
+    _gc.collect(); _gc.collect()
+    _loop = QEventLoop()
+    QTimer.singleShot(1500, _loop.quit)
+    _loop.exec()
+
+    ok("일 참조를 버려도 실행된다", "ran" in _ran, str(_ran))
+    ok("끝나면 done 콜백이 온다", "done" in _ran, str(_ran))
+    ok("끝난 일은 보관 목록에서 빠진다", len(_jobs._ALIVE) == 0, str(len(_jobs._ALIVE)))
