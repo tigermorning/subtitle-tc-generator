@@ -2375,6 +2375,89 @@ ok("문서에 라이선스를 사진 옆에 붙인다", "라이선스:" in _chmd
 ok("성격이 위키 요약임을 밝힌다", "요약이므로" in _chmd)
 
 
+# --- T17 정한 말투를 벗어난 자리 ---------------------------------------------
+# 프로파일에 오래 선언만 돼 있던 검사다. 미뤄진 이유가 있다 — **같은 인물이 존댓말과
+# 반말을 섞는 것은 상대가 다르면 정상**이고 자막에 상대는 표시되지 않는다. 그래서
+# 사람이 캐릭터 시트에 "이 인물은 이렇게 말한다"를 적어 주어야 성립한다.
+
+_t17prof = load_profile("netflix", "ko", "translation")
+_t17evs = [
+    _gev("[민수] 어디 계십니까", 1),          # 합니다체 — 맞다
+    _gev("[민수] 어디 있어요", 2),            # 해요체 — 어긋난다
+    _gev("[영희] 여기 있어요", 3),            # 해요체로 정함 — 맞다
+    _gev("[민수] 알았어", 4),                 # 유보 — 넘긴다
+    _gev("화자를 모르는 대사입니다", 5),       # 화자 없음 — 넘긴다
+]
+_t17cast = {"민수": "합니다체", "영희": "해요체"}
+
+# **시트가 없으면 조용히 통과로 보이면 안 된다.** 구현은 됐으므로 미구현 목록에서
+# 빠지는데, 그러면 "검사했고 통과"로 읽힌다(규칙 9가 금지하는 상태).
+_t17none = check_events(_t17evs, _t17prof, fps=23.976)
+ok("시트가 없으면 T17을 지적하지 않는다",
+   not [v for v in _t17none["violations"] if v["rule_id"] == "T17"])
+ok("시트가 없으면 '돌지 못했다'고 밝힌다",
+   any("formality_inconsistent" in r for r in _t17none.get("skipped_checks") or []),
+   str(_t17none.get("skipped_checks")))
+
+_t17got = check_events(_t17evs, _t17prof, fps=23.976, cast=_t17cast)
+_t17hits = [(v["event_index"], v["detail"]) for v in _t17got["violations"]
+            if v["rule_id"] == "T17"]
+ok("정한 말투를 벗어난 자막만 잡는다", [i for i, _ in _t17hits] == [2], str(_t17hits))
+ok("무엇이 어긋났는지 적는다", "합니다체로 정했는데 해요체" in _t17hits[0][1],
+   _t17hits[0][1])
+# 조사가 받침에 맞아야 한다. `민수은(는)`처럼 나오면 사람이 읽다가 걸린다.
+ok("주제 조사를 받침에 맞춘다", "민수는" in _t17hits[0][1], _t17hits[0][1])
+ok("시트를 주면 '돌지 못했다'가 사라진다",
+   not [r for r in _t17got.get("skipped_checks") or []
+        if "formality_inconsistent" in r])
+
+# **반말로 정해 둔 인물도 한 방향으로는 검증된다** — 그 줄이 존댓말로 확정되면 어긋난
+# 것이 맞다. 반대 방향(반말 확정)은 못 한다: `해야`와 `뭐야`를 줄 끝만 보고 못 가른다.
+_t17ban = check_events([_gev("[철수] 어디 계십니까", 1), _gev("[철수] 몰라", 2)],
+                       _t17prof, fps=23.976, cast={"철수": "반말"})
+_t17banhits = [v["event_index"] for v in _t17ban["violations"] if v["rule_id"] == "T17"]
+ok("반말로 정한 인물이 존댓말을 쓰면 잡는다", _t17banhits == [1], str(_t17banhits))
+
+# 정해 주지 않은 인물은 건드리지 않는다 — 넓히면 오답이 난다.
+_t17partial = check_events(_t17evs, _t17prof, fps=23.976, cast={"영희": "합니다체"})
+ok("정해 주지 않은 인물은 넘긴다",
+   [v["event_index"] for v in _t17partial["violations"] if v["rule_id"] == "T17"] == [3],
+   str([v["event_index"] for v in _t17partial["violations"] if v["rule_id"] == "T17"]))
+
+# 시트 되읽기 — **칸 순서가 아니라 머리글로 찾는다.** 사람이 엑셀에서 칸을 옮긴다.
+import tempfile as _t17tf  # noqa: E402
+
+with _t17tf.TemporaryDirectory() as _t17d:
+    _t17p = Path(_t17d) / "cast.tsv"
+    _t17people = [_ch.Character(name="민수", lines=5), _ch.Character(name="영희", lines=2)]
+    _t17people[0].declared_tone = "하십시오체"      # 같은 뜻의 다른 말
+    _t17people[0].relations = {"영희": "동료"}
+    _t17p.write_text(_ch.to_tsv(_t17people), encoding="utf-8-sig")
+
+    _back = _ch.read_tsv(_t17p)
+    ok("시트를 되읽는다", [p.name for p in _back] == ["민수", "영희"],
+       str([p.name for p in _back]))
+    # 같은 뜻으로 쓰는 말을 받아 준다. **모르는 말은 빈 값으로 둔다**(짐작해서 한쪽으로
+    # 떨어뜨리지 않는다).
+    ok("말투 표기가 달라도 알아본다", _back[0].declared_tone == "합니다체",
+       _back[0].declared_tone)
+    ok("관계를 되읽는다", _back[0].relations == {"영희": "동료"}, str(_back[0].relations))
+    # 우리가 적어 낸 자리표시자를 사람이 채운 것으로 착각하면 안 된다.
+    ok("'정해 주세요'는 빈 값으로 읽는다", _back[1].declared_tone == "",
+       _back[1].declared_tone)
+    ok("'확인 필요'는 빈 값으로 읽는다", _back[1].gender == "", _back[1].gender)
+
+    # 칸을 옮겨도 머리글로 찾으므로 값이 밀리지 않는다.
+    _rows = [r.split("\t") for r in _t17p.read_text(encoding="utf-8-sig").splitlines()]
+    _order = [_rows[0].index("성별"), _rows[0].index("이름")]
+    _moved = ["\t".join([r[i] for i in _order] + r) for r in _rows]
+    (Path(_t17d) / "moved.tsv").write_text("\n".join(_moved), encoding="utf-8-sig")
+    _movedback = _ch.read_tsv(Path(_t17d) / "moved.tsv")
+    ok("칸을 옮겨도 머리글로 찾는다",
+       [p.name for p in _movedback] == ["민수", "영희"], str([p.name for p in _movedback]))
+ok("모르는 말투 표기는 빈 값", _ch._tone_of("아무말") == "", _ch._tone_of("아무말"))
+
+
 # --- 결과 ---------------------------------------------------------------
 
 print(f"통과 {PASSED}건")

@@ -288,12 +288,14 @@ def stage_fixes(events: list[Event], profile: dict, *, job_rules=None,
 
 def stage_check(events: list[Event], profile: dict, *, children: bool = False,
                 fps: float | None = None, busy_spans=None, job_rules=None,
+                cast: dict[str, str] | None = None,
                 progress: Progress | None = None) -> StageResult:
     """규정 위반을 센다. **반드시 마지막이다** — 리포트는 최종 자막을 설명해야 한다."""
     say = progress or _silent
     say("검사 중...")
     report = check_events([e.__dict__ for e in events], profile, children=children,
-                          fps=fps, busy_spans=busy_spans, job_rules=job_rules)
+                          fps=fps, busy_spans=busy_spans, job_rules=job_rules,
+                          cast=cast)
     return StageResult(events=list(events), violations=list(report["violations"]),
                        extra={"report": report})
 
@@ -317,6 +319,9 @@ class CorrectOptions:
     fps: float | None = None
     busy_spans: list | None = None
     job_rules: object | None = None
+    # 캐릭터 시트의 `이름 -> 정한 말투`. 없으면 T17이 돌지 않는다 — 관계를 모르는 채
+    # 말투 혼용을 지적하면 오답이 된다.
+    cast: dict | None = None
 
 
 def correct_and_check(events: list[Event], profile: dict, options: CorrectOptions,
@@ -354,7 +359,7 @@ def correct_and_check(events: list[Event], profile: dict, options: CorrectOption
 
     checked = stage_check(current, profile, children=options.children, fps=options.fps,
                           busy_spans=options.busy_spans, job_rules=options.job_rules,
-                          progress=say)
+                          cast=options.cast, progress=say)
 
     # 한국어 교정이 낸 확인 항목을 규정 위반과 한 목록으로 합친다. 사용자는 출처가
     # 어디든 "고쳐야 할 것"을 한 번에 본다 — 정렬 기준은 자막 번호다.

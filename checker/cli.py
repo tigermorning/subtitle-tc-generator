@@ -155,6 +155,10 @@ def _format_text(report: dict, path: Path) -> str:
         # 검사하지 않은 것을 통과로 보이게 하지 않는다.
         out.append(f"  미구현 검사 {len(report['unimplemented_checks'])}건: "
                    + ", ".join(report["unimplemented_checks"]))
+    # **구현은 돼 있는데 자료가 없어 못 돈 검사.** 미구현과 다르지만 숨기면 똑같이
+    # "통과"로 보인다.
+    for reason in report.get("skipped_checks") or []:
+        out.append(f"  돌지 못한 검사: {reason}")
     return "\n".join(out)
 
 
@@ -296,6 +300,7 @@ def _run_one(path: Path, profile: dict, args, backend) -> dict | None:
         fps=args.fps,
         busy_spans=busy_spans,
         job_rules=rules,
+        cast=getattr(args, "_cast", None),
     ))
     fixed = result.events
     report = result.extra["report"]
@@ -844,6 +849,12 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--web", action="store_true",
                     help="규범 용례에 없는 것을 위키백과에서도 찾는다. "
                          "**낱말만 보낸다** — 대사는 나가지 않는다. 기본은 끔")
+    ap.add_argument("--cast", type=Path,
+                    help="캐릭터 시트(--characters로 만든 .characters.tsv). "
+                         "'말투 지정' 칸을 채워 주면 T17(정한 말투를 벗어난 자리)이 "
+                         "돈다. **주지 않으면 T17은 돌지 않는다** — 같은 인물이 "
+                         "존댓말과 반말을 섞는 것은 상대가 다르면 정상이고, 자막에 "
+                         "상대는 표시되지 않기 때문이다")
     ap.add_argument("--characters", action="store_true",
                     help="등장인물을 뽑아 캐릭터 분석 문서를 만든다. **KNP 시트와 다른 "
                          "문서다** — KNP는 고유명사 표기를, 이것은 말투와 인물 관계를 "
@@ -1015,6 +1026,25 @@ def main(argv: list[str] | None = None) -> int:
         except CorrectorUnavailable as e:
             # 못 돌렸다는 사실을 숨기지 않는다 — 통과로 보이면 안 된다.
             print(f"한국어 교정 레인을 건너뜁니다: {e}", file=sys.stderr)
+
+    # 캐릭터 시트는 **한 번만 읽는다.** 파일마다 읽으면 같은 표를 몇 번씩 읽는다.
+    args._cast = None
+    if getattr(args, "cast", None):
+        from . import characters as _characters
+        try:
+            people = _characters.read_tsv(args.cast)
+        except OSError as exc:
+            print(f"캐릭터 시트를 읽지 못했습니다: {exc}", file=sys.stderr)
+            return 2
+        args._cast = {p.name: p.declared_tone for p in people if p.declared_tone}
+        # **채워지지 않았으면 그렇게 말한다.** 조용히 넘기면 T17이 돈 것처럼 보인다.
+        if args._cast:
+            print(f"캐릭터 시트: 말투를 정한 인물 {len(args._cast)}명 "
+                  f"(전체 {len(people)}명)", file=sys.stderr)
+        else:
+            print(f"캐릭터 시트에 '말투 지정' 칸이 비어 있어 T17은 돌지 않습니다 "
+                  f"(인물 {len(people)}명). 칸을 채우면 정한 말투를 벗어난 자리를 "
+                  f"찾습니다.", file=sys.stderr)
 
     args._media = media
     reports = []

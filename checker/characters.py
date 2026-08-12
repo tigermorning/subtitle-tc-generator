@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from . import formality
 from .checks import SPEAKER_ID_RE
@@ -71,6 +72,13 @@ class Character:
     #   "인물 성격 파악에 따른 말투, 단어 설정이 중요함. … 모든 인물들의 말투가
     #    번역가의 말투로 설정되었다는 뜻이기 때문에 좋은 번역이 아님.
     #    (ex.) 성별, 나이, 직업, 경력, 싸가지 없는 성격, 비꼬기 좋아하는 성격 등"
+    # **사람이 정하는 말투.** 잰 말투(`speech`)와 다르다 — 잰 것은 자막이 지금 어떤지고,
+    # 이것은 그 인물이 어떠해야 하는지다. T17(말투 혼용) 검사가 이 칸을 본다.
+    #
+    # 이 칸이 없으면 T17을 돌 수 없다. 같은 인물이 존댓말과 반말을 섞는 것은 **상대가
+    # 다르면 정상**이고, 자막에 상대는 표시되지 않는다. 그래서 "이 인물은 이렇게
+    # 말한다"를 사람이 적어 주어야 어긋난 자리를 가릴 수 있다.
+    declared_tone: str = ""                          # 합니다체 | 해요체 | 반말
     gender: str = ""                                 # 성별
     age: str = ""                                    # 나이
     job: str = ""                                    # 직업
@@ -240,7 +248,7 @@ def to_tsv(people: list[Character]) -> str:
     근거를 칸으로 두는 것은 KNP 관례를 따른 것이다 — 출처 없는 정보는 감수에서
     되돌아온다.
     """
-    head = ["이름", "대사 수", "처음", "말투", "합니다체", "해요체", "유보",
+    head = ["이름", "대사 수", "처음", "말투", "말투 지정", "합니다체", "해요체", "유보",
             "부르는 호칭", "관계",
             # 아래 다섯은 작업자 자료가 이름 붙인 항목이다(성별·나이·직업·경력·성격).
             "성별", "나이", "직업", "경력", "성격",
@@ -259,6 +267,8 @@ def to_tsv(people: list[Character]) -> str:
         rows.append("\t".join([
             who.name, str(who.lines), f"#{who.first_at}",
             who.dominant or "확인 필요",
+            # **비워 두면 T17이 돌지 않는다.** 채우라고 적어 둔다.
+            who.declared_tone or "정해 주세요",
             str(counts.get("합니다체", 0)), str(counts.get("해요체", 0)),
             str((who.speech or {}).get("undecided", 0)),
             calls, relations,
@@ -342,6 +352,77 @@ def to_markdown(people: list[Character], counts: dict, title: str = "") -> str:
     out.append("사진은 **주소만** 적었습니다. 저작권물이므로 납품 문서에 동봉할지는 "
                "라이선스를 보고 판단하십시오.")
     return "\n".join(out)
+
+
+PLACEHOLDERS = {"확인 필요", "정해 주세요", "-", "—", ""}
+
+
+def read_tsv(path: Path) -> list[Character]:
+    """작업자가 채운 시트를 되읽는다. **칸 순서가 아니라 머리글로 찾는다.**
+
+    사람이 엑셀에서 칸을 옮기거나 칸을 더 붙이는 것이 실제로 일어난다. 순서로 읽으면
+    그때 조용히 엉뚱한 값이 들어온다.
+
+    `확인 필요`·`정해 주세요` 같은 자리표시자는 **빈 값으로 읽는다** — 우리가 적어 낸
+    글자를 사람이 채운 것으로 착각하면 안 된다.
+    """
+    text = Path(path).read_text(encoding="utf-8-sig")
+    rows = [line.split("\t") for line in text.splitlines() if line.strip()]
+    if not rows:
+        return []
+
+    head = [h.strip() for h in rows[0]]
+    index = {name: i for i, name in enumerate(head)}
+
+    def cell(row: list[str], name: str) -> str:
+        i = index.get(name)
+        if i is None or i >= len(row):
+            return ""
+        value = row[i].strip()
+        return "" if value in PLACEHOLDERS else value
+
+    people: list[Character] = []
+    for row in rows[1:]:
+        name = cell(row, "이름")
+        if not name:
+            continue
+        who = Character(name=name)
+        who.declared_tone = _tone_of(cell(row, "말투 지정"))
+        who.gender = cell(row, "성별")
+        who.age = cell(row, "나이")
+        who.job = cell(row, "직업")
+        who.career = cell(row, "경력")
+        who.traits = cell(row, "성격")
+        who.photo = cell(row, "사진")
+        who.photo_licence = cell(row, "사진 라이선스")
+        who.origin = cell(row, "근거")
+        for pair in cell(row, "관계").split(";"):
+            key, _, value = pair.partition(":")
+            if key.strip() and value.strip():
+                who.relations[key.strip()] = value.strip()
+        try:
+            who.lines = int(cell(row, "대사 수") or 0)
+        except ValueError:
+            who.lines = 0
+        people.append(who)
+    return people
+
+
+# 사람이 적는 말이 한 가지일 리 없다. 같은 뜻으로 쓰는 것들을 받아 준다 —
+# **모르는 말이 오면 빈 값으로 둔다**(짐작해서 한쪽으로 떨어뜨리지 않는다).
+TONE_WORDS = {
+    "합니다체": ("합니다체", "하십시오체", "격식체", "격식"),
+    "해요체": ("해요체", "비격식", "두루높임"),
+    "반말": ("반말", "해체", "낮춤", "해라체", "평어"),
+}
+
+
+def _tone_of(word: str) -> str:
+    word = (word or "").strip().replace(" ", "")
+    for level, spellings in TONE_WORDS.items():
+        if word in spellings:
+            return level
+    return ""
 
 
 def summarize(people: list[Character]) -> dict:

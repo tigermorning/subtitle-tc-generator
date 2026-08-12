@@ -314,16 +314,21 @@ def excerpt(event: Event, line_no: int | None, limit: int = 60) -> str:
 def run_checks(events: list[Event], profile: dict, children: bool = False,
                fps: float | None = None,
                busy_spans: list[tuple[int, int]] | None = None,
-               job_rules=None):
+               job_rules=None, cast: dict[str, str] | None = None):
     """프로파일이 지정한 검사를 이벤트마다 돌린다.
 
-    반환: (violations, unimplemented_check_names)
+    반환: (violations, unimplemented_check_names, skipped_reasons)
     """
     from .model import Violation
 
     ctx = {"profile": profile, "limits": profile.get("limits") or {},
            "children": children, "fps": fps, "busy_spans": busy_spans,
-           "job_rules": job_rules}
+           "job_rules": job_rules,
+           # 캐릭터 시트의 `이름 -> 정한 말투`. 없으면 T17이 돌지 않는다.
+           "cast": cast or {},
+           # **자료가 없어 못 돈 검사.** 구현은 돼 있는데 입력이 없어 건너뛴 것들이다.
+           # 미구현과 다르지만, 조용히 빠지면 똑같이 "통과"로 보인다(규칙 9).
+           "skipped": []}
 
     limits = ctx["limits"]
     speeds = limits.get("reading_speed_cps") or {}
@@ -392,7 +397,7 @@ def run_checks(events: list[Event], profile: dict, children: bool = False,
                     )
 
     violations.sort(key=lambda v: (v.event_index, v.rule_id))
-    return violations, unimplemented
+    return violations, unimplemented, ctx["skipped"]
 
 
 # --- 문서 단위 검사 -------------------------------------------------------
@@ -627,6 +632,58 @@ def _gap(events: list[Event], ctx: dict):
             out.append((cur.index, None, f"앞 자막과 {-gap}ms 겹칩니다"))
         elif gap < min_gap:
             out.append((cur.index, None, f"간격 {gap}ms — 최소 {min_gap:.0f}ms"))
+    return out
+
+
+def _topic(word: str) -> str:
+    """받침에 맞는 주제 조사. `민수는` / `경위는`이 아니라 `민수는` / `김 경위는`."""
+    last = (word or "")[-1:]
+    if not ("가" <= last <= "힣"):
+        return "은(는)"
+    return "은" if (ord(last) - 0xAC00) % 28 else "는"
+
+
+@doc_check("formality_inconsistent")
+def _formality_inconsistent(events: list[Event], ctx: dict):
+    """같은 인물이 정해진 말투를 벗어난 자리. **캐릭터 시트가 있어야 돈다.**
+
+    프로파일에 T17로 선언돼 있고 오래 미구현이었다. 구현이 미뤄진 이유가 있다 —
+    **같은 인물이 존댓말과 반말을 섞는 것은 상대가 다르면 정상**이고, 자막에 상대는
+    표시되지 않는다. 관계를 모르는 채 지적하면 오답이 쏟아진다.
+
+    그래서 사람이 "이 인물은 이렇게 말한다"를 시트에 적어 주면(`말투 지정`) 거기서
+    벗어난 자리만 가린다. 하나의 작품을 여러 작업자가 나누어 하기 때문에 이 어긋남이
+    실제로 생긴다 — 작업 원칙도 "극소수의 예외를 제외하고 모두 서로서로 존댓말"이고
+    예외는 인물마다 다르다.
+
+    **확정된 말투만 견준다.** `해야`(문장 중간)와 `뭐야`(반말 종결)를 줄 끝만 보고
+    가를 수 없으므로 유보는 넘긴다(`formality.level_of`가 `None`을 준다).
+    반말로 정해 둔 인물도 그 줄이 **존댓말로 확정되면** 어긋난 것이 맞다.
+    """
+    cast = ctx.get("cast") or {}
+    if not cast:
+        # **돌지 않았다는 사실을 남긴다.** 조용히 빈 목록을 내면 통과로 보인다.
+        ctx.setdefault("skipped", []).append(
+            "T17 (formality_inconsistent): 캐릭터 시트의 '말투 지정' 칸이 필요합니다"
+            " — 관계를 모르는 채 말투 혼용을 지적하면 오답이 됩니다")
+        return []
+
+    from .formality import level_of
+
+    out = []
+    for ev in events:
+        for line_no, line in enumerate(ev.lines, 1):
+            found = SPEAKER_ID_RE.match(strip_tags(line))
+            if not (found and found.group(2).strip()):
+                continue                    # 화자를 모르면 누구의 말투인지 알 수 없다
+            want = cast.get(found.group(1).strip())
+            if not want:
+                continue                    # 정해 주지 않은 인물은 건드리지 않는다
+            got = level_of(found.group(2))
+            if got and got != want:
+                who = found.group(1).strip()
+                out.append((ev.index, line_no,
+                            f"{who}{_topic(who)} {want}로 정했는데 {got}입니다"))
     return out
 
 
