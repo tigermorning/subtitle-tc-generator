@@ -1,0 +1,35 @@
+schema_version: 1
+
+# 예능 / 리얼다큐. 자료가 이 장르에 대해 말하는 것은 **TC 길이 하나뿐**이다.
+# 그래서 하나만 적는다 — 없는 값을 지어내지 않는다(규칙 9).
+#
+# 호칭 규칙은 658·659행이 "다큐/리얼리티 쇼"를 묶어 말하므로 리얼리티 쪽을 따른다.
+genre: variety
+label: "예능 / 리얼다큐"
+
+source:
+  official: false
+  client: "작업자 실무 자료 (rules/sources/작업자-자료/작업 기본 원칙.txt)"
+  section: "590·658·659행"
+  revision: "2026-08-12"
+  verified: "2026-08-12"
+
+address:
+  forbid_ssi: true                  # 658행이 "다큐/리얼리티 쇼"를 함께 묶는다
+  forbid_super_honorific: true
+
+spotting:
+  recommended_ms: [null, 2000]      # "2초 이하" — 하한은 자료에 없다
+  recommended_note: "예능·리얼다큐 권장 2초 이하 (작업자 자료 590행)"
+
+rules:
+  - id: G01
+    clause: "작업자 자료 658행 / 호칭"
+    check: honorific_ssi_used
+    auto: false
+    message: "다큐·리얼리티에서는 '~씨' 호칭을 쓰지 않습니다."
+  - id: G02
+    clause: "작업자 자료 659행 / 극존칭"
+    check: super_honorific_used
+    auto: false
+    message: "다큐·리얼리티에서는 극존칭을 쓰지 않습니다."

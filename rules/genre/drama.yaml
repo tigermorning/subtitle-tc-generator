@@ -1,0 +1,36 @@
+schema_version: 1
+
+# 드라마 — **멜로도 여기에 들어간다.** 사용자 확인: "멜로는 일반 대화체이면 된다."
+# 빈 프로파일을 하나 더 만들면 상속만 늘고 얻는 것이 없다.
+#
+# 느와르도 별도 프로파일을 만들지 않았다. 거친 표현·욕설은 이미 **플랫폼 규정**이
+# 정한다(`censorship.allowed: false` = 검열 금지 = 동등 강도로 옮긴다). 장르가 아니라
+# **캐릭터**가 그 인물이 그렇게 말하는지를 정한다 — 캐릭터 분석 문서의 일이다
+# (`checker/characters.py`).
+genre: drama
+label: "드라마 (멜로·느와르 포함)"
+
+source:
+  official: false
+  client: "작업자 실무 자료 (rules/sources/작업자-자료/작업 기본 원칙.txt)"
+  section: "590·658·659행"
+  revision: "2026-08-12"
+  verified: "2026-08-12"
+
+formality:
+  # 말투는 장르가 정하지 않는다. **인물 관계가 정한다** — 플랫폼 프로파일의
+  # `formality.decide_by: [context, relationship, era]`가 이미 그렇게 적고 있고,
+  # `never_decide_by: [gender_only, age_only]`로 못 박아 두었다.
+  #
+  # 작업 원칙은 "극소수의 예외를 제외하고 모두 서로서로 존댓말"이다. 관계를 모를 때
+  # 존댓말로 두는 것은 이미 1차 번역 프롬프트가 하고 있다.
+  prefer: null
+  polite_allowed: true
+
+address:
+  forbid_ssi: false                 # 658행: "드라마에선 가능"
+  forbid_super_honorific: false     # 659행: "드라마에선 가능"
+
+spotting:
+  recommended_ms: [2000, 3000]
+  recommended_note: "드라마 권장 2~3초 (작업자 자료 590행)"

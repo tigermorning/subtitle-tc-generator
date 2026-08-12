@@ -14,6 +14,7 @@ import sys
 from pathlib import Path
 
 from . import available_profiles, load_profile, ProfileError
+from . import genre as _genre
 from .profile import load_profile_file
 from .korean import CorrectorUnavailable, load_backend
 from .parsers import parse
@@ -77,6 +78,34 @@ def _format_text(report: dict, path: Path) -> str:
         if len(report["spot_suggestions"]) > 8:
             out.append(f"    … 외 {len(report['spot_suggestions']) - 8}건")
 
+    if report.get("genre"):
+        src = report.get("genre_source") or {}
+        out.append(f"  장르: {report['genre']}"
+                   + (f" ({src.get('section')} — {src.get('client', '')})" if src else ""))
+    # **권장이지 규정이 아니다.** 위반 건수에 섞지 않는다.
+    if report.get("off_recommendation"):
+        off = report["off_recommendation"]
+        out.append(f"  권장 표시 시간을 벗어난 자막 {len(off)}개 "
+                   f"(규정 위반은 아닙니다 — {off[0]['note']})")
+        for row in off[:8]:
+            out.append(f"    #{row['event_index']} {row['reason']}")
+        if len(off) > 8:
+            out.append(f"    … 외 {len(off) - 8}개")
+    if report.get("formality"):
+        fm = report["formality"]
+        ratio = fm.get("formal_ratio")
+        if ratio is None:
+            out.append(f"  말투: 확정된 종결어미가 없어 재지 못했습니다"
+                       f"(유보 {fm['undecided']}개)")
+        else:
+            # **판정하지 않는다.** '가끔 요를 쓰는 것은 허용된다'는 확인을 받았고,
+            # 몇 퍼센트까지가 '가끔'인지는 완성본으로 재기 전까지 모른다.
+            out.append(f"  말투: {fm['prefer']} 권장 — 합니다체 {ratio:.0%} "
+                       f"(합니다체 {fm['counts']['합니다체']} / "
+                       f"해요체 {fm['counts']['해요체']}, 유보 {fm['undecided']})")
+            if fm["counts"]["해요체"]:
+                out.append("    해요체가 섞인 것은 허용됩니다. 기준선이 없어 "
+                           "판정하지 않고 숫자만 냅니다.")
     if report.get("job_note"):
         out.append(f"  ⚠ {report['job_note']}")
     if report.get("position_suggestions"):
@@ -297,6 +326,21 @@ def _run_one(path: Path, profile: dict, args, backend) -> dict | None:
         if guesses:
             report["position_suggestions"] = [
                 {"event_index": s.event_index, "reason": s.reason} for s in guesses]
+
+    # 장르는 **권장이지 규정이 아니다.** 위반 목록에 넣지 않고 숫자로 낸다 —
+    # 플랫폼이 정한 최소·최대(`limits`)를 어긴 것과 무게가 다르다(규칙 4·5).
+    if profile.get("genre"):
+        report["genre"] = profile["genre"]
+        report["genre_source"] = profile.get("genre_source") or {}
+        off = _genre.off_recommendation(fixed, profile)
+        if off:
+            report["off_recommendation"] = off
+        # 다큐 합니다체 비율. **임계값을 두지 않았다** — '가끔 요를 쓰는 것은
+        # 허용된다'는 확인을 받았고, 몇 퍼센트까지가 '가끔'인지는 완성본으로 재야 안다.
+        prefer = (profile.get("formality") or {}).get("prefer")
+        if prefer:
+            from .formality import summary as _formality_summary
+            report["formality"] = {"prefer": prefer, **_formality_summary(fixed)}
 
     # 프로파일을 잘못 고르면 지적이 통째로 뒤집힌다. 자막 표기로 유추해 어긋나면 알린다.
     from .detect import mismatch_warning
@@ -578,8 +622,10 @@ def _generate_mode(args, ap) -> int:
     if not args.video.is_file():
         ap.error(f"영상을 찾지 못했습니다: {args.video}")
 
-    profile = (load_profile_file(args.profile) if args.profile
-               else load_profile(args.platform, args.lang, args.kind))
+    profile = _genre.apply(
+        (load_profile_file(args.profile) if args.profile
+         else load_profile(args.platform, args.lang, args.kind)),
+        getattr(args, "genre", None))
     print(f"프로파일: {profile.get('platform')} {profile.get('language')} "
           f"{profile.get('kind')}")
 
@@ -690,6 +736,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("-l", "--lang", default="ko")
     ap.add_argument("-k", "--kind", choices=["sdh", "translation"], default="translation")
     ap.add_argument("--children", action="store_true", help="아동 프로그램 기준 적용")
+    ap.add_argument("--genre", choices=["documentary", "drama", "variety"],
+                    help="장르를 플랫폼 프로파일 위에 얹는다. 호칭 규칙과 권장 표시 "
+                         "시간이 달라진다(작업자 자료 590·658·659행). "
+                         "멜로는 drama, 느와르도 drama를 쓴다 — 거친 표현은 장르가 "
+                         "아니라 캐릭터가 정하고 검열 금지는 이미 플랫폼 규정이다")
     ap.add_argument("--video", type=Path,
                     help="영상 파일. 프레임레이트를 자동으로 읽고 --spot에 쓴다(ffmpeg 필요)")
     ap.add_argument("--spot", action="store_true",
@@ -860,6 +911,9 @@ def main(argv: list[str] | None = None) -> int:
     try:
         profile = (load_profile_file(args.profile) if args.profile
                    else load_profile(args.platform, args.lang, args.kind))
+        # 장르는 **플랫폼 프로파일 위에 얹는다.** 자료가 장르로 타임코드 길이와
+        # 호칭 규칙을 가르므로 프롬프트가 아니라 이 층에 있어야 검사기가 본다.
+        profile = _genre.apply(profile, getattr(args, "genre", None))
     except ProfileError as e:
         print(f"프로파일 오류: {e}", file=sys.stderr)
         return 2

@@ -2216,6 +2216,78 @@ ok("모델을 주지 않으면 기본값을 쓴다",
    _Cli.__init__.__defaults__[0] is None)
 
 
+# --- 장르 겹치기 -------------------------------------------------------------
+# 장르를 프롬프트가 아니라 **프로파일 층**에 두는 이유: 작업자 자료 590행이 장르로
+# 타임코드 길이를 가른다. 프롬프트에 적으면 검사기가 모른다.
+# (`translate.DOCUMENTARY_RULES`가 죽은 코드로 남아 있던 이유가 그것이다.)
+
+from checker import genre as _gn  # noqa: E402
+
+_gnames = {g["genre"] for g in _gn.available()}
+ok("장르 셋", _gnames == {"documentary", "drama", "variety"}, str(sorted(_gnames)))
+# 근거 없는 프로파일을 만들지 않는다 — 멜로는 드라마, 느와르는 캐릭터 문제다.
+ok("멜로·느와르 프로파일은 만들지 않았다",
+   not {"melodrama", "noir"} & _gnames, str(sorted(_gnames)))
+ok("장르마다 출처가 있다",
+   all(g["source"].get("client") for g in _gn.available()))
+
+_gbase = load_profile("netflix", "ko", "sdh")
+_gdoc = _gn.apply(_gbase, "documentary")
+_gdrama = _gn.apply(_gbase, "drama")
+
+ok("장르를 주지 않으면 그대로", _gn.apply(_gbase, None) is _gbase)
+ok("다큐는 ~씨를 막는다", _gdoc["address"]["forbid_ssi"] is True)
+ok("드라마는 ~씨를 허용한다", _gdrama["address"]["forbid_ssi"] is False)
+ok("장르마다 권장 표시 시간이 다르다",
+   _gn.recommended_spotting(_gdoc)[:2] == (3000, 5000)
+   and _gn.recommended_spotting(_gdrama)[:2] == (2000, 3000))
+# **출처를 덮어쓰지 않는다.** 플랫폼 규정과 장르 관행은 근거의 무게가 다르다.
+ok("플랫폼 출처가 살아 있다", _gdoc["source"]["official"] is True)
+ok("장르 출처를 따로 남긴다", "658" in _gdoc["genre_source"]["section"],
+   str(_gdoc.get("genre_source")))
+ok("얹어도 원본을 바꾸지 않는다", "genre" not in _gbase)
+
+def _gev(text, index, start=0, end=4000):
+    # 위쪽 `ev` 도우미는 루프 변수에 덮여 있다. 여기서 쓸 것을 따로 만든다.
+    return {"index": index, "start_ms": start, "end_ms": end, "text": text}
+
+
+_gevs = [
+    _gev("민수 씨 어디 계십니까", 1, 0, 4000),
+    _gev("[민수] 여기 있습니다", 2, 4000, 8000),      # 화자명은 호칭이 아니다
+    _gev("씨앗을 심었습니다", 3, 8000, 12000),         # 낱말
+    _gev("그 씨 말입니까", 4, 12000, 16000),           # 지시어 — 거른다
+]
+_gdocids = [(v["event_index"]) for v in check_events(_gevs, _gdoc, fps=23.976)["violations"]
+            if v["rule_id"] == "G01"]
+ok("다큐에서 이름 뒤 ~씨를 잡는다", _gdocids == [1], str(_gdocids))
+ok("화자명·낱말·지시어는 잡지 않는다", 2 not in _gdocids and 3 not in _gdocids
+   and 4 not in _gdocids, str(_gdocids))
+ok("드라마에서는 잡지 않는다",
+   not [v for v in check_events(_gevs, _gdrama, fps=23.976)["violations"]
+        if v["rule_id"] == "G01"])
+# 극존칭은 자료에 정의가 없어 무늬를 지어내지 않았다. **미구현으로 남겨 리포트에
+# 뜨게 한다** — 조용히 통과시키면 "전부 통과"가 거짓말이 된다(규칙 9).
+ok("극존칭은 미구현으로 밝힌다",
+   any("super_honorific" in u
+       for u in check_events(_gevs, _gdoc, fps=23.976)["unimplemented_checks"]))
+
+# 권장 이탈은 **위반이 아니라 목록**이다(규칙 4·5).
+_goff = _gn.off_recommendation([_PEvent(1, 0, 2000, "짧다"),
+                                _PEvent(2, 2000, 6000, "맞다"),
+                                _PEvent(3, 6000, 16000, "길다")], _gdoc)
+ok("권장 이탈을 목록으로 낸다", [r["event_index"] for r in _goff] == [1, 3], str(_goff))
+ok("권장 이탈은 위반 목록에 없다",
+   not [v for v in check_events(_gevs, _gdoc, fps=23.976)["violations"]
+        if "권장" in v["message"]])
+
+try:
+    _gn.apply(_gbase, "없는장르")
+    ok("모르는 장르는 예외", False, "예외가 나지 않았다")
+except ProfileError:
+    ok("모르는 장르는 예외", True)
+
+
 # --- 결과 ---------------------------------------------------------------
 
 print(f"통과 {PASSED}건")

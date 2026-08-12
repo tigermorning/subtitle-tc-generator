@@ -525,6 +525,37 @@ def _colon_speaker(ev: Event, ctx: dict):
             yield line_no, f"'{found.group(3)}:' — 대본 표기가 그대로 남았습니다"
 
 
+# 이름 뒤 `~씨`. **앞에 이름이 있어야 호칭이다** — `씨앗`·`아무씨`가 아니라 `민수 씨`
+# 처럼 사람 이름(또는 성) 뒤에 오는 것만 본다. 한 음절 성(`김 씨`)도 실무에서 쓰인다.
+HONORIFIC_SSI = re.compile(r"(?<![가-힣])([가-힣]{1,4})\s*씨(?![가-힣])")
+
+# `씨` 앞에 와도 호칭이 아닌 것들. 목록으로 거르는 것은 무늬로 거르는 것보다 좁지만,
+# **넓게 잡아 오답을 내는 것보다 좁게 잡는 쪽**을 택한다(오답 0이 먼저다).
+NOT_HONORIFIC_BEFORE_SSI = {"한", "그", "이", "저", "무슨", "어느", "옆", "같은"}
+
+
+@check("honorific_ssi_used")
+def _honorific_ssi(ev: Event, ctx: dict):
+    """다큐·리얼리티에서 쓰지 않는 `~씨` 호칭.
+
+    작업자 자료 658행: "호칭: 다큐/리얼리티 쇼에서는 '~씨' 사용하지 말 것.
+    드라마에선 가능". 그래서 이 검사는 **장르 겹치기가 켠 프로파일에서만** 돈다
+    (`rules/genre/documentary.yaml`, `variety.yaml`).
+
+    **자동으로 고치지 않는다.** `민수 씨`를 무엇으로 바꿀지는 인물 관계에 달렸고
+    (이름만? 직함? 뺀다?) 문장을 다시 써야 하는 일이다.
+    """
+    if not ((ctx.get("profile") or {}).get("address") or {}).get("forbid_ssi"):
+        return
+    for line_no, line in enumerate(ev.lines, 1):
+        # 화자명·효과음은 대사가 아니다. `[민수]`의 이름을 호칭으로 잡으면 안 된다.
+        body = re.sub(r"[\[(][^)\]]*[\])]|\{[^}]*\}", " ", strip_tags(line))
+        for found in HONORIFIC_SSI.finditer(body):
+            if found.group(1) in NOT_HONORIFIC_BEFORE_SSI:
+                continue
+            yield line_no, f"'{found.group(0).strip()}' — 다큐·리얼리티에서는 쓰지 않습니다"
+
+
 @check("forbidden_punctuation")
 def _forbidden_punctuation(ev: Event, ctx: dict):
     """프로파일이 금지한 문장부호가 대사에 들어갔는지.
