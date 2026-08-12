@@ -455,6 +455,15 @@ class MainWindow(QMainWindow):
         seconds = int(time.time() - self._started_at)
         self.elapsed_label.setText(f"{seconds // 60}:{seconds % 60:02d} 경과")
 
+    def _note_ui(self, text: str) -> None:
+        """일이 보내는 말을 화면에만 보인다. 로그는 `Job.say`가 이미 남겼다.
+
+        일하는 실에서 남기는 것이 낫다 — UI 실이 밀려 있으면 화면 기록은 늦게 오는데,
+        로그는 **실제로 언제 끝났는지**를 알려 줘야 한다.
+        """
+        self.statusBar().showMessage(text)
+        self.progress_log.appendPlainText(text)
+
     def _note(self, text: str) -> None:
         """진행 한 줄. 상태줄·기록 창·로그 파일에 함께 남긴다.
 
@@ -519,7 +528,10 @@ class MainWindow(QMainWindow):
             self._note(f"실패: {why}")
             QMessageBox.warning(self, "작업을 마치지 못했습니다", why)
 
-        thread = jobs.start(job, done, self._note, failed)
+        # **일이 보내는 말은 여기서 로그에 다시 쓰지 않는다.** `Job.say`가 이미
+        # 일하는 실에서 즉시 남긴다. 두 번 쓰이면 같은 줄이 두 벌로 섞여 로그를
+        # 읽기 어렵다 — 멈춤을 조사할 때 실제로 잘못 읽을 뻔했다(2026-08-12).
+        thread = jobs.start(job, done, self._note_ui, failed)
         self._threads.append(thread)
 
     def run_generate(self) -> None:

@@ -3,7 +3,65 @@
 이 파일은 **작업을 이어받기 위해** 있다. `CLAUDE.md`가 "이미 틀렸다가 바로잡은 규칙"을
 담고, 이 파일은 **아직 안 한 것과 왜 그 순서인지**를 담는다.
 
-마지막 갱신: 2026-08-12 · 마지막 커밋 `81f7c13`+멈춤 조사 · 시험 770건 통과
+마지막 갱신: 2026-08-12 · 마지막 커밋 `25ce0d3`+비동기 mpv · 시험 776건 통과
+
+---
+
+## 0-A. 지금 막혀 있는 것 — **여기부터**
+
+### 실사용 멈춤 (AppHangB1) — 고쳤다고 보지만 확인 못 했다
+
+**증상.** 영상에서 자막을 만들면 생성은 끝까지 가는데(자막 208개까지 나온다) **그 뒤
+UI가 멈춘다.** Windows 이벤트 로그가 `AppHangB1`을 남긴다 — 크래시가 아니라 UI 실이
+이벤트를 못 돌린 것이고, 파이썬 예외 기록은 없다. 두 번 재현했다(22:26, 22:36).
+
+**밝혀낸 것.**
+
+- 생성 자체는 문제가 없다. `.work/01-generate.srt`에 자막 208개가 남는다.
+- Qt 쪽은 빠르다. 같은 규모(자막 210개·지적 118건)를 mpv 없이 재현해 재 봤다:
+  `model.replace` 8.9ms · 파형 10.0ms · 지적표 9.0ms · `_refresh_stages` 1.0ms.
+- 남는 것은 **UI 실에서 도는 동기 mpv 왕복**이다. `python-mpv`의 `command()`는 답을
+  기다린다.
+- ONNX(VAD)는 이미 단일 스레드다(`inter_op=1, intra_op=1`) — CPU 포화 가설은 죽었다.
+
+**한 조치 둘.**
+
+1. `fit_subtitle_scale()`을 100ms 시계에서 빼고 `resizeEvent`로 옮겼다. mpv 왕복을
+   초당 20번 UI 실에서 기다리던 것이다(그 함수 독스트링이 "창 크기가 바뀔 때마다"라고
+   적고 있었다). 멈춰 있으면 시계를 500ms로 늦춘다. → 커밋 `25ce0d3`
+2. `set_subtitles`/`reload_subtitles`를 `command_async`로 바꿨다. 생성 직후 자막 208개를
+   mpv에 **처음 얹는** 자리가 `sub-add`이고 그것이 가장 유력하다. → **아직 커밋 전이면
+   `app/player.py`를 확인**
+
+**다음 사람이 할 일.**
+
+- exe를 재빌드하고 같은 영상으로 다시 돌린다. **그것이 유일한 시험이다.**
+- 여전히 멈추면 다음 후보는 `_sync_position`의 `position_ms`(속성 읽기, 100/500ms마다)와
+  `player.seek`(파형 클릭). 같은 방식으로 비동기화하거나, 재생기 조작을 전부 한 곳으로
+  모아 UI 실에서 mpv를 만지지 않게 한다.
+- **막힌 지점을 증명하지는 못했다.** 스택을 뜨려면 procdump 같은 도구가 필요하다.
+
+**재빌드가 막힐 수 있다.** 멈춘 `자막생성기.exe`가 `dist` 파일을 잠근다. 작업 관리자로
+끝낸 뒤 빌드한다(자막은 `.work/`에 있어 잃는 것이 없다).
+
+```
+cmd.exe /c "..\korean-subtitle-corrector\.venv\Scripts\python.exe -m PyInstaller \
+  --noconfirm --distpath dist --workpath .tmp\build 자막생성기.spec"
+```
+
+`tools/build-exe.bat`은 끝에 `pause`가 있어 자동 실행에서 멈춘다. 위처럼 직접 부른다.
+
+### 실사용 자료가 여기 있다 (평가·재현용)
+
+```
+/mnt/c/Users/user/Desktop/바른번역 글밥아카데미/영어영상 입회 테스트 [2026.04.05]/
+    Sub_en-ko.work/01-generate.srt    자막 208개 — 대본 123 / 전사 62 / 소리 없음 24
+    Sub_en-ko.work/01-source.json     번호별 원문
+    Sub_en-ko.work/manifest.json      단계 기록
+```
+
+**T4(다큐 합니다체 임계값)를 재려면 완성본 자막이 필요하다.** 이 초벌과 사용자의
+완성본을 견주면 임계값도, 오역 검증의 헛플래그율도 실측할 수 있다.
 
 ---
 
@@ -16,8 +74,8 @@
 **시험을 먼저 돌려 기준선을 잡는다.**
 
 ```bash
-python3 tests/run_tests.py                                    # 743건 (GUI 제외)
-cmd.exe /c "..\korean-subtitle-corrector\.venv\Scripts\python.exe tests\run_tests.py"   # 770건 (PySide6 포함)
+python3 tests/run_tests.py                                    # 747건 (GUI 제외)
+cmd.exe /c "..\korean-subtitle-corrector\.venv\Scripts\python.exe tests\run_tests.py"   # 776건 (PySide6 포함)
 ```
 
 시스템 `python3`에는 PySide6가 없다. GUI를 건드리면 반드시 venv 쪽으로도 돌린다.
@@ -119,6 +177,9 @@ recall 100%는 사전 커버리지가 상한이라 원리적으로 불가능하�
 ---
 
 ## 3. 남은 작업 — 이 순서로
+
+**T1~T3, T5~T11이 전부 끝났다.** 남은 것은 T4의 절반(임계값 실측)뿐이고, 그것은 자료를
+기다리는 일이다. 그래서 **다음 할 일은 §0-A(멈춤 확인)와 §4(결정 대기)에 있다.**
 
 순서에 이유가 있다. 뒤 항목이 앞 항목을 전제로 한다.
 
@@ -434,3 +495,9 @@ ep01.work/
 - **`%APPDATA%\자막편집기\` 폴더명과 `SUBTITLE_EDITOR_HOME` 환경변수는 공개
   계약이라 이름을 바꾸지 않는다.** 바꿨다가 시험 2건이 깨졌다.
 - **자료가 없는 프로파일·임계값을 추측해서 만들지 않는다.**
+- **시험이 사용자의 앱 로그에 쓴다.** `%APPDATA%\자막편집기\log.txt`에 `_Tiny 시작`,
+  `배치: spotting` 같은 줄이 있으면 시험이 남긴 것이다 — 실사용 기록으로 오해하면
+  엉뚱한 것을 조사한다. 실제로 두 번 헛짚었다.
+- **로그를 두 곳에서 쓰지 않는다.** `Job.say`(일하는 실)와 `_note`(UI 실)가 같은 줄을
+  각각 남겨 로그가 두 벌로 섞였다. 멈춤 조사에서 잘못 읽을 뻔했다. 지금은 일하는
+  실에서만 남긴다(`_note_ui`가 화면 전용).

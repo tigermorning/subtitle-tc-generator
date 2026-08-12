@@ -2982,6 +2982,35 @@ else:
     ok("생성이 work 경로를 받는다",
        "work_beside" in _uinspect.signature(_uj.GenerateJob.__init__).parameters)
 
+    # 로그가 두 벌로 섞이면 읽을 수 없다. 일이 보내는 말은 **일하는 실에서만** 남긴다 —
+    # UI 실이 밀려 있으면 화면 기록은 늦게 오는데, 로그는 실제로 언제 끝났는지를
+    # 알려 줘야 한다. 중복 때문에 멈춤 조사에서 로그를 잘못 읽을 뻔했다.
+    ok("일이 보내는 말을 화면에만 보인다",
+       "self._note_ui" in _uinspect.getsource(_uw.MainWindow._start))
+    ok("화면 전용 함수는 로그를 안 쓴다",
+       "log(" not in _uinspect.getsource(_uw.MainWindow._note_ui))
+
+
+# --- mpv를 UI 실에서 기다리지 않는다 ------------------------------------------
+# `command()`는 mpv의 답을 기다린다. UI 실에서 부르면 mpv가 늦는 만큼 화면이 멈춘다 —
+# 자막 210개를 처음 얹는 자리에서 실제로 `AppHangB1`이 났다(2026-08-12). 미리 보기는
+# 늦게 반영돼도 되는 일이라 기다릴 이유가 없다.
+
+try:
+    from app import player as _up  # noqa: E402
+except ImportError:
+    ok("자막 얹기는 기다리지 않는다 (PySide6 없어 건너뜀)", True)
+else:
+    for _name in ("set_subtitles", "reload_subtitles"):
+        _src = _uinspect.getsource(getattr(_up.Player, _name))
+        ok(f"{_name}은 기다리지 않는다",
+           "self._async(" in _src and "self._mpv.command(" not in _src, _src[:70])
+    _async_src = _uinspect.getsource(_up.Player._async)
+    ok("command_async를 쓴다", "command_async" in _async_src)
+    # 없는 빌드에서는 동기로 떨어진다 — 조용히 안 하는 것보다 느린 것이 낫다.
+    ok("없는 빌드에서는 동기로 떨어진다", "self._mpv.command(name" in _async_src)
+
+
 
 # --- 결과 ---------------------------------------------------------------
 

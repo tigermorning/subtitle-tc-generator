@@ -157,16 +157,29 @@ class Player:
         """
         # **자막이 하나도 없을 때 `sub-remove`는 예외를 던진다**(실측: SystemError).
         # 그대로 두면 뒤의 `sub-add`까지 못 가서 자막이 조용히 안 뜬다.
-        try:
-            self._mpv.command("sub-remove")
-        except Exception:
-            pass
-        self._mpv.command("sub-add", path, "select")
+        self._async("sub-remove")
+        self._async("sub-add", path, "select")
 
     def reload_subtitles(self) -> None:
         """같은 파일을 다시 읽는다. 편집한 내용을 곧바로 보여 줄 때 쓴다."""
+        self._async("sub-reload")
+
+    def _async(self, name: str, *args) -> None:
+        """mpv에 명령을 **기다리지 않고** 보낸다.
+
+        `command()`는 mpv의 답을 기다린다 — 그것을 UI 실에서 부르면 mpv가 늦는 만큼
+        화면이 멈춘다. 자막 210개를 처음 얹는 자리에서 실제로 `AppHangB1`이 났다
+        (2026-08-12). 미리 보기는 **늦게 반영돼도 되는 일**이라 기다릴 이유가 없다.
+
+        `command_async`가 없는 빌드에서는 동기로 떨어진다 — 조용히 안 하는 것보다
+        느린 것이 낫다.
+        """
         try:
-            self._mpv.command("sub-reload")
+            sender = getattr(self._mpv, "command_async", None)
+            if sender is not None:
+                sender(name, *args)
+            else:
+                self._mpv.command(name, *args)
         except Exception:
             pass
 
