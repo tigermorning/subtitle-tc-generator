@@ -63,6 +63,11 @@ def _format_text(report: dict, path: Path) -> str:
         if notes:
             out.append(f"    확인이 필요한 자리 {len(notes)}곳: "
                        + ", ".join(f"#{n['event_index']}" for n in notes[:8]))
+    if report.get("revision_rounds"):
+        rows = report["revision_rounds"]
+        out.append("  감수 회차: "
+                   + ", ".join(f"{r['stage']}({r['role']}) {r['changed']}곳" for r in rows))
+        out.append(f"    {report.get('revision_stopped_because', '')}")
     if report.get("mistranslation_flags"):
         flags = report["mistranslation_flags"]
         counts = report.get("mistranslation_summary") or {}
@@ -438,6 +443,9 @@ def _run_one(path: Path, profile: dict, args, backend) -> dict | None:
             later = stage_revise(translated, profile, translator=translator,
                                  source={e.index: e.text for e in events},
                                  glossary=glossary, rounds=args.passes - 1,
+                                 max_rounds=(args.max_passes - 1
+                                             if args.max_passes > args.passes else 0),
+                                 settle_at=args.settle_at,
                                  # 캐릭터 시트가 있으면 **정한 말투대로 쓰게** 한다.
                                  # 같은 시트가 T17 검사도 돌린다 — 정하고, 쓰고,
                                  # 검사하는 것이 한 자료다.
@@ -445,6 +453,11 @@ def _run_one(path: Path, profile: dict, args, backend) -> dict | None:
                                  progress=say)
             translated = later.events
             print(f"  {revision_report(later.extra['revisions'], show=6)}")
+            # **멈춘 이유를 남긴다.** "5차에서 멈췄다"만으로는 다 끝난 것인지 상한에
+            # 걸린 것인지 알 수 없고, 상한에 걸린 것은 아직 덜 됐다는 뜻이다.
+            report["revision_stopped_because"] = later.extra["stopped_because"]
+            report["revision_rounds"] = later.extra["rounds"]
+            print(f"  {later.extra['stopped_because']}", file=sys.stderr)
             for row in later.extra["rounds"]:
                 stage_revisions = [r for r in later.extra["revisions"]
                                    if r.stage == row["stage"]]
@@ -988,6 +1001,12 @@ def main(argv: list[str] | None = None) -> int:
     gen.add_argument("--passes", type=int, default=1,
                      help="번역을 몇 차까지 할지. 1차=빠른 초벌, 2차=용어·맥락 감수, "
                           "3차=말맛 윤문(작업자 자료의 단계 그대로)")
+    gen.add_argument("--max-passes", type=int, default=0,
+                     help="수렴을 볼 상한 회차. --passes보다 크게 주면 그 사이에서 "
+                          "**고친 자막이 없어질 때까지** 돈다. 안 주면 --passes만큼만 "
+                          "돈다. 모델은 미사여구를 영원히 만지므로 상한이 필요하다")
+    gen.add_argument("--settle-at", type=int, default=0,
+                     help="한 회차에서 고친 자막이 이 수 이하이면 멈춘다(기본 0)")
     gen.add_argument("--no-knp", action="store_true",
                      help="옆에 있는 KNP 시트를 쓰지 않는다(기본은 찾으면 쓴다)")
     gen.add_argument("--glossary", type=Path,

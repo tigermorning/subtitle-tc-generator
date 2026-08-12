@@ -2729,6 +2729,102 @@ ok("역번역이 실패해도 터지지 않는다", _btdead.extra["summary"] == 
    str(_btdead.extra["summary"]))
 
 
+# --- 누적 표류와 수렴 조건 ----------------------------------------------------
+# `_too_different`는 **직전 단계만** 봤다. 2차가 1.4배, 3차가 또 1.4배면 원문 대비
+# 2배가 되어도 매 회차는 통과한다 — 회차를 설정으로 열어 둔 지금 실제 위험이다.
+
+class _Grower:
+    """회차마다 직전 대비 1.4배로 늘리는 흉내."""
+
+    def __init__(self):
+        self.n = 0
+
+    def ask(self, system, prompt):
+        self.n += 1
+        size = int(10 * (1.4 ** self.n))
+        return "\n".join(f"{line.strip().split('.')[0]}. " + "가" * size
+                         for line in prompt.splitlines()
+                         if line.strip().split(".")[0].strip().isdigit())
+
+
+_drift = [_PEvent(1, 0, 2000, "가" * 10)]
+_loose = _pl.stage_revise(_drift, _trprof, translator=_Grower(), rounds=3)
+# 가드를 회차마다 걸므로 3회차를 돌아도 1차 대비 1.5배를 넘지 않는다.
+ok("누적 표류를 막는다", len(_loose.events[0].text) / 10 <= 1.5,
+   f"{len(_loose.events[0].text) / 10:.2f}배")
+
+# 직전 대비만 보면 어떻게 되는지 — `baseline` 없이 부르면 막지 못한다.
+from checker.revise import revise as _rv  # noqa: E402
+
+_g, _cur = _Grower(), _drift
+for _stage, _role in (("2차", "감수"), ("3차", "윤문"), ("4차", "윤문")):
+    _cur, _ = _rv(_cur, _g, stage=_stage, role=_role)
+ok("baseline 없이는 누적으로 새어 나간다", len(_cur[0].text) / 10 > 1.5,
+   f"{len(_cur[0].text) / 10:.2f}배")
+
+
+class _Settling:
+    """회차가 갈수록 고칠 것이 줄어드는 흉내."""
+
+    def __init__(self):
+        self.n = 0
+
+    def ask(self, system, prompt):
+        self.n += 1
+        body = "바꿈" + "가" * self.n if self.n <= 2 else "바꿈가가"
+        return "\n".join(f"{line.strip().split('.')[0]}. {body}"
+                         for line in prompt.splitlines()
+                         if line.strip().split(".")[0].strip().isdigit())
+
+
+class _Busy:
+    """미사여구를 영원히 만지는 흉내 — 상한이 없으면 안 멈춘다."""
+
+    def __init__(self):
+        self.n = 0
+
+    def ask(self, system, prompt):
+        self.n += 1
+        return "\n".join(f"{line.strip().split('.')[0]}. 고침{self.n}"
+                         for line in prompt.splitlines()
+                         if line.strip().split(".")[0].strip().isdigit())
+
+
+_conv = [_PEvent(1, 0, 2000, "처음")]
+
+# ① 상한을 안 주면 예전처럼 고정 회차로 돈다.
+_fixed = _pl.stage_revise(_conv, _trprof, translator=_Settling(), rounds=3)
+ok("상한이 없으면 고정 회차", [r["stage"] for r in _fixed.extra["rounds"]]
+   == ["2차", "3차", "4차"], str([r["stage"] for r in _fixed.extra["rounds"]]))
+
+# ② 상한이 크면 그 사이에서 수렴을 본다.
+_settled = _pl.stage_revise(_conv, _trprof, translator=_Settling(),
+                            rounds=1, max_rounds=5)
+ok("잠잠해지면 상한 전에 멈춘다", len(_settled.extra["rounds"]) < 5,
+   str([(r["stage"], r["changed"]) for r in _settled.extra["rounds"]]))
+ok("멈춘 이유를 남긴다", "멈췄습니다" in _settled.extra["stopped_because"],
+   _settled.extra["stopped_because"])
+
+# ③ **모델이 고치기를 멈추는 것을 기다리면 안 된다.** 상한이 잡아야 한다.
+_capped = _pl.stage_revise(_conv, _trprof, translator=_Busy(),
+                           rounds=1, max_rounds=4)
+ok("상한이 영원한 손질을 끊는다", len(_capped.extra["rounds"]) == 4,
+   str(len(_capped.extra["rounds"])))
+# **상한에 걸린 것은 아직 덜 됐다는 뜻이다.** 다 끝난 것과 구분해야 한다.
+ok("상한에 걸린 것을 구분해 적는다", "아직 덜 됐습니다" in _capped.extra["stopped_because"],
+   _capped.extra["stopped_because"])
+ok("다 끝난 것과 문구가 다르다",
+   _capped.extra["stopped_because"] != _fixed.extra["stopped_because"])
+
+# ④ 최소 회차는 채운다 — 2차를 안 돌면 오역·용어를 아무도 보지 않는다.
+_minimum = _pl.stage_revise(_conv, _trprof, translator=_Busy(),
+                            rounds=2, max_rounds=6, settle_at=999)
+ok("최소 회차는 채운다", len(_minimum.extra["rounds"]) >= 2,
+   str(len(_minimum.extra["rounds"])))
+ok("임계를 넘기면 최소만 돌고 멈춘다", len(_minimum.extra["rounds"]) == 2,
+   str([(r["stage"], r["changed"]) for r in _minimum.extra["rounds"]]))
+
+
 # --- 결과 ---------------------------------------------------------------
 
 print(f"통과 {PASSED}건")

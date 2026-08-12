@@ -171,16 +171,27 @@ def stage_translate(events: list[Event], profile: dict, *, translator,
 
 def stage_revise(events: list[Event], profile: dict, *, translator,
                  source: dict[int, str] | None = None, glossary=None,
-                 rounds: int = 1, first_round: int = 2,
-                 cast: dict[str, str] | None = None,
+                 rounds: int = 1, first_round: int = 2, max_rounds: int = 0,
+                 settle_at: int = 0, cast: dict[str, str] | None = None,
                  progress: Progress | None = None) -> StageResult:
-    """감수를 `rounds`번 돈다. **회차를 하드코딩하지 않는다.**
+    """감수를 돈다. **회차를 하드코딩하지 않고, 멈춘 이유를 기록한다.**
 
     전에는 두 어댑터가 각자 `("2차", "3차")[:passes - 1]`을 적어 두어 3차를 넘길 수
     없었다. 이제 회차는 인자다.
 
     첫 회차는 **감수**(오역·용어·맥락 — 원문을 함께 보여 준다), 그 뒤는 **윤문**
     (말맛만). 사람이 하는 순서를 그대로 따른 것이다(작업자 자료 569~579행).
+
+    ## 언제 멈추나
+
+    `rounds`가 최소 회차, `max_rounds`가 상한이다. 상한이 최소보다 크면 그 사이에서
+    **수렴을 본다** — 이번 회차가 고친 자막이 `settle_at` 이하이면 멈춘다.
+
+    **모델이 고치기를 멈추는 것을 기다리면 안 된다.** LLM은 미사여구를 영원히 만진다.
+    그래서 "고친 개수"라는 셀 수 있는 것으로 끊고, 상한을 함께 둔다.
+
+    **멈춘 이유를 남긴다.** "5차에서 멈췄다"만으로는 다 끝난 것인지 상한에 걸린
+    것인지 알 수 없다. 상한에 걸린 것은 **아직 덜 됐다는 뜻**이다.
 
     **바꾼 내역을 버리지 않는다.** 전에는 GUI가 `events, _ = revise(...)`로 받아
     무엇이 바뀌었는지 사용자가 볼 수 없었다 — 한국어 위반을 버리던 것과 같은 무늬다.
@@ -191,22 +202,45 @@ def stage_revise(events: list[Event], profile: dict, *, translator,
     current = list(events)
     all_revisions = []
     per_round = []
+    # 1차 번역을 붙잡아 둔다. 회차마다 이것과 견주어 **누적 표류**를 막는다 —
+    # 직전 단계만 보면 매 회차 1.4배씩 늘어 원문 대비 2배가 되어도 통과한다.
+    baseline = {e.index: e.text for e in events}
+    limit = max(rounds, max_rounds)
+    stopped = "회차를 다 돌았습니다"
 
-    for n in range(rounds):
+    for n in range(limit):
         label = f"{first_round + n}차"
         role = "감수" if n == 0 else "윤문"
         say(f"{label} ({role})")
         current, revisions = revise(current, translator, source=source,
                                     glossary=glossary, stage=label, role=role,
-                                    profile=profile, cast=cast, progress=say)
+                                    profile=profile, cast=cast, baseline=baseline,
+                                    progress=say)
+        changed = sum(1 for r in revisions if r.changed)
         all_revisions += revisions
-        per_round.append({"stage": label, "role": role,
-                          "changed": sum(1 for r in revisions if r.changed)})
+        per_round.append({"stage": label, "role": role, "changed": changed})
+
+        # 최소 회차는 채운다 — 2차를 안 돌면 오역·용어를 아무도 보지 않는다.
+        if n + 1 >= rounds and changed <= settle_at:
+            stopped = (f"{label}에서 고친 자막이 {changed}개뿐이라 멈췄습니다"
+                       if n + 1 < limit else "회차를 다 돌았습니다")
+            if n + 1 < limit:
+                say(stopped)
+                break
+    else:
+        if max_rounds and max_rounds > rounds and per_round \
+                and per_round[-1]["changed"] > settle_at:
+            # **상한에 걸린 것은 아직 덜 됐다는 뜻이다.** 다 끝난 것과 구분한다.
+            # 회차 수와 라벨을 함께 적는다 — `2차`부터 세므로 "4회차"가 "5차"다.
+            stopped = (f"상한 {limit}회({per_round[-1]['stage']})까지 돌았지만 "
+                       f"마지막 회차에서 {per_round[-1]['changed']}개를 고쳤습니다 "
+                       f"— 아직 덜 됐습니다")
 
     return StageResult(
         events=current,
         changed=len(_edits(events, current)),
-        extra={"revisions": all_revisions, "rounds": per_round},
+        extra={"revisions": all_revisions, "rounds": per_round,
+               "stopped_because": stopped},
     )
 
 

@@ -136,6 +136,7 @@ def cast_hint(cast: dict[str, str] | None) -> str:
 def revise(events: list[Event], translator, source: dict[int, str] | None = None,
            glossary=None, stage: str = "2차", role: str = "",
            profile: dict | None = None, cast: dict[str, str] | None = None,
+           baseline: dict[int, str] | None = None,
            batch: int = 8, context: int = 2,
            progress=None) -> tuple[list[Event], list[Revision]]:
     """자막을 다시 본다. (고친 자막, 바뀐 내역)
@@ -145,6 +146,9 @@ def revise(events: list[Event], translator, source: dict[int, str] | None = None
 
     `role`이 프롬프트를 고른다(`감수` 또는 `윤문`). `stage`는 사람에게 보이는
     이름일 뿐이다.
+
+    `baseline`은 **1차 번역**이다(번호별). 회차를 여러 번 돌 때 누적 표류를 막는 데
+    쓴다 — 직전 단계만 보면 매 회차 1.4배씩 늘어 원문 대비 2배가 되어도 통과한다.
 
     **전에는 `role`이 없고 `stage`로 프롬프트를 유추했다.** `stage == "2차"`가 아니면
     무조건 윤문 프롬프트를 썼기 때문에 `"4차"`를 넘기면 **에러도 없이** 윤문으로
@@ -195,8 +199,15 @@ def revise(events: list[Event], translator, source: dict[int, str] | None = None
             text = (got.get(event.index) or "").strip()
             # 모델이 형식을 흘리면(`[2차]` 같은 표지) 걷어낸다.
             text = re.sub(r"^\[[^\]]{1,6}\]\s*", "", text)
-            if not text or _too_different(event.text, text):
-                # **의심스러우면 1차를 지킨다.** 2차가 늘 나은 것은 아니다.
+            # **누적 표류를 함께 막는다.** 직전 단계만 보면 2차가 1.4배, 3차가 또
+            # 1.4배로 늘어 원문 대비 2배가 되어도 매 회차는 통과한다. 회차를 설정으로
+            # 열어 둔 지금 이것이 실제 위험이다.
+            origin = (baseline or {}).get(event.index)
+            drifted = _too_different(event.text, text) or (
+                bool(origin) and _too_different(origin, text))
+            if not text or drifted:
+                # **의심스러우면 직전을 지킨다.** 다음 회차가 늘 나은 것은 아니다.
+                # 1차로 되돌리지는 않는다 — 중간 회차가 제대로 고친 것을 버릴 이유가 없다.
                 out.append(Event(event.index, event.start_ms, event.end_ms, event.text))
                 continue
             out.append(Event(event.index, event.start_ms, event.end_ms, text))

@@ -149,6 +149,8 @@ class TranslateJob(Job):
                 events, revisions = later.events, later.extra["revisions"]
                 for row in later.extra["rounds"]:
                     self.say(f"{row['stage']}({row['role']}) {row['changed']}곳 고침")
+                # 상한에 걸린 것과 다 끝난 것을 구분해서 보인다.
+                self.say(later.extra["stopped_because"])
 
             return events, first.extra["notes_by_index"], revisions
         self._guarded(work)
