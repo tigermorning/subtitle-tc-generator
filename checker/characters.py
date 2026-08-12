@@ -66,9 +66,20 @@ class Character:
     mentions: dict[str, int] = field(default_factory=dict)      # 상대 -> 언급 횟수
 
     # 아래는 자막이 증명하지 못한다. 외부 조사나 사람이 채운다.
+    #
+    # **항목을 지어낸 것이 아니다.** 작업자 자료가 무엇을 봐야 하는지 적어 두었다:
+    #   "인물 성격 파악에 따른 말투, 단어 설정이 중요함. … 모든 인물들의 말투가
+    #    번역가의 말투로 설정되었다는 뜻이기 때문에 좋은 번역이 아님.
+    #    (ex.) 성별, 나이, 직업, 경력, 싸가지 없는 성격, 비꼬기 좋아하는 성격 등"
+    gender: str = ""                                 # 성별
+    age: str = ""                                    # 나이
+    job: str = ""                                    # 직업
+    career: str = ""                                 # 경력 (소속·계급 등)
+    family: str = ""                                 # 가족 관계
     traits: str = ""                                 # 성격
     relations: dict[str, str] = field(default_factory=dict)     # 상대 -> 관계
-    photo: str = ""                                  # 로컬 사진 경로
+    photo: str = ""                                  # 로컬 사진 경로 또는 주소
+    photo_licence: str = ""                          # 사진 라이선스 — 동봉 판단 재료
     origin: str = ""                                 # 근거 — 어디서 온 정보인지
 
     @property
@@ -81,8 +92,16 @@ class Character:
 
     @property
     def researched(self) -> bool:
-        """외부 조사가 채워졌는지. 근거 없이 채운 것은 조사로 보지 않는다."""
-        return bool(self.traits) and self.origin not in ("", "모델 제안")
+        """외부 조사가 채워졌는지. **근거 없이 채운 것은 조사로 보지 않는다.**"""
+        filled = any((self.gender, self.age, self.job, self.career, self.traits))
+        return filled and self.origin not in ("", "모델 제안")
+
+    @property
+    def missing(self) -> list[str]:
+        """아직 비어 있는 항목. 문서에 '확인 필요'로 나갈 것들."""
+        labels = {"gender": "성별", "age": "나이", "job": "직업",
+                  "career": "경력", "traits": "성격"}
+        return [name for key, name in labels.items() if not getattr(self, key)]
 
 
 def _body(line: str) -> str:
@@ -163,6 +182,58 @@ def _cross_reference(found: dict[str, Character],
                             used.append(form)
 
 
+def research(people: list[Character], wiki: str, work_title: str = "",
+             limit: int = 0, with_image: bool = True, progress=None) -> dict:
+    """외부 자료에서 성격·사진을 채운다. **기본으로 돌지 않는다** — 부르는 쪽이 켠다.
+
+    나가는 것은 **작품 제목과 인물 이름뿐**이다. 대사·대본은 어떤 경우에도 나가지
+    않는다(규칙 6). 무엇을 보냈는지 돌려주는 사전의 `sent`에 담아 낸다.
+
+    `wiki`는 **사람이 지정한다.** 슬러그를 짐작하면 엉뚱한 작품의 위키를 읽고, 엉뚱한
+    인물 정보는 없는 것보다 나쁘다 — `terms.py`가 "못 찾은 것을 지어내지 않는다"고
+    한 것과 같은 판단이다.
+
+    `limit`을 주면 대사가 많은 인물부터 그만큼만 조사한다. 단역까지 다 부르면 요청이
+    수십 번 나가고, 단역은 위키에 문서가 없는 것이 보통이다.
+    """
+    from . import webchars
+
+    say = progress or (lambda _m: None)
+    webchars.forget()
+    targets = people[:limit] if limit else list(people)
+    found = 0
+
+    for who in targets:
+        try:
+            hit = webchars.lookup(wiki, who.name, work_title, with_image=with_image)
+        except Exception as exc:            # 네트워크·형식 문제로 조사가 멈추면 안 된다
+            say(f"조사 실패({who.name}): {exc}")
+            continue
+        if hit is None:
+            say(f"문서를 못 찾았습니다: {who.name}")
+            continue
+
+        who.gender = who.gender or hit.fields.get("gender", "")
+        who.age = who.age or hit.fields.get("age", "")
+        who.job = who.job or hit.fields.get("job", "")
+        who.career = who.career or hit.fields.get("career", "")
+        who.family = who.family or hit.fields.get("family", "")
+        # **성격은 인포박스에 없다.** 소개 문단이 유일한 재료이고 그것도 요약이라
+        # 그대로 성격이라고 부를 수 없다. 원문을 그대로 두고 사람이 읽게 한다.
+        who.traits = who.traits or hit.summary
+        who.photo = who.photo or hit.image_url
+        who.photo_licence = who.photo_licence or hit.image_licence
+        # 후보가 여럿이었으면 그 사실을 근거에 남긴다 — 엉뚱한 인물일 수 있다.
+        who.origin = hit.url + (" (후보가 여럿이라 확인 필요)" if hit.ambiguous else "")
+        found += 1
+        say(f"{who.name}: {', '.join(k for k in hit.fields) or '칸 없음'}")
+
+    sent = webchars.sent()
+    say(f"인물 {len(targets)}명 중 {found}명을 찾았습니다. "
+        f"밖으로 보낸 것 {len(sent)}건(작품 제목과 인물 이름뿐)")
+    return {"looked_up": len(targets), "found": found, "sent": sent, "wiki": wiki}
+
+
 def to_tsv(people: list[Character]) -> str:
     """표로 낸다. KNP 시트처럼 그대로 붙일 수 있게 탭으로 가른다.
 
@@ -170,20 +241,34 @@ def to_tsv(people: list[Character]) -> str:
     되돌아온다.
     """
     head = ["이름", "대사 수", "처음", "말투", "합니다체", "해요체", "유보",
-            "부르는 호칭", "관계", "성격", "사진", "근거"]
+            "부르는 호칭", "관계",
+            # 아래 다섯은 작업자 자료가 이름 붙인 항목이다(성별·나이·직업·경력·성격).
+            "성별", "나이", "직업", "경력", "성격",
+            "사진", "사진 라이선스", "근거"]
     rows = ["\t".join(head)]
     for who in people:
         counts = (who.speech or {}).get("counts") or {}
         calls = "; ".join(f"{k}->{'/'.join(v)}" for k, v in who.calls.items())
         relations = "; ".join(f"{k}: {v}" for k, v in who.relations.items())
+
+        def cell(value: str) -> str:
+            # 탭이 들어가면 칸이 밀린다. 빈 칸은 '확인 필요'로 둔다 — 빈칸은 지나치고
+            # 글자는 눈에 띈다(규칙 3과 같은 판단).
+            return (value or "확인 필요").replace("\t", " ").replace("\n", " ")
+
         rows.append("\t".join([
             who.name, str(who.lines), f"#{who.first_at}",
             who.dominant or "확인 필요",
             str(counts.get("합니다체", 0)), str(counts.get("해요체", 0)),
             str((who.speech or {}).get("undecided", 0)),
             calls, relations,
-            who.traits.replace("\t", " ") or "확인 필요",
-            who.photo, who.origin or "확인 필요",
+            cell(who.gender), cell(who.age), cell(who.job), cell(who.career),
+            cell(who.traits),
+            who.photo,
+            # **사진이 있는데 라이선스를 모르면 그렇게 적는다.** 비워 두면 자유
+            # 이용으로 오해할 수 있고, 그 오해가 납품 문서에 실린다.
+            (who.photo_licence or "확인 필요") if who.photo else "",
+            who.origin or "확인 필요",
         ]))
     return "\n".join(rows)
 
@@ -214,6 +299,11 @@ def to_markdown(people: list[Character], counts: dict, title: str = "") -> str:
         out.append("")
         if who.photo:
             out.append(f"![{who.name}]({who.photo})")
+            # **라이선스를 사진 옆에 붙인다.** 문서를 보는 사람이 동봉 여부를 그
+            # 자리에서 판단할 수 있어야 한다.
+            out.append("")
+            out.append(f"사진 출처: {who.photo} · 라이선스: "
+                       f"{who.photo_licence or '확인 필요'}")
             out.append("")
         out.append(f"- 대사 {who.lines}개 · 처음 나온 자막 #{who.first_at}")
         ratio = speech.get("formal_ratio")
@@ -232,9 +322,25 @@ def to_markdown(people: list[Character], counts: dict, title: str = "") -> str:
             out.append("- 함께 나오는 인물: "
                        + ", ".join(f"{k}({n})" for k, n in top))
         out.append(f"- 관계: {'; '.join(f'{k}: {v}' for k, v in who.relations.items()) or '확인 필요'}")
+        # 작업자 자료가 이름 붙인 항목들. 빈 것은 '확인 필요'로 남긴다.
+        for label, value in (("성별", who.gender), ("나이", who.age),
+                             ("직업", who.job), ("경력", who.career),
+                             ("가족", who.family)):
+            if value:
+                out.append(f"- {label}: {value}")
         out.append(f"- 성격: {who.traits or '확인 필요'}")
+        if who.missing:
+            out.append(f"- 아직 빈 항목: {', '.join(who.missing)}")
         out.append(f"- 근거: {who.origin or '확인 필요'}")
         out.append("")
+
+    out.append("---")
+    out.append("")
+    out.append("성격 칸은 위키 소개 문단을 **그대로** 옮긴 것입니다. 요약이므로 "
+               "성격 자체는 아닙니다 — 읽고 고쳐 쓰십시오.")
+    out.append("")
+    out.append("사진은 **주소만** 적었습니다. 저작권물이므로 납품 문서에 동봉할지는 "
+               "라이선스를 보고 판단하십시오.")
     return "\n".join(out)
 
 

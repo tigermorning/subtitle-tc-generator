@@ -539,6 +539,71 @@ def _loanword_lookup(root: Path):
     return lookup_by_source
 
 
+def _characters_mode(args, ap) -> int:
+    """캐릭터 분석 문서를 만든다. **KNP 시트와 다른 문서다.**
+
+    KNP는 고유명사 표기를 통일하고(`--terms`), 이것은 말투와 인물 관계를 통일한다.
+    하나의 작품을 여러 작업자가 나누어 하기 때문에 필요하다 — 시트가 없으면 인물마다
+    말투가 작업자별로 갈린다.
+    """
+    from . import characters
+
+    files = collect_files(args.targets)
+    if not files:
+        ap.error("자막 파일을 주세요")
+
+    events = []
+    for path in files:
+        events += parse(path)
+    if not events:
+        print("자막 이벤트를 읽지 못했습니다.", file=sys.stderr)
+        return 2
+
+    people, counts = characters.extract(events)
+    if not people:
+        # 화자 표시가 없으면 인물을 가릴 수 없다. 없는 것을 지어내지 않는다.
+        print("화자 표시([이름])가 없어 인물을 가리지 못했습니다. "
+              "SDH 자막이나 화자명이 붙은 대본이 필요합니다.", file=sys.stderr)
+        return 1
+
+    print(f"인물 {counts['total']}명 · 화자 표시가 붙은 자막 {counts['tagged_events']}개")
+    if counts["untagged_events"]:
+        print(f"  화자를 모르는 자막 {counts['untagged_events']}개는 집계에서 뺐습니다 "
+              f"— 앞 화자에게 이어 붙이면 말투가 틀린 인물에게 쌓입니다.")
+
+    research_info = None
+    if args.wiki:
+        # **기본은 꺼져 있다.** `--wiki`를 준 것이 곧 밖으로 조회하겠다는 뜻이다.
+        print(f"밖에서 조사합니다({args.wiki}) — 작품 제목과 인물 이름만 나갑니다. "
+              f"대사는 나가지 않습니다.")
+        research_info = characters.research(
+            people, args.wiki, args.work_title, limit=args.characters_limit,
+            progress=lambda m: print(f"    {m}", file=sys.stderr))
+
+    base = files[0]
+    tsv_path = args.out or base.with_suffix(".characters.tsv")
+    md_path = tsv_path.with_suffix(".md")
+    # 표는 KNP처럼 붙여 쓰고, 문서는 사진을 붙일 수 있어야 해서 둘 다 낸다.
+    tsv_path.write_text(characters.to_tsv(people), encoding="utf-8-sig")
+    md_path.write_text(characters.to_markdown(people, counts, args.work_title or base.stem),
+                       encoding="utf-8")
+
+    stats = characters.summarize(people)
+    print(f"표: {tsv_path}")
+    print(f"문서: {md_path}")
+    print(f"  조사된 인물 {stats['researched']}/{stats['total']}명 · "
+          f"관계가 빈 인물 {stats['no_relation']}명 · "
+          f"말투를 재지 못한 인물 {stats['tone_unknown']}명")
+    if research_info:
+        # 무엇을 내보냈는지 숨기지 않는다.
+        print(f"  밖으로 보낸 것 {len(research_info['sent'])}건: "
+              + ", ".join(research_info["sent"][:8])
+              + (" …" if len(research_info["sent"]) > 8 else ""))
+    print("  관계는 자막이 증명하지 못합니다. 표의 '관계' 칸은 사람이 채웁니다 — "
+          "그것이 채워지면 T17(같은 관계에서 존댓말·반말 혼용) 검사가 성립합니다.")
+    return 0
+
+
 def _bookmarks_mode(args, ap) -> int:
     """강사 첨삭을 데이터로. **전문가가 짚은 실패 사례 목록**이다."""
     from .bookmarks import collect, read, summarize
@@ -779,6 +844,20 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--web", action="store_true",
                     help="규범 용례에 없는 것을 위키백과에서도 찾는다. "
                          "**낱말만 보낸다** — 대사는 나가지 않는다. 기본은 끔")
+    ap.add_argument("--characters", action="store_true",
+                    help="등장인물을 뽑아 캐릭터 분석 문서를 만든다. **KNP 시트와 다른 "
+                         "문서다** — KNP는 고유명사 표기를, 이것은 말투와 인물 관계를 "
+                         "통일한다. 하나의 작품을 여러 작업자가 나누어 하기 때문에 필요하다")
+    ap.add_argument("--wiki",
+                    help="캐릭터 조사에 쓸 위키(예: breakingbad 또는 전체 주소). "
+                         "**주면 밖으로 조회한다** — 나가는 것은 작품 제목과 인물 "
+                         "이름뿐이고 대사는 어떤 경우에도 나가지 않는다. 안 주면 "
+                         "자막에서 알 수 있는 것만 채운다")
+    ap.add_argument("--work-title", default="",
+                    help="작품 제목. 위키 안에서 같은 이름이 여럿일 때 검색어에 붙는다")
+    ap.add_argument("--characters-limit", type=int, default=0,
+                    help="대사가 많은 인물부터 이만큼만 조사한다(기본: 전원). "
+                         "단역은 위키에 문서가 없는 것이 보통이다")
     ap.add_argument("--bookmarks", type=Path,
                     help="SubtitleEdit 북마크(강사 첨삭)를 모아 갈래별로 낸다. "
                          "폴더를 주면 그 안의 것을 모두 읽는다")
@@ -845,6 +924,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.terms:
         return _terms_mode(args, ap)
+
+    if args.characters:
+        return _characters_mode(args, ap)
 
     if args.bookmarks:
         return _bookmarks_mode(args, ap)

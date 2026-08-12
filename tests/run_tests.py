@@ -2288,6 +2288,93 @@ except ProfileError:
     ok("모르는 장르는 예외", True)
 
 
+# --- 캐릭터 외부 조사 (네트워크 없이 파싱만) ---------------------------------
+# 조회는 네트워크가 필요하지만 **읽어 들인 것을 해석하는 부분은 그렇지 않다.**
+# 인포박스 해석을 시험으로 고정해 두면 위키 문법이 달라졌을 때 여기서 걸린다.
+
+from checker import webchars as _wc  # noqa: E402
+
+for _w, _want in (("breakingbad", "https://breakingbad.fandom.com/api.php"),
+                  ("breakingbad.fandom.com", "https://breakingbad.fandom.com/api.php"),
+                  ("https://x.fandom.com/ko", "https://x.fandom.com/ko/api.php"),
+                  ("https://x.fandom.com/api.php", "https://x.fandom.com/api.php")):
+    ok(f"위키 주소 -> API ({_w})", _wc.api_of(_w) == _want, _wc.api_of(_w))
+try:
+    _wc.api_of("  ")
+    ok("위키를 비우면 예외", False, "예외가 나지 않았다")
+except ValueError:
+    ok("위키를 비우면 예외", True)
+
+_WIKITEXT = """{{Character Infobox
+|title = Walter White
+|gender = Male
+|age = 52
+|occupation = [[Chemistry|Chemistry]] teacher<br />Meth manufacturer
+|affiliation = {{Plainlist|
+* [[Gray Matter]]
+* [[Los Pollos Hermanos]]
+}}
+|family = [[Skyler White|Skyler]] (wife)<ref>{{cite web|url=http://x|title=y}}</ref>
+|status = Deceased
+}}
+'''Walter Hartwell White Sr.''' was a [[chemistry]] teacher who turned to
+manufacturing methamphetamine to secure his family's future.
+
+== History ==
+"""
+_box = _wc.parse_infobox(_WIKITEXT)
+# 중괄호 짝을 세지 않으면 첫 `}}`에서 잘려 절반만 읽는다(안쪽 템플릿이 흔하다).
+ok("중첩 템플릿을 넘어 끝까지 읽는다", "status" in _box, str(sorted(_box)))
+ok("링크는 보이는 글자만", _box["occupation"].startswith("Chemistry teacher"),
+   _box["occupation"])
+# **목록 틀 안의 값을 지우지 않는다.** `{{...}}`를 통째로 지웠다가 경력 정보를 통째로
+# 버렸다 — `affiliation`이 빈칸이 됐다.
+ok("목록 틀에 싸인 값을 살린다", "Gray Matter" in _box.get("affiliation", ""),
+   str(_box.get("affiliation")))
+# 각주 틀은 전부 `키=값`이라 자연히 빠진다.
+ok("각주 틀은 빠진다", "http" not in _box["family"], _box["family"])
+
+_picked = _wc.pick_fields(_box)
+# 항목 이름은 작업자 자료가 정한 것이다(성별·나이·직업·경력·성격).
+ok("자료 항목으로 옮긴다",
+   {"gender", "age", "job", "career", "family"} <= set(_picked), str(_picked))
+ok("경력을 빠뜨리지 않는다", "Gray Matter" in _picked["career"], _picked["career"])
+ok("아는 키만 옮긴다", "status" not in _picked, str(sorted(_picked)))
+
+ok("소개 첫 문단을 딴다",
+   _wc.first_paragraph(_WIKITEXT).startswith("Walter Hartwell White Sr. was a"),
+   _wc.first_paragraph(_WIKITEXT)[:50])
+ok("인포박스는 소개로 잡지 않는다", "|" not in _wc.first_paragraph(_WIKITEXT))
+
+# 나간 것을 기록한다 — **대사는 여기에 들어올 수 없다**(작품 제목과 인물 이름만).
+_wc.forget()
+ok("기록을 비울 수 있다", _wc.sent() == [])
+
+# 조사 결과를 문서에 옮기는 부분. 네트워크 없이 가짜 결과로 잰다.
+_chp = [_ch.Character(name="민수", lines=3)]
+ok("조사 전에는 빈 항목이 다섯", len(_chp[0].missing) == 5, str(_chp[0].missing))
+_chp[0].gender, _chp[0].age, _chp[0].job = "남성", "42", "형사"
+_chp[0].career, _chp[0].traits = "강력계", "말수가 적다"
+ok("채우면 빈 항목이 없다", _chp[0].missing == [], str(_chp[0].missing))
+# **근거 없이 채운 것은 조사로 보지 않는다.**
+ok("근거가 없으면 조사로 보지 않는다", not _chp[0].researched)
+_chp[0].origin = "https://x.fandom.com/wiki/민수"
+ok("근거가 있으면 조사로 본다", _chp[0].researched)
+
+_chp[0].photo = "https://x/민수.png"
+_chtsv = _ch.to_tsv(_chp).splitlines()
+ok("표에 자료 항목 칸이 있다",
+   all(c in _chtsv[0].split("\t") for c in ("성별", "나이", "직업", "경력", "성격")),
+   _chtsv[0])
+# 사진이 있는데 라이선스를 모르면 그렇게 적는다. 비워 두면 자유 이용으로 오해한다.
+ok("사진이 있고 라이선스를 모르면 '확인 필요'",
+   "확인 필요" in _chtsv[1].split("\t")[_chtsv[0].split("\t").index("사진 라이선스")],
+   _chtsv[1])
+_chmd = _ch.to_markdown(_chp, {"total": 1, "tagged_events": 3, "untagged_events": 0})
+ok("문서에 라이선스를 사진 옆에 붙인다", "라이선스:" in _chmd)
+ok("성격이 위키 요약임을 밝힌다", "요약이므로" in _chmd)
+
+
 # --- 결과 ---------------------------------------------------------------
 
 print(f"통과 {PASSED}건")
