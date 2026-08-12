@@ -296,6 +296,21 @@ class MainWindow(QMainWindow):
         self.addDockWidget(Qt.TopDockWidgetArea, dock)
         self.stage_dock = dock
 
+        # **단계를 메뉴에도 둔다.** 단추만 있으면 키보드로 못 가고, 무엇이 있는지
+        # 메뉴를 열어 훑을 수도 없다. `stage_actions`를 만들어 두고 아무 데도 붙이지
+        # 않아 쓸 수 없던 것을 여기서 붙인다.
+        # 메뉴 만들기(`_build_menu`)가 이 함수보다 먼저 돌기 때문에 여기서 붙인다.
+        stage_menu = self.menuBar().addMenu("단계(&S)")
+        for key, title in TRACKS:
+            group = stages_of(key)
+            if not group:
+                continue
+            stage_menu.addSection(title)
+            for stage in group:
+                action = self.stage_actions.get(stage.id)
+                if action is not None:
+                    stage_menu.addAction(action)
+
         # 옛 이름을 쓰던 자리가 남아 있어도 깨지지 않게 한다.
         self.pipeline_buttons = list(self.stage_actions.values())
         self._refresh_stages()
