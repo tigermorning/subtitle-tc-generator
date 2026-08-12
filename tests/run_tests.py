@@ -2074,6 +2074,148 @@ ok("확정이 없으면 비율도 없다",
    _fm.summary([_PEvent(1, 0, 1000, "[문 닫히는 소리]")])["formal_ratio"] is None)
 
 
+# --- 캐릭터 분석 문서 -------------------------------------------------------
+# **KNP 시트와 다른 문서다.** KNP는 고유명사 표기를, 이 문서는 말투와 인물 관계를
+# 통일한다. 하나의 작품을 여러 작업자가 나누어 하기 때문에 필요하다.
+
+from checker import characters as _ch  # noqa: E402
+
+_chevs = [
+    _PEvent(1, 0, 2000, "[민수] 김 경위님 어디 계십니까"),
+    _PEvent(2, 2000, 4000, "[김 경위] 여기 있습니다"),
+    _PEvent(3, 4000, 6000, "[민수] 지금 갑니다"),
+    _PEvent(4, 6000, 8000, "저기 뭔가 있어요"),          # 화자 표시 없음
+    _PEvent(5, 8000, 10000, "[문이 닫히는 소리]"),        # 효과음 — 인물이 아니다
+    _PEvent(6, 10000, 12000, "[영희] 민수 씨 왔어요"),
+    _PEvent(7, 12000, 14000, "[영희] 김 경위 어디 갔지"),
+]
+_people, _chcounts = _ch.extract(_chevs)
+_by = {p.name: p for p in _people}
+
+ok("인물만 뽑는다(효과음 제외)", sorted(_by) == ["김 경위", "민수", "영희"],
+   str(sorted(_by)))
+ok("대사 수를 센다", _by["민수"].lines == 2 and _by["김 경위"].lines == 1)
+ok("대사가 많은 순", [p.name for p in _people][:2] == ["민수", "영희"],
+   str([p.name for p in _people]))
+# 못 센 것을 숨기지 않는다. 화자를 모르는 자막을 앞 화자에게 이어 붙이면 말투가
+# 틀린 인물에게 쌓인다.
+ok("화자를 모르는 자막은 따로 센다", _chcounts["untagged_events"] == 1,
+   str(_chcounts))
+ok("효과음은 화자 미상으로도 세지 않는다", _chcounts["tagged_events"] == 5,
+   str(_chcounts))
+
+# 말투는 그 인물의 대사만 모아서 센다. 화자 표시가 집계에 섞이면 안 된다.
+ok("화자별로 말투를 센다",
+   _by["민수"].dominant == "합니다체" and _by["영희"].dominant == "해요체",
+   f'{_by["민수"].dominant} / {_by["영희"].dominant}')
+
+# 호칭은 대사 안에 있으므로 근거가 된다. 다만 관계를 단정하지는 않는다.
+ok("호칭을 뽑는다", _by["민수"].calls == {"김 경위": ["님"]}, str(_by["민수"].calls))
+ok("긴 이름을 먼저 맞춘다 — '김 경위'가 '경위'에 먹히지 않는다",
+   "김 경위" in _by["영희"].mentions, str(_by["영희"].mentions))
+ok("자기 이름은 언급으로 세지 않는다", "민수" not in _by["민수"].mentions)
+
+# **관계·성격·사진은 자막이 증명하지 못한다.** 비워 두고 표시한다.
+ok("관계는 비어 있다", all(not p.relations for p in _people))
+ok("조사 전에는 researched가 거짓", not any(p.researched for p in _people))
+_chsum = _ch.summarize(_people)
+ok("관계 없는 인물 수를 낸다", _chsum["no_relation"] == 3, str(_chsum))
+
+_tsv = _ch.to_tsv(_people).splitlines()
+ok("표에 근거 칸이 있다", _tsv[0].split("\t")[-1] == "근거", _tsv[0])
+ok("채우지 않은 칸은 '확인 필요'", "확인 필요" in _tsv[1], _tsv[1])
+ok("표는 인물마다 한 줄", len(_tsv) == 4, str(len(_tsv)))
+
+_md = _ch.to_markdown(_people, _chcounts, "표본")
+ok("문서에 못 센 자막을 적는다", "화자를 모르는 자막 1개" in _md)
+ok("문서에 증명 못 하는 것을 밝힌다", "자막이 증명하지 못하므로" in _md)
+# 사진은 저작권물이라 링크로만 넣는다. 없으면 넣지 않는다.
+ok("사진이 없으면 그림을 넣지 않는다", "![" not in _md)
+_by["민수"].photo = "characters/민수.jpg"
+ok("사진이 있으면 링크로 넣는다",
+   "![민수](characters/민수.jpg)" in _ch.to_markdown(_people, _chcounts))
+
+
+# --- 번역·감수·용어 단계 ----------------------------------------------------
+# `STAGES`는 다섯 단계를 선언하는데 `stage_` 함수는 넷뿐이었다. `translate`와
+# `terms`는 두 어댑터가 각자 적어 두어 세 가지가 갈렸다:
+#   ① GUI가 사용자의 번역 모델 설정을 무시했다(설정이 죽어 있었다)
+#   ② GUI가 감수 내역을 버려 무엇이 바뀌었는지 볼 수 없었다
+#   ③ GUI가 타임코드 고정을 확인하지 않았다
+
+from checker import pipeline as _pl  # noqa: E402
+from checker.translate import DEFAULT_MODEL as _DEF_MODEL  # noqa: E402
+
+_declared = {s.id for s in _pl.STAGES}
+_built = {n[6:] for n in dir(_pl) if n.startswith("stage_") and n != "stage_by_id"}
+ok("선언한 단계마다 함수가 있다", _declared <= _built, str(sorted(_declared - _built)))
+
+
+class _EchoTranslator:
+    """번호를 그대로 돌려주는 흉내. 무엇을 물었는지도 남긴다."""
+
+    def __init__(self):
+        self.systems = []
+
+    def ask(self, system, prompt):
+        self.systems.append(system)
+        out = []
+        for line in prompt.splitlines():
+            head = line.strip().split(".")[0].strip()
+            if head.isdigit():
+                out.append(f"{head}. 옮긴 말 {head}")
+        return "\n".join(out)
+
+
+_trprof = load_profile("netflix", "ko", "translation")
+_trevs = [_PEvent(1, 0, 2000, "Find them"), _PEvent(2, 2000, 4000, "Before we fight")]
+_tr = _EchoTranslator()
+_first = _pl.stage_translate(_trevs, _trprof, translator=_tr)
+ok("번역이 타임코드를 물려받는다",
+   [(e.start_ms, e.end_ms) for e in _first.events] == [(0, 2000), (2000, 4000)])
+# 전에는 CLI만 확인했다. 이제 단계가 확인하므로 GUI도 얻는다.
+ok("타임코드가 그대로면 위반이 없다", _first.violations == [], str(_first.violations))
+ok("확인이 필요한 자리를 낸다", "notes_by_index" in _first.extra)
+
+# **회차는 인자다.** 전에는 `("2차","3차")[:passes-1]`이라 3차가 상한이었다.
+_later = _pl.stage_revise(_first.events, _trprof, translator=_tr,
+                          source={1: "Find them", 2: "Before we fight"}, rounds=3)
+ok("회차 상한이 없다 — 4차까지 돈다",
+   [r["stage"] for r in _later.extra["rounds"]] == ["2차", "3차", "4차"],
+   str(_later.extra["rounds"]))
+ok("첫 회차는 감수, 그 뒤는 윤문",
+   [r["role"] for r in _later.extra["rounds"]] == ["감수", "윤문", "윤문"],
+   str([r["role"] for r in _later.extra["rounds"]]))
+# 프롬프트가 역할에 따라 실제로 갈리는지. 라벨만 바뀌고 프롬프트가 같으면 뜻이 없다.
+ok("감수와 윤문이 다른 프롬프트를 쓴다",
+   len({s[:24] for s in _tr.systems}) >= 2, str(len({s[:24] for s in _tr.systems})))
+# 바꾼 내역을 버리지 않는다.
+ok("감수 내역을 돌려준다", "revisions" in _later.extra)
+
+# `stage`로 프롬프트를 유추하던 것이 조용한 실패의 원인이었다 — `"4차"`를 넘기면
+# 에러 없이 윤문 프롬프트로 돌았다. 이제 알 수 없으면 예외다.
+from checker.revise import revise as _revise  # noqa: E402
+try:
+    _revise(_trevs[:1], _tr, stage="4차")
+    ok("유추할 수 없는 회차는 예외", False, "예외가 나지 않았다")
+except ValueError:
+    ok("유추할 수 없는 회차는 예외", True)
+try:
+    _revise(_trevs[:1], _tr, stage="4차", role="없는역할")
+    ok("모르는 역할은 예외", False, "예외가 나지 않았다")
+except ValueError:
+    ok("모르는 역할은 예외", True)
+
+# 모델 기본값이 세 곳에 흩어져 값이 달랐다. 이제 하나다.
+from checker.translate import OllamaCliTranslator as _Cli  # noqa: E402
+ok("설정 기본값과 번역기 기본값이 같다",
+   _prefs.DEFAULTS["translate_model"] == _DEF_MODEL, _prefs.DEFAULTS["translate_model"])
+ok("라이선스 제약을 설명에 적는다",
+   "라이선스" in [o for o in _prefs.OPTIONS if o.key == "translate_model"][0].what)
+ok("모델을 주지 않으면 기본값을 쓴다",
+   _Cli.__init__.__defaults__[0] is None)
+
+
 # --- 결과 ---------------------------------------------------------------
 
 print(f"통과 {PASSED}건")

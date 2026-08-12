@@ -106,39 +106,51 @@ class CheckJob(Job):
 
 
 class TranslateJob(Job):
-    """한국어로 옮긴다. **타임코드는 건드리지 않는다.**"""
+    """한국어로 옮긴다. **타임코드는 건드리지 않는다.**
 
-    def __init__(self, events, profile: dict, passes: int, knp: Path | None):
+    순서와 회차는 `pipeline`이 정한다. 전에는 이 클래스가 자기 순서를 적어 두어
+    세 가지가 CLI와 달랐다 — 사용자의 번역 모델 설정을 무시했고, 감수 내역을 버려
+    무엇이 바뀌었는지 볼 수 없었고, 타임코드 고정을 확인하지 않았다.
+    """
+
+    def __init__(self, events, profile: dict, passes: int, knp: Path | None,
+                 model: str | None = None):
         super().__init__()
         self.events, self.profile, self.passes, self.knp = events, profile, passes, knp
+        self.model = model
 
     def run(self) -> None:
         def work():
             from checker.model import Event
-            from checker.translate import (Glossary, make_translator, to_events,
-                                           translate_events)
+            from checker.pipeline import stage_revise, stage_translate
+            from checker.translate import Glossary, ensure_server, make_translator
 
-            from checker.translate import ensure_server
             ensure_server(progress=self.say, wait_seconds=20)
-            translator = make_translator()
+            translator = make_translator(self.model)
             glossary = Glossary.from_profile(self.profile)
             if self.knp:
                 added = glossary.merge_knp(self.knp)
                 self.say(f"KNP에서 용어 {added}개")
 
             source = [Event(e.index, e.start_ms, e.end_ms, e.text) for e in self.events]
-            cues = translate_events(source, translator, glossary,
-                                    progress=self.say)
-            events = to_events(cues, source)
+            first = stage_translate(source, self.profile, translator=translator,
+                                    glossary=glossary, progress=self.say)
+            # 타임코드가 움직였으면 쓰지 않는다. 조용히 넘기면 사람은 고정된 줄 알고
+            # 기계는 옮긴 상태로 납품물이 나간다.
+            if first.violations:
+                raise RuntimeError(first.violations[0]["message"])
 
+            events, revisions = first.events, []
             if self.passes > 1:
-                from checker.revise import revise
-                original = {e.index: e.text for e in source}
-                for stage in ("2차", "3차")[:self.passes - 1]:
-                    events, _ = revise(events, translator, source=original,
-                                       glossary=glossary, stage=stage,
-                                       progress=self.say)
-            return events
+                later = stage_revise(events, self.profile, translator=translator,
+                                     source={e.index: e.text for e in source},
+                                     glossary=glossary, rounds=self.passes - 1,
+                                     progress=self.say)
+                events, revisions = later.events, later.extra["revisions"]
+                for row in later.extra["rounds"]:
+                    self.say(f"{row['stage']}({row['role']}) {row['changed']}곳 고침")
+
+            return events, first.extra["notes_by_index"], revisions
         self._guarded(work)
 
 
@@ -146,42 +158,30 @@ class TermsJob(Job):
     """용어를 뽑아 조사한다. 결과는 (용어 목록, 저장한 파일)."""
 
     def __init__(self, events, out: Path, web: bool, explain: bool,
-                 corrector_path: str | None, knp: Path | None):
+                 corrector_path: str | None, knp: Path | None,
+                 model: str | None = None):
         super().__init__()
         self.events, self.out, self.web = events, out, web
         self.explain, self.corrector_path, self.knp = explain, corrector_path, knp
+        self.model = model
 
     def run(self) -> None:
         def work():
-            from checker.terms import extract, research, to_tsv
+            from checker.pipeline import stage_terms
+            from checker.terms import to_tsv
 
-            terms = extract([e.text for e in self.events])
-            self.say(f"용어 후보 {len(terms)}개")
-
-            lookup = None
-            if self.corrector_path:
-                try:
-                    from checker.cli import _loanword_lookup
-                    lookup = _loanword_lookup(Path(self.corrector_path))
-                except Exception as exc:
-                    self.say(f"규범 용례 조회를 건너뜁니다: {exc}")
-
-            glossary = {}
-            if self.knp:
-                from checker.knp import read_terms
-                glossary = read_terms(self.knp)
-
-            research(terms, lookup=lookup, glossary=glossary, web=self.web,
-                     progress=self.say)
-
+            translator = None
             if self.explain:
+                from checker.translate import make_translator
                 try:
-                    from checker.terms import explain
-                    from checker.translate import make_translator
-                    explain(terms, make_translator(), progress=self.say)
+                    translator = make_translator(self.model)
                 except Exception as exc:
                     self.say(f"용어 설명을 건너뜁니다: {exc}")
 
+            result = stage_terms(self.events, corrector_path=self.corrector_path,
+                                 knp=self.knp, web=self.web, translator=translator,
+                                 progress=self.say)
+            terms = result.extra["terms"]
             self.out.write_text(to_tsv(terms), encoding="utf-8-sig")
             return terms, self.out
         self._guarded(work)

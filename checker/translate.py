@@ -89,6 +89,16 @@ class Glossary:
         return missed
 
 
+# **번역 모델 기본값은 여기 하나뿐이다.** 세 곳에 흩어져 있었고 값이 달랐다 —
+# 두 백엔드 클래스는 qwen, 설정 화면과 CLI 도움말은 exaone. 그래서 GUI가 설정을
+# 읽지 않던 동안 사용자는 exaone으로 도는 줄 알고 qwen으로 돌렸다.
+#
+# exaone3.5는 한국어가 낫지만(실측) **상업 이용에 제약이 있는 라이선스**다.
+# qwen2.5는 Apache 2.0이다. 바꿔 쓸 수 있게 설정에 열어 둔다.
+DEFAULT_MODEL = "exaone3.5:7.8b"
+OPEN_LICENCE_MODEL = "qwen2.5:7b-instruct"
+
+
 class OllamaTranslator:
     """Ollama에 붙는다. 모델은 이 컴퓨터에서 돈다.
 
@@ -97,9 +107,9 @@ class OllamaTranslator:
     먼저 보고 안 되면 localhost를 본다.
     """
 
-    def __init__(self, model: str = "qwen2.5:7b-instruct", host: str | None = None,
+    def __init__(self, model: str | None = None, host: str | None = None,
                  timeout: int = 300):
-        self.model = model
+        self.model = model or DEFAULT_MODEL
         self.timeout = timeout
         self.host = host or self._find_host()
 
@@ -179,9 +189,9 @@ class OllamaCliTranslator:
         "/mnt/c/Program Files/Ollama/ollama.exe",
     )
 
-    def __init__(self, model: str = "qwen2.5:7b-instruct", exe: str | None = None,
+    def __init__(self, model: str | None = None, exe: str | None = None,
                  timeout: int = 600):
-        self.model = model
+        self.model = model or DEFAULT_MODEL
         self.timeout = timeout
         self.exe = exe or self._find_exe()
 

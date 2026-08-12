@@ -325,10 +325,10 @@ def _run_one(path: Path, profile: dict, args, backend) -> dict | None:
         #
         # 이때는 재분할을 하지 않는다. 나누면 경계가 새로 생기기 때문이다. 대신
         # 주어진 칸 안에 들어가지 않는 한국어는 **검사가 잡아** 사람이 줄인다.
+        from .pipeline import stage_revise, stage_translate
         from .translate import Glossary, TranslatorUnavailable, make_translator
-        from .translate import to_events, translate_events
         try:
-            translator = make_translator(args.translate_model or "exaone3.5:7.8b")
+            translator = make_translator(args.translate_model)
         except TranslatorUnavailable as exc:
             print(f"[오류] {exc}", file=sys.stderr)
             return report
@@ -336,31 +336,33 @@ def _run_one(path: Path, profile: dict, args, backend) -> dict | None:
         if getattr(args, "glossary", None):
             glossary.merge_file(args.glossary)
         _add_knp(glossary, args, path)
-        print(f"    한국어로 옮깁니다 — 자막 {len(events)}개", file=sys.stderr)
-        cues = translate_events(events, translator, glossary,
-                                progress=lambda m: print(f"    {m}", file=sys.stderr))
-        translated = to_events(cues, events)
 
-        # **2차·3차는 따로 돈다.** 사람도 나눠서 한다 — 1차는 정확도, 2차는 용어와
-        # 맥락, 3차는 말맛. 한 번에 시키면 셋을 뒤섞어 어중간하게 낸다.
+        say = lambda m: print(f"    {m}", file=sys.stderr)   # noqa: E731
+        first = stage_translate(events, profile, translator=translator,
+                                glossary=glossary, progress=say)
+        translated = first.events
+        report["translation_notes"] = first.extra["notes_by_index"]
+
+        # **회차는 인자다.** 전에는 `("2차", "3차")[:passes - 1]`을 여기와 GUI에 각각
+        # 적어 두어 3차를 넘길 수 없었다.
         if args.passes > 1:
-            from .revise import report as revision_report, revise
-            source = {e.index: e.text for e in events}
-            for stage in ("2차", "3차")[:args.passes - 1]:
-                translated, revisions = revise(
-                    translated, translator, source=source, glossary=glossary,
-                    stage=stage,
-                    progress=lambda m: print(f"    {m}", file=sys.stderr))
-                print(f"  {revision_report(revisions, show=6)}")
-                report[f"revisions_{stage}"] = [
+            from .revise import report as revision_report
+            later = stage_revise(translated, profile, translator=translator,
+                                 source={e.index: e.text for e in events},
+                                 glossary=glossary, rounds=args.passes - 1,
+                                 progress=say)
+            translated = later.events
+            print(f"  {revision_report(later.extra['revisions'], show=6)}")
+            for row in later.extra["rounds"]:
+                stage_revisions = [r for r in later.extra["revisions"]
+                                   if r.stage == row["stage"]]
+                report[f"revisions_{row['stage']}"] = [
                     {"event_index": r.index, "before": r.before, "after": r.after}
-                    for r in revisions]
+                    for r in stage_revisions]
 
         out_path = args.out or path.with_suffix(".ko.srt")
         write_srt(translated, out_path)
         report["translated_file"] = str(out_path)
-        report["translation_notes"] = [
-            {"event_index": c.index, "note": c.note} for c in cues if c.note]
         # 번역본은 타임코드를 그대로 물려받는다. 그것을 확인해 둔다.
         problem = _assert_timecodes_unchanged(
             _timecodes_of(events), _timecodes_of(translated), path)
@@ -450,7 +452,7 @@ def _terms_mode(args, ap) -> int:
         from .terms import explain
         from .translate import TranslatorUnavailable, make_translator
         try:
-            translator = make_translator(args.translate_model or "exaone3.5:7.8b")
+            translator = make_translator(args.translate_model)
         except TranslatorUnavailable as exc:
             print(f"용어 설명을 건너뜁니다: {exc}", file=sys.stderr)
         else:
@@ -585,7 +587,7 @@ def _generate_mode(args, ap) -> int:
     if args.translate:
         from .translate import Glossary, TranslatorUnavailable, make_translator
         try:
-            translator = make_translator(args.translate_model or "exaone3.5:7.8b")
+            translator = make_translator(args.translate_model)
         except TranslatorUnavailable as exc:
             print(f"[오류] {exc}")
             return 2
@@ -777,7 +779,7 @@ def main(argv: list[str] | None = None) -> int:
     gen.add_argument("--translate-model",
                      help="번역에 쓸 로컬 모델(기본: exaone3.5:7.8b). "
                           "`ollama list`에 있는 이름")
-    gen.add_argument("--passes", type=int, default=1, choices=[1, 2, 3],
+    gen.add_argument("--passes", type=int, default=1,
                      help="번역을 몇 차까지 할지. 1차=빠른 초벌, 2차=용어·맥락 감수, "
                           "3차=말맛 윤문(작업자 자료의 단계 그대로)")
     gen.add_argument("--no-knp", action="store_true",

@@ -66,16 +66,35 @@ class Revision:
         return self.before.strip() != self.after.strip()
 
 
+ROLES = {"감수": SECOND_PASS, "윤문": THIRD_PASS}
+
+
 def revise(events: list[Event], translator, source: dict[int, str] | None = None,
-           glossary=None, stage: str = "2차", batch: int = 8, context: int = 2,
+           glossary=None, stage: str = "2차", role: str = "",
+           batch: int = 8, context: int = 2,
            progress=None) -> tuple[list[Event], list[Revision]]:
     """자막을 다시 본다. (고친 자막, 바뀐 내역)
 
-    `source`는 자막 번호별 원문이다. 2차에서는 원문이 있어야 오역을 볼 수 있다 —
-    없으면 한국어만 보고 다듬는 3차처럼 돈다.
+    `source`는 자막 번호별 원문이다. 감수에서는 원문이 있어야 오역을 볼 수 있다 —
+    없으면 한국어만 보고 다듬는 윤문처럼 돈다.
+
+    `role`이 프롬프트를 고른다(`감수` 또는 `윤문`). `stage`는 사람에게 보이는
+    이름일 뿐이다.
+
+    **전에는 `role`이 없고 `stage`로 프롬프트를 유추했다.** `stage == "2차"`가 아니면
+    무조건 윤문 프롬프트를 썼기 때문에 `"4차"`를 넘기면 **에러도 없이** 윤문으로
+    돌았다. 회차를 설정으로 열려면 그 조용한 실패를 먼저 막아야 한다 — 유추할 수
+    없는 이름이 오면 예외를 올린다.
     """
     say = progress or (lambda _m: None)
-    system = SECOND_PASS if stage == "2차" else THIRD_PASS
+    if not role:
+        role = {"2차": "감수", "3차": "윤문"}.get(stage, "")
+        if not role:
+            raise ValueError(
+                f"'{stage}'가 감수인지 윤문인지 알 수 없습니다. role을 주세요.")
+    if role not in ROLES:
+        raise ValueError(f"모르는 역할입니다: {role} (쓸 수 있는 것: {', '.join(ROLES)})")
+    system = ROLES[role]
     source = source or {}
     revisions: list[Revision] = []
     out: list[Event] = []
@@ -93,7 +112,7 @@ def revise(events: list[Event], translator, source: dict[int, str] | None = None
         lines = []
         for event in chunk:
             original = source.get(event.index)
-            if original and stage == "2차":
+            if original and role == "감수":
                 lines.append(f"{event.index}. [원문] {original}\n   [1차] {event.text}")
             else:
                 lines.append(f"{event.index}. {event.text}")

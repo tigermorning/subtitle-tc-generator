@@ -606,14 +606,31 @@ class MainWindow(QMainWindow):
         sources = self.model.remember_sources()
         job = jobs.TranslateJob(self.model.events, self._profile(),
                                 passes=3 if self.translate_check.isChecked() else 1,
-                                knp=knp)
+                                knp=knp,
+                                # **설정이 죽어 있었다.** `translate_model`은 설정
+                                # 화면에 있는데 아무도 읽지 않아, 사용자가 모델을
+                                # 바꿔도 아무 일이 없었다.
+                                model=getattr(self, "_prefs", {}).get("translate_model"))
 
-        def done(events):
+        def done(result):
+            events, notes, revisions = result
             self.model.replace(events, sources)
             self.waveform.set_events(self.model.events)
             self._preview_timer.start()
             self.statusBar().showMessage(
                 f"번역했습니다 — 타임코드는 그대로입니다({len(events)}개)")
+            # **감수가 무엇을 바꿨는지 보여 준다.** 전에는 버렸다 — 2차가 1차보다 늘
+            # 나은 것은 아니므로 사람이 되돌릴 근거를 봐야 한다.
+            if revisions:
+                self._note(f"감수에서 {len(revisions)}곳 고쳤습니다")
+                for rev in revisions[:12]:
+                    self._note(f"  #{rev.index} {rev.stage} {rev.before} -> {rev.after}")
+                if len(revisions) > 12:
+                    self._note(f"  … 외 {len(revisions) - 12}곳")
+            if notes:
+                self._show_violations([
+                    {"event_index": n["event_index"], "rule_id": "번역",
+                     "detail": n["note"], "auto_fixable": False} for n in notes])
 
         self._start(job, done, "한국어로 옮기는 중입니다...")
 
@@ -626,7 +643,8 @@ class MainWindow(QMainWindow):
         out = base.with_suffix(".terms.tsv")
         job = jobs.TermsJob(self.model.events, out, web=True, explain=True,
                             corrector_path=self._corrector_path(),
-                            knp=find_for(base) if self.subtitle_path else None)
+                            knp=find_for(base) if self.subtitle_path else None,
+                            model=getattr(self, "_prefs", {}).get("translate_model"))
 
         def done(result):
             terms, path = result

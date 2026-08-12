@@ -15,6 +15,8 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 
+from checker.translate import DEFAULT_MODEL, OPEN_LICENCE_MODEL
+
 DEFAULTS = {
     # 저장
     "save_source_too": True,        # 원어 자막도 함께 낸다
@@ -33,7 +35,7 @@ DEFAULTS = {
     # 도구 자리 — 비우면 스스로 찾는다
     "ffmpeg_path": "",
     "whisper_model": "",
-    "translate_model": "exaone3.5:7.8b",
+    "translate_model": DEFAULT_MODEL,
     "corrector_path": "",
 }
 
@@ -77,7 +79,9 @@ OPTIONS = (
     Option("whisper_model", "전사 모델 파일", "비우면 사용자 자료 폴더의 models에서 "
            "가장 큰 것을 쓴다.", "도구", "text"),
     Option("translate_model", "번역 모델", "Ollama에 받아 둔 이름. exaone3.5가 한국어에 "
-           "낫다(실측).", "도구", "text"),
+           "낫지만(실측) 상업 이용에 제약이 있는 라이선스다. "
+           "{OPEN_LICENCE_MODEL}은 Apache 2.0.".replace(
+               "{OPEN_LICENCE_MODEL}", OPEN_LICENCE_MODEL), "도구", "text"),
     Option("corrector_path", "한국어 교정기 자리", "비우면 편집기 폴더 옆에서 찾는다.",
            "도구", "text"),
 )

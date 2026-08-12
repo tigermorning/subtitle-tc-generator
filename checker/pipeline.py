@@ -114,6 +114,130 @@ def stage_generate(video: Path, profile: dict, *, script: Path | None = None,
     return StageResult(events=list(draft.events), extra={"draft": draft})
 
 
+# ---------------------------------------------------------------- 번역과 감수
+
+def stage_translate(events: list[Event], profile: dict, *, translator,
+                    glossary=None, progress: Progress | None = None) -> StageResult:
+    """1차 번역. **받은 타임코드를 그대로 물려받고 확인한다.**
+
+    작업자 자료 190행: "TC 작업이 되어 온 파일에 내가 번역만 한 경우는 TC를 절대
+    건드리면 안 됨!" 그래서 여기서 잰다 — 전에는 CLI만 확인하고 GUI는 확인하지
+    않았다. 어긋나면 `violations`에 넣어 어댑터가 막을 수 있게 한다.
+    """
+    from .translate import Glossary, to_events, translate_events
+
+    say = progress or _silent
+    glossary = glossary if glossary is not None else Glossary.from_profile(profile)
+    say(f"한국어로 옮깁니다 — 자막 {len(events)}개")
+    cues = translate_events(events, translator, glossary, progress=say)
+    translated = to_events(cues, events)
+
+    violations: list[dict] = []
+    before = [(e.index, e.start_ms, e.end_ms) for e in events]
+    after = [(e.index, e.start_ms, e.end_ms) for e in translated]
+    if before != after:
+        violations.append({
+            "event_index": 0, "rule_id": "TC00", "source": "pipeline",
+            "message": "번역이 타임코드를 바꿨습니다. 결과를 쓰지 마세요.",
+        })
+
+    return StageResult(
+        events=translated,
+        changed=len(_edits(events, translated)),
+        violations=violations,
+        # 확인이 필요한 자리. **번역을 못 한 자막은 빈칸이 아니라 원문이 남는다**
+        # (빈칸은 지나치지만 원문은 눈에 띈다) — 그 자리를 여기로 낸다.
+        extra={"cues": cues,
+               "notes_by_index": [{"event_index": c.index, "note": c.note}
+                                  for c in cues if c.note]},
+    )
+
+
+def stage_revise(events: list[Event], profile: dict, *, translator,
+                 source: dict[int, str] | None = None, glossary=None,
+                 rounds: int = 1, first_round: int = 2,
+                 progress: Progress | None = None) -> StageResult:
+    """감수를 `rounds`번 돈다. **회차를 하드코딩하지 않는다.**
+
+    전에는 두 어댑터가 각자 `("2차", "3차")[:passes - 1]`을 적어 두어 3차를 넘길 수
+    없었다. 이제 회차는 인자다.
+
+    첫 회차는 **감수**(오역·용어·맥락 — 원문을 함께 보여 준다), 그 뒤는 **윤문**
+    (말맛만). 사람이 하는 순서를 그대로 따른 것이다(작업자 자료 569~579행).
+
+    **바꾼 내역을 버리지 않는다.** 전에는 GUI가 `events, _ = revise(...)`로 받아
+    무엇이 바뀌었는지 사용자가 볼 수 없었다 — 한국어 위반을 버리던 것과 같은 무늬다.
+    """
+    from .revise import revise
+
+    say = progress or _silent
+    current = list(events)
+    all_revisions = []
+    per_round = []
+
+    for n in range(rounds):
+        label = f"{first_round + n}차"
+        role = "감수" if n == 0 else "윤문"
+        say(f"{label} ({role})")
+        current, revisions = revise(current, translator, source=source,
+                                    glossary=glossary, stage=label, role=role,
+                                    progress=say)
+        all_revisions += revisions
+        per_round.append({"stage": label, "role": role,
+                          "changed": sum(1 for r in revisions if r.changed)})
+
+    return StageResult(
+        events=current,
+        changed=len(_edits(events, current)),
+        extra={"revisions": all_revisions, "rounds": per_round},
+    )
+
+
+def stage_terms(events: list[Event], profile: dict | None = None, *,
+                corrector_path: str | None = None, knp: Path | None = None,
+                web: bool = False, translator=None,
+                progress: Progress | None = None) -> StageResult:
+    """용어를 뽑아 조사한다. 자막은 건드리지 않는다 — 표만 낸다.
+
+    두 어댑터가 같은 순서를 각자 적어 두었던 자리다(뽑기 -> 규범 용례 -> KNP ->
+    조사 -> 설명). 조회가 막히면 **건너뛴 사실을 `notes`에 남기고** 나머지를 계속
+    돈다 — 조용히 빠지면 "조사 다 했다"가 거짓말이 된다.
+    """
+    from .terms import extract, research, summarize
+
+    say = progress or _silent
+    notes: list[str] = []
+    terms = extract([e.text for e in events])
+    say(f"용어 후보 {len(terms)}개")
+
+    lookup = None
+    if corrector_path:
+        try:
+            from .cli import _loanword_lookup
+            lookup = _loanword_lookup(Path(corrector_path))
+        except Exception as exc:
+            notes.append(f"규범 용례 조회를 건너뜁니다: {exc}")
+
+    glossary: dict = {}
+    if knp:
+        from .knp import read_terms
+        glossary = read_terms(knp)
+
+    research(terms, lookup=lookup, glossary=glossary, web=web, progress=say)
+
+    if translator is not None:
+        try:
+            from .terms import explain
+            explain(terms, translator, progress=say)
+        except Exception as exc:
+            notes.append(f"용어 설명을 건너뜁니다: {exc}")
+
+    for note in notes:
+        say(note)
+    return StageResult(events=list(events), notes=notes,
+                       extra={"terms": terms, "summary": summarize(terms)})
+
+
 # ---------------------------------------------------------------- 단계 ② 한국어 교정
 
 def stage_korean(events: list[Event], profile: dict | None = None, *,
