@@ -2628,6 +2628,107 @@ ok("검증을 끌 수 있다",
                        verify=False).extra["flags"] == [])
 
 
+# --- 역번역 대조 --------------------------------------------------------------
+# **역번역이 답인 이유는 읽기 편해서가 아니다 — 비교가 같은 언어끼리 되기 때문이다.**
+# 영·한을 직접 견주려면 다국어 임베딩이 필요하고(torch ~2GB) 점수만 나와서 무엇이
+# 틀렸는지 못 본다. 역번역을 거치면 의존성 없이 낱말로 재고 근거가 그대로 남는다.
+#
+# 백로그에 "겹침이 낮은 자막만 역번역한다"고 적어 두었는데 **그건 순환이었다** —
+# 겹침은 역번역을 해야 계산된다. 전수로 돌리고 점수로 고른다.
+
+from checker import backtranslate as _bt  # noqa: E402
+
+ok("기능어는 빼고 내용어만 센다",
+   _bt.content_words("It is the thing that I want") == ["thing", "want"],
+   str(_bt.content_words("It is the thing that I want")))
+# **부정은 기능어라도 빼지 않는다.** 빠지면 뜻이 정반대로 뒤집힌다.
+ok("부정은 남긴다", "not" in _bt.content_words("I do not know"))
+ok("표시 안의 글자는 안 센다",
+   _bt.content_words("[Sarah] come in") == ["come"],
+   str(_bt.content_words("[Sarah] come in")))
+
+# 줄임말을 펴지 않으면 원문 `don't`와 역번역 `do not`이 어긋난 것으로 보인다 —
+# 가장 중요한 신호인 부정이 바로 그 무늬라 그냥 두면 못 쓴다.
+for _src, _back, _want in [
+    ("I don't know", "I do not know", 1.0),
+    ("We can't wait", "We cannot wait", 1.0),       # `n't`를 먼저 걸면 `ca not`이 된다
+    ("He won't come", "He will not come", 1.0),
+    ("I never said I'd go alone", "I never said I would go alone", 1.0),
+]:
+    ok(f"줄임말을 펴서 같게 본다: {_src}", abs(_bt.overlap(_src, _back) - _want) < 1e-9,
+       f"{_bt.overlap(_src, _back):.2f}")
+
+# 뜻이 새면 점수가 떨어진다.
+ok("부정이 사라지면 점수가 내려간다",
+   _bt.overlap("I don't know", "I know") < 1.0)
+ok("낱말이 사라지면 점수가 내려간다",
+   _bt.overlap("I never said I'd go alone", "I said I would go alone") < 1.0)
+# **원문 기준으로 센다**(재현율). 역번역이 말을 덧붙이는 것은 관심이 아니다.
+ok("덧붙임은 점수를 깎지 않는다",
+   _bt.overlap("Come in", "Please come inside right now and come in") == 1.0,
+   str(_bt.overlap("Come in", "Please come inside right now and come in")))
+ok("셀 것이 없으면 점수도 없다", _bt.overlap("The is a", "anything") is None)
+
+_btevs = [_PEvent(1, 0, 2000, "혼자 가겠다고 했어요"),
+          _PEvent(2, 2000, 4000, "5분 기다려요")]
+_btsrc = {1: "I never said I'd go alone", 2: "Wait five minutes"}
+_btd = _bt.compare(_btevs, _btsrc, {1: "I said I would go alone",
+                                    2: "Wait five minutes"})
+ok("점수 낮은 순으로 낸다", [d.event_index for d in _btd] == [1, 2],
+   str([(d.event_index, round(d.score, 2)) for d in _btd]))
+ok("빠진 낱말을 짚는다", _btd[0].missing == ["never"], str(_btd[0].missing))
+ok("원문·번역·역번역을 함께 낸다",
+   all((_btd[0].source, _btd[0].korean, _btd[0].back)))
+# 역번역이 없는 번호는 견줄 수 없다. 넘긴다.
+ok("역번역이 없으면 넘긴다", _bt.compare(_btevs, _btsrc, {}) == [])
+
+# **임계값을 두지 않는다.** 자르는 것은 점수가 아니라 개수다 — 몇 점 이하가 오역인지는
+# 실제 작업물로 재야 알고, 재기 전에 임계값을 박으면 오답 공장이 된다.
+ok("개수로 자른다", len(_bt.worst(_btd, 1)) == 1)
+ok("0을 주면 전부", len(_bt.worst(_btd, 0)) == 2)
+_btstats = _bt.summarize(_btd)
+ok("눈금을 낸다", set(_btstats) == {"total", "mean", "median", "min", "below_half"},
+   str(sorted(_btstats)))
+ok("빈 목록도 터지지 않는다", _bt.summarize([]) == {"total": 0})
+
+
+class _LeakyBack:
+    """부정을 흘리는 역번역 흉내."""
+
+    def ask(self, system, prompt):
+        out = []
+        for line in prompt.splitlines():
+            head = line.strip().split(".")[0].strip()
+            if head == "1":
+                out.append("1. I said I would go alone")
+            elif head == "2":
+                out.append("2. Wait five minutes")
+        return "\n".join(out)
+
+
+_btresult = _pl.stage_backtranslate(_btevs, _trprof, translator=_LeakyBack(),
+                                    source=_btsrc)
+# **자막을 바꾸지 않는다** — 이 단계는 읽기만 한다.
+ok("역번역이 자막을 바꾸지 않는다",
+   [e.text for e in _btresult.events] == [e.text for e in _btevs])
+ok("어긋난 자리를 낸다",
+   [d.event_index for d in _btresult.extra["worst"]] == [1, 2],
+   str([d.event_index for d in _btresult.extra["worst"]]))
+ok("역번역은 위반을 내지 않는다", _btresult.violations == [])
+
+
+class _DeadBack:
+    def ask(self, system, prompt):
+        raise RuntimeError("모델 없음")
+
+
+# 한 묶음이 실패해도 나머지가 돌아야 한다. 여기서는 전부 실패하지만 터지지 않는다.
+_btdead = _pl.stage_backtranslate(_btevs, _trprof, translator=_DeadBack(),
+                                  source=_btsrc)
+ok("역번역이 실패해도 터지지 않는다", _btdead.extra["summary"] == {"total": 0},
+   str(_btdead.extra["summary"]))
+
+
 # --- 결과 ---------------------------------------------------------------
 
 print(f"통과 {PASSED}건")

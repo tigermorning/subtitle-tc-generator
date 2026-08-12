@@ -210,6 +210,37 @@ def stage_revise(events: list[Event], profile: dict, *, translator,
     )
 
 
+def stage_backtranslate(events: list[Event], profile: dict | None = None, *,
+                        translator, source: dict[int, str], language: str = "en",
+                        worst: int = 20,
+                        progress: Progress | None = None) -> StageResult:
+    """번역을 원어로 되돌려 원문과 견준다. **자막을 바꾸지 않는다** — 읽기만 한다.
+
+    두 자리에서 부른다:
+
+        1차 직후   층1(`mistranslation`)이 놓친 뜻 변화
+        3차 끝     **윤문이 뜻을 깎았는지** — 2차·3차가 글자를 줄이며 의미를 버릴 수
+                   있어서, 1차만 검증하면 그 유실을 못 잡는다
+
+    **임계값을 두지 않는다.** 몇 점 이하가 오역인지는 실제 작업물로 재야 안다. 점수
+    낮은 순으로 정렬해 상위 몇 개를 낸다 — 판정이 아니라 순위다.
+    """
+    from . import backtranslate as bt
+
+    say = progress or _silent
+    say(f"원어로 되돌려 원문과 견줍니다 — 자막 {len(events)}개")
+    back = bt.run(events, translator, language=language, progress=say)
+    diverged = bt.compare(events, source, back)
+    picked = bt.worst(diverged, worst)
+    stats = bt.summarize(diverged)
+    if stats.get("total"):
+        say(f"견준 자막 {stats['total']}개 · 원문 낱말이 남은 비율 중간값 "
+            f"{stats['median']:.0%} · 절반도 안 남은 자막 {stats['below_half']}개")
+    return StageResult(events=list(events),
+                       extra={"back": back, "diverged": diverged, "worst": picked,
+                              "summary": stats})
+
+
 def stage_terms(events: list[Event], profile: dict | None = None, *,
                 corrector_path: str | None = None, knp: Path | None = None,
                 web: bool = False, translator=None,

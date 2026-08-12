@@ -80,6 +80,23 @@ def _format_text(report: dict, path: Path) -> str:
                 out.append(f"           번역 {flag['target'][:60]}")
         if len(flags) > 10:
             out.append(f"    … 외 {len(flags) - 10}곳")
+    if report.get("backtranslation"):
+        bt = report["backtranslation"]
+        stats, rows = bt["summary"], bt["worst"]
+        out.append(f"  역번역 대조 — 견준 자막 {stats.get('total', 0)}개, 원문 낱말이 "
+                   f"남은 비율 중간값 {stats.get('median', 0):.0%}, "
+                   f"절반도 안 남은 자막 {stats.get('below_half', 0)}개")
+        # **판정이 아니라 순위다.** 몇 점 이하가 오역인지는 실제 작업물로 재야 안다.
+        out.append("    점수가 낮은 순입니다(판정이 아니라 순위 — 기준선이 없습니다)")
+        for row in rows[:8]:
+            out.append(f"    #{row['event_index']} {row['score']:.0%}"
+                       + (f"  빠진 낱말: {', '.join(row['missing'][:5])}"
+                          if row["missing"] else ""))
+            out.append(f"           원문   {row['source'][:60]}")
+            out.append(f"           번역   {row['korean'][:60]}")
+            out.append(f"           역번역 {row['back'][:60]}")
+        if len(rows) > 8:
+            out.append(f"    … 외 {len(rows) - 8}개")
     if report.get("timecodes_locked"):
         out.append("  타임코드 고정: 받은 타임코드를 그대로 둡니다(나누기·수렴·스포팅 안 함)")
     if report.get("lock_violation"):
@@ -434,6 +451,20 @@ def _run_one(path: Path, profile: dict, args, backend) -> dict | None:
                 report[f"revisions_{row['stage']}"] = [
                     {"event_index": r.index, "before": r.before, "after": r.after}
                     for r in stage_revisions]
+
+        # **윤문이 끝난 뒤에 잰다.** 2차·3차가 글자를 줄이며 뜻을 깎을 수 있어서,
+        # 1차만 검증하면 그 유실을 못 잡는다.
+        if getattr(args, "backtranslate", False):
+            from .pipeline import stage_backtranslate
+            checked = stage_backtranslate(
+                translated, profile, translator=translator,
+                source={e.index: e.text for e in events},
+                language=args.lang if args.lang != "ko" else "en",
+                worst=args.backtranslate_worst, progress=say)
+            report["backtranslation"] = {
+                "summary": checked.extra["summary"],
+                "worst": [d.to_dict() for d in checked.extra["worst"]],
+            }
 
         out_path = args.out or path.with_suffix(".ko.srt")
         write_srt(translated, out_path)
@@ -875,6 +906,14 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--web", action="store_true",
                     help="규범 용례에 없는 것을 위키백과에서도 찾는다. "
                          "**낱말만 보낸다** — 대사는 나가지 않는다. 기본은 끔")
+    ap.add_argument("--backtranslate", action="store_true",
+                    help="번역을 원어로 되돌려 원문과 견준다. 같은 언어끼리 견주므로 "
+                         "낱말로 잴 수 있고, 어긋난 자리를 원문·번역·역번역 3단으로 "
+                         "보여 준다. **한 회차 더 도는 비용이다.** 로컬 모델로만 돈다")
+    ap.add_argument("--backtranslate-worst", type=int, default=20,
+                    help="역번역 결과에서 점수 낮은 순으로 몇 개를 보일지(기본 20). "
+                         "임계값을 두지 않는 이유는 몇 점 이하가 오역인지 실제 "
+                         "작업물로 재야 알기 때문이다 — 판정이 아니라 순위다")
     ap.add_argument("--cast", type=Path,
                     help="캐릭터 시트(--characters로 만든 .characters.tsv). "
                          "'말투 지정' 칸을 채워 주면 T17(정한 말투를 벗어난 자리)이 "
