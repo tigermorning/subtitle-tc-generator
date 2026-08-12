@@ -399,6 +399,10 @@ def _run_one(path: Path, profile: dict, args, backend) -> dict | None:
             later = stage_revise(translated, profile, translator=translator,
                                  source={e.index: e.text for e in events},
                                  glossary=glossary, rounds=args.passes - 1,
+                                 # 캐릭터 시트가 있으면 **정한 말투대로 쓰게** 한다.
+                                 # 같은 시트가 T17 검사도 돌린다 — 정하고, 쓰고,
+                                 # 검사하는 것이 한 자료다.
+                                 cast=getattr(args, "_cast", None),
                                  progress=say)
             translated = later.events
             print(f"  {revision_report(later.extra['revisions'], show=6)}")

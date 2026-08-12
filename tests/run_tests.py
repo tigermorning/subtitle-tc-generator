@@ -2458,6 +2458,87 @@ with _t17tf.TemporaryDirectory() as _t17d:
 ok("모르는 말투 표기는 빈 값", _ch._tone_of("아무말") == "", _ch._tone_of("아무말"))
 
 
+# --- 단계마다 볼 것이 다르다 (프롬프트 재배치) --------------------------------
+# 1차가 문체·간결성·문화 조정까지 한꺼번에 시키고 있었다. 작업자 자료 569~579행이
+# 나눠 놓은 것과 어긋나고, 한 번에 셋을 시키면 모델이 뒤섞어 어중간하게 낸다 —
+# 그러면 가장 비싼 것(오역)에 쓸 여유가 없어진다.
+#
+# **규칙이 두 단계에 겹치면 고칠 때 한 곳만 고친다.** 그래서 겹침을 시험이 잡는다.
+
+from checker.translate import SYSTEM as _P1  # noqa: E402
+from checker.revise import (SECOND_PASS as _P2, THIRD_PASS as _P3,  # noqa: E402
+                           cast_hint as _cast_hint, genre_hint as _genre_hint)
+
+# 문체·간결·문장부호는 **3차에만** 있어야 한다.
+for _mark in ("마침표", "인칭대명사", "문장 요소", "과감히", "문장 부호"):
+    ok(f"'{_mark}'는 3차에만", _mark in _P3 and _mark not in _P1 and _mark not in _P2,
+       f"1차={_mark in _P1} 2차={_mark in _P2} 3차={_mark in _P3}")
+
+# 오역은 1차의 일이다. 2차도 다시 보지만 1차가 첫 책임이다.
+ok("1차가 오역을 못 박는다", "오역은 괜찮지 않습니다" in _P1)
+ok("1차는 투박한 한국어를 허용한다", "투박" in _P1)
+ok("1차가 부정·숫자·이름을 짚는다",
+   all(w in _P1 for w in ("부정", "숫자", "이름")))
+# 구조는 1차에서 지켜야 한다 — 번호가 타임코드에 걸려 있어 뒤 단계가 복구할 수 없다.
+ok("1차가 번호 보존을 요구한다", "번호를 합치거나 나누지" in _P1)
+
+# 말투는 2차의 일로 옮겼다. 전에는 2차가 "말투는 1차를 따릅니다"라고 해서,
+# 1차가 말투를 정하지 않게 되면 **아무도 정하지 않는 상태**가 됐다.
+ok("1차는 말투를 존댓말로 통일만 한다", "존댓말로 통일" in _P1)
+ok("2차가 말투를 정한다", "인물 관계" in _P2 and "말투" in _P2)
+ok("2차에 '말투는 1차를 따릅니다'가 없다", "1차를 따릅니다" not in _P2)
+# 3차는 2차가 정한 것을 흔들지 않는다.
+ok("3차는 말투를 바꾸지 않는다", "말투를 바꾸지 마세요" in _P3)
+ok("3차는 뜻을 바꾸지 않는다", "뜻을 바꾸지 마세요" in _P3)
+# 글자 수는 마지막이다(CLAUDE.md 1번).
+ok("2차는 글자 수를 미룬다", "글자 수를 줄이는 것은 3차" in _P2)
+
+# `DOCUMENTARY_RULES`는 **죽은 코드였다** — 정의만 있고 참조가 0건. 층이 틀렸기
+# 때문이다. 이제 프로파일에서 읽는다.
+import checker.translate as _tr  # noqa: E402
+ok("죽은 상수를 지웠다", not hasattr(_tr, "DOCUMENTARY_RULES"))
+
+_hint = _genre_hint(_gdoc)
+ok("장르 규칙을 프로파일에서 읽는다", "~씨" in _hint and "극존칭" in _hint, _hint)
+ok("합니다체 권장을 넣는다", "습니다" in _hint, _hint)
+# **'요'를 금지하지 않는다.** 허용된다는 확인을 받았다.
+ok("'요'를 금지하지 않는다", "괜찮습니다" in _hint, _hint)
+ok("장르가 없으면 조각도 없다", _genre_hint(_gbase) == "", _genre_hint(_gbase))
+ok("프로파일이 없어도 터지지 않는다", _genre_hint(None) == "")
+
+# 캐릭터 시트가 정한 말투를 감수 프롬프트에 물린다 — **정하고, 쓰고, 검사하는 것이
+# 한 자료다**(같은 시트가 T17도 돌린다).
+_ch_hint = _cast_hint({"민수": "합니다체", "영희": "반말"})
+ok("인물별 말투를 프롬프트에 넣는다",
+   "민수: 합니다체" in _ch_hint and "영희: 반말" in _ch_hint, _ch_hint)
+ok("시트에 없는 인물은 존댓말", "존댓말" in _ch_hint, _ch_hint)
+ok("시트가 없으면 조각도 없다", _cast_hint(None) == "" and _cast_hint({}) == "")
+
+
+class _SpyTranslator:
+    """무엇을 물었는지 남기는 흉내."""
+
+    def __init__(self):
+        self.systems = []
+
+    def ask(self, system, prompt):
+        self.systems.append(system)
+        return "\n".join(f"{n}. 그대로" for n in range(1, 3))
+
+
+_spy = _SpyTranslator()
+_pl.stage_revise([_PEvent(1, 0, 2000, "가"), _PEvent(2, 2000, 4000, "나")],
+                 _gdoc, translator=_spy, source={1: "a", 2: "b"}, rounds=2,
+                 cast={"민수": "합니다체"})
+# 장르·인물 말투는 **말투를 정하는 단계에만** 붙는다. 윤문에 붙이면 3차가 말투를
+# 다시 만지고, 그건 2차가 정한 것을 흔드는 일이다.
+ok("감수 프롬프트에만 장르가 붙는다",
+   "~씨" in _spy.systems[0] and "~씨" not in _spy.systems[-1],
+   f"감수={'~씨' in _spy.systems[0]} 윤문={'~씨' in _spy.systems[-1]}")
+ok("감수 프롬프트에만 인물 말투가 붙는다",
+   "민수: 합니다체" in _spy.systems[0] and "민수: 합니다체" not in _spy.systems[-1])
+
+
 # --- 결과 ---------------------------------------------------------------
 
 print(f"통과 {PASSED}건")

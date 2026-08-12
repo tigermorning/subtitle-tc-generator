@@ -114,10 +114,10 @@ class TranslateJob(Job):
     """
 
     def __init__(self, events, profile: dict, passes: int, knp: Path | None,
-                 model: str | None = None):
+                 model: str | None = None, cast: dict | None = None):
         super().__init__()
         self.events, self.profile, self.passes, self.knp = events, profile, passes, knp
-        self.model = model
+        self.model, self.cast = model, cast
 
     def run(self) -> None:
         def work():
@@ -145,7 +145,7 @@ class TranslateJob(Job):
                 later = stage_revise(events, self.profile, translator=translator,
                                      source={e.index: e.text for e in source},
                                      glossary=glossary, rounds=self.passes - 1,
-                                     progress=self.say)
+                                     cast=self.cast, progress=self.say)
                 events, revisions = later.events, later.extra["revisions"]
                 for row in later.extra["rounds"]:
                     self.say(f"{row['stage']}({row['role']}) {row['changed']}곳 고침")

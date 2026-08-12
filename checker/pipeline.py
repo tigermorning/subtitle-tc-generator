@@ -156,6 +156,7 @@ def stage_translate(events: list[Event], profile: dict, *, translator,
 def stage_revise(events: list[Event], profile: dict, *, translator,
                  source: dict[int, str] | None = None, glossary=None,
                  rounds: int = 1, first_round: int = 2,
+                 cast: dict[str, str] | None = None,
                  progress: Progress | None = None) -> StageResult:
     """감수를 `rounds`번 돈다. **회차를 하드코딩하지 않는다.**
 
@@ -181,7 +182,7 @@ def stage_revise(events: list[Event], profile: dict, *, translator,
         say(f"{label} ({role})")
         current, revisions = revise(current, translator, source=source,
                                     glossary=glossary, stage=label, role=role,
-                                    progress=say)
+                                    profile=profile, cast=cast, progress=say)
         all_revisions += revisions
         per_round.append({"stage": label, "role": role,
                           "changed": sum(1 for r in revisions if r.changed)})
