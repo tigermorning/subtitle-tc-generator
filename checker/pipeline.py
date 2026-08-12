@@ -231,23 +231,48 @@ class Stage:
     id: str
     label: str
     requires: tuple[str, ...] = ()
+    needs_video: bool = False
     note: str = ""
 
-    def available(self, done: set[str], has_subtitle: bool) -> tuple[bool, str]:
-        missing = [r for r in self.requires if r not in done]
-        if self.id != "generate" and not has_subtitle:
-            return False, "자막이 없습니다. [자막 만들기]로 만들거나 [자막 열기]로 여세요."
+    def available(self, *, has_subtitle: bool, has_video: bool = False,
+                  done: set[str] | None = None) -> tuple[bool, str]:
+        """켤 수 있는가, 아니면 **왜 안 되는가**.
+
+        이유를 여기서 문장으로 돌려주는 것이 요점이다. 지금은 같은 안내가
+        `app/window.py`의 세 곳(502·522·545행)에 복사돼 있어, 단계를 하나 늘리면
+        세 곳을 고쳐야 한다.
+        """
+        if self.needs_video and not has_video:
+            return False, "영상이 필요합니다. [영상 열기]로 영상을 여세요."
+        if not self.needs_video and not has_subtitle:
+            return False, ("자막이 없습니다. [① 자막 만들기]로 만들거나 "
+                           "[자막 열기]로 여세요.")
+        missing = [r for r in self.requires if r not in (done or set())]
         if missing:
-            return False, f"먼저 끝내야 하는 단계가 있습니다: {', '.join(missing)}"
+            labels = [s.label for s in STAGES if s.id in missing]
+            return False, f"먼저 끝내야 합니다: {', '.join(labels)}"
         return True, ""
 
 
-# 화면에 이 순서로 보인다. 번역·번역 QA는 여기 한 줄씩 더하면 된다.
+# 화면에 이 순서로, 이 번호로 보인다. 번역·번역 QA는 여기 한 줄씩 더하면 된다.
+#
+# `needs_video`가 참인 단계는 영상이 있어야 켜진다. 나머지는 자막만 있으면 된다 —
+# 작업자가 이미 만들어진 자막을 받아 교정만 하는 경우가 실무에서 가장 흔하다
+# (`CLAUDE.md` §8).
 STAGES: tuple[Stage, ...] = (
-    Stage("generate", "자막 만들기",
-          note="영상에서 전사·타임코드·초벌 자막을 만든다. 교정은 하지 않는다."),
-    Stage("korean", "한국어 교정",
+    Stage("generate", "① 자막 만들기", needs_video=True,
+          note="영상에서 전사·타임코드·초벌 자막을 만든다. **교정은 하지 않는다** — "
+               "초안을 사람이 먼저 보게 한다."),
+    Stage("korean", "② 한국어 교정",
           note="맞춤법·띄어쓰기를 국립국어원 근거로 본다. 자동 교정과 확인 항목이 갈린다."),
-    Stage("check", "규정 검사",
+    Stage("check", "③ 규정 검사",
           note="발주처 규정 위반을 센다. 자막이 바뀌면 다시 돌려야 한다."),
+    Stage("translate", "번역",
+          note="원어를 한국어 초벌로 옮긴다. 타임코드는 건드리지 않는다."),
+    Stage("terms", "용어표",
+          note="대본에서 고유명사·약어를 뽑아 조사한다. 자막을 바꾸지 않는다."),
 )
+
+
+def stage_by_id(stage_id: str) -> Stage | None:
+    return next((s for s in STAGES if s.id == stage_id), None)

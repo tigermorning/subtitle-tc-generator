@@ -214,16 +214,16 @@ class MainWindow(QMainWindow):
         self.kind_box.addItems(["translation", "sdh"])
         self.language_box = QComboBox()
         self.language_box.addItems(["en", "ko", "auto"])
-        self.translate_check = QCheckBox("번역")
-        self.korean_check = QCheckBox("한국어 교정")
-        self.korean_check.setChecked(True)
+        # 자막 만들 때 번역까지 함께 할지. **한국어 교정 체크박스는 없앴다** —
+        # 버튼(② 한국어 교정)이 되었으므로 체크박스로 또 있으면 어느 쪽이 언제 걸리는지
+        # 화면만 봐서는 알 수 없다. 단계는 버튼 하나가 하나씩 맡는다.
+        self.translate_check = QCheckBox("만들 때 번역까지")
 
         for label, widget in (("플랫폼", self.platform_box), ("종류", self.kind_box),
                               ("원어", self.language_box)):
             bar.addWidget(QLabel(f"  {label} "))
             bar.addWidget(widget)
         bar.addWidget(self.translate_check)
-        bar.addWidget(self.korean_check)
         bar.addSeparator()
 
         bar.addSeparator()
@@ -232,15 +232,23 @@ class MainWindow(QMainWindow):
         bar.addAction(settings_action)
         bar.addSeparator()
 
-        self.pipeline_buttons = []
-        for title, slot in (("영상에서 자막 만들기", self.run_generate),
-                            ("검사·교정", self.run_check),
-                            ("번역", self.run_translate),
-                            ("용어표", self.run_terms)):
-            action = QAction(title, self)
-            action.triggered.connect(slot)
+        # **버튼을 `STAGES`에서 만든다.** 목록이 유일한 사실이고 화면은 그것을 그린다 —
+        # 번역 QA 같은 단계를 붙일 때 `pipeline.STAGES`에 한 줄만 더하면 된다.
+        from checker.pipeline import STAGES
+
+        slots = {"generate": self.run_generate, "korean": self.run_korean,
+                 "check": self.run_check, "translate": self.run_translate,
+                 "terms": self.run_terms}
+        self.stage_actions: dict = {}
+        for stage in STAGES:
+            action = QAction(stage.label, self)
+            action.setToolTip(stage.note)
+            action.triggered.connect(slots[stage.id])
             bar.addAction(action)
-            self.pipeline_buttons.append(action)
+            self.stage_actions[stage.id] = action
+        # 옛 이름을 쓰던 자리가 남아 있어도 깨지지 않게 한다.
+        self.pipeline_buttons = list(self.stage_actions.values())
+        self._refresh_stages()
 
     NEW_PROFILE = "＋ 새 기준 만들기..."
 
@@ -448,9 +456,8 @@ class MainWindow(QMainWindow):
         self._threads.append(thread)
 
     def run_generate(self) -> None:
-        self._note("[영상에서 자막 만들기] 눌림")
-        if not getattr(self, "_video_path", None):
-            self._refuse("영상이 필요합니다", "먼저 [영상 열기]로 영상을 여세요.")
+        self._note("[① 자막 만들기] 눌림")
+        if not self._stage_guard("generate"):
             return
         if not self.player:
             # **재생기가 없어도 자막은 만들 수 있다.** 전사는 ffmpeg가 하지 mpv가
@@ -495,31 +502,78 @@ class MainWindow(QMainWindow):
 
         self._start(job, done, "영상에서 자막을 만드는 중입니다...")
 
+    def _stage_guard(self, stage_id: str) -> bool:
+        """단계를 켤 수 있는지 묻고, 안 되면 **왜인지** 화면에 보인다.
+
+        이유를 여기서 만들지 않는다 — `pipeline.STAGES`가 갖고 있다. 전에는 같은
+        안내 문구가 이 파일 세 곳에 복사돼 있었다.
+        """
+        from checker.pipeline import stage_by_id
+
+        stage = stage_by_id(stage_id)
+        if stage is None:
+            return True
+        ok, why = stage.available(has_subtitle=bool(self.model.events),
+                                  has_video=bool(getattr(self, "_video_path", None)))
+        if not ok:
+            self._refuse(f"[{stage.label}]를 지금 할 수 없습니다", why)
+        return ok
+
+    def _refresh_stages(self) -> None:
+        """버튼의 켬/끔과 안내를 상태에 맞춘다. 자막·영상이 바뀔 때마다 부른다."""
+        from checker.pipeline import STAGES
+
+        for stage in STAGES:
+            action = self.stage_actions.get(stage.id)
+            if action is None:
+                continue
+            ok, why = stage.available(has_subtitle=bool(self.model.events),
+                                      has_video=bool(getattr(self, "_video_path", None)))
+            action.setEnabled(ok)
+            # 끈 이유를 도구설명으로 보인다. 눌러 보고 팝업으로 알게 되는 것보다 낫다.
+            action.setToolTip(stage.note if ok else f"{why}\n\n{stage.note}")
+
+    def _apply_stage_result(self, events, violations, label: str) -> None:
+        """단계 결과를 화면에 반영한다. 세 단계가 같은 뒷처리를 한다."""
+        self.model.replace(events)
+        self.waveform.set_events(self.model.events)
+        self._preview_timer.start()
+        self._show_violations(violations)
+        self.statusBar().showMessage(f"{label} — 남은 지적 {len(violations)}건")
+        self._refresh_stages()
+
+    def run_korean(self) -> None:
+        """② 한국어 교정. **규정 검사와 갈라 놓았다** — 전에는 한 버튼이 둘을 했고,
+        어느 쪽이 언제 걸리는지 화면만 봐서는 알 수 없었다."""
+        self._note("[② 한국어 교정] 눌림")
+        if not self._stage_guard("korean"):
+            return
+        path = self._corrector_path()
+        if not path:
+            self._refuse("한국어 교정기를 찾지 못했습니다",
+                         "교정기 폴더를 프로그램 옆에 두거나 [도움말 → 진단]에서 자리를 "
+                         "확인하세요.")
+            return
+        job = jobs.CheckJob(self.model.events, self._profile(), fix=False,
+                            korean=True, corrector_path=path)
+        self._start(job,
+                    lambda r: self._apply_stage_result(r[0], r[1], "한국어 교정 완료"),
+                    "한국어 교정 중입니다...")
+
     def run_check(self) -> None:
-        self._note("[검사·교정] 눌림")
-        if not self.model.events:
-            self._refuse("검사할 자막이 없습니다",
-                         "[영상에서 자막 만들기]로 만들거나 [자막 열기]로 여세요.")
+        """③ 규정 검사. 발주처 규정만 본다. 한국어 교정은 ②가 한다."""
+        self._note("[③ 규정 검사] 눌림")
+        if not self._stage_guard("check"):
             return
         job = jobs.CheckJob(self.model.events, self._profile(), fix=True,
-                            korean=self.korean_check.isChecked(),
-                            corrector_path=self._corrector_path())
-
-        def done(result):
-            events, violations = result
-            self.model.replace(events)
-            self.waveform.set_events(self.model.events)
-            self._preview_timer.start()
-            self._show_violations(violations)
-            self.statusBar().showMessage(f"남은 지적 {len(violations)}건")
-
-        self._start(job, done, "검사·교정 중입니다...")
+                            korean=False, corrector_path=None)
+        self._start(job,
+                    lambda r: self._apply_stage_result(r[0], r[1], "규정 검사 완료"),
+                    "규정 검사 중입니다...")
 
     def run_translate(self) -> None:
         self._note("[번역] 눌림")
-        if not self.model.events:
-            self._refuse("번역할 자막이 없습니다",
-                         "[영상에서 자막 만들기]로 만들거나 [자막 열기]로 여세요.")
+        if not self._stage_guard("translate"):
             return
         from checker.knp import find_for
         knp = find_for(self.subtitle_path) if self.subtitle_path else None
@@ -540,9 +594,7 @@ class MainWindow(QMainWindow):
 
     def run_terms(self) -> None:
         self._note("[용어표] 눌림")
-        if not self.model.events:
-            self._refuse("용어를 뽑을 자막이 없습니다",
-                         "[영상에서 자막 만들기]로 만들거나 [자막 열기]로 여세요.")
+        if not self._stage_guard("terms"):
             return
         from checker.knp import find_for
         base = self.subtitle_path or Path("용어표.srt")
@@ -620,6 +672,7 @@ class MainWindow(QMainWindow):
                                     f"{MPV_MISSING}\n\n{exc}")
                 return
         self._video_path = path
+        self._refresh_stages()
         self.player.open(path)
         self.statusBar().showMessage(f"영상: {Path(path).name}  {self.player.fps:.3f}fps"
                                      f" — 파형을 만드는 중입니다...")
@@ -637,6 +690,7 @@ class MainWindow(QMainWindow):
             return
         self.subtitle_path = Path(path)
         self.model.replace(events)
+        self._refresh_stages()
         self.waveform.set_events(self.model.events)
         self._preview_timer.start()
         self.statusBar().showMessage(f"자막 {len(events)}개: {self.subtitle_path.name}")
