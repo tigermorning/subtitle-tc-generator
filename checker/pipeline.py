@@ -173,7 +173,7 @@ def stage_revise(events: list[Event], profile: dict, *, translator,
                  source: dict[int, str] | None = None, glossary=None,
                  rounds: int = 1, first_round: int = 2, max_rounds: int = 0,
                  settle_at: int = 0, cast: dict[str, str] | None = None,
-                 progress: Progress | None = None) -> StageResult:
+                 on_round=None, progress: Progress | None = None) -> StageResult:
     """감수를 돈다. **회차를 하드코딩하지 않고, 멈춘 이유를 기록한다.**
 
     전에는 두 어댑터가 각자 `("2차", "3차")[:passes - 1]`을 적어 두어 3차를 넘길 수
@@ -219,6 +219,10 @@ def stage_revise(events: list[Event], profile: dict, *, translator,
         changed = sum(1 for r in revisions if r.changed)
         all_revisions += revisions
         per_round.append({"stage": label, "role": role, "changed": changed})
+        # **회차마다 중간 결과를 넘긴다.** 이것이 없으면 어댑터가 마지막 것만 남길 수
+        # 있고, 그러면 회차 사이를 견줄 수 없다 — 어느 회차에서 나빠졌는지 알아야 한다.
+        if on_round:
+            on_round(label, role, list(current), changed)
 
         # 최소 회차는 채운다 — 2차를 안 돌면 오역·용어를 아무도 보지 않는다.
         if n + 1 >= rounds and changed <= settle_at:

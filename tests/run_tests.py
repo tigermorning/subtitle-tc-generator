@@ -2825,6 +2825,63 @@ ok("임계를 넘기면 최소만 돌고 멈춘다", len(_minimum.extra["rounds"
    str([(r["stage"], r["changed"]) for r in _minimum.extra["rounds"]]))
 
 
+# --- 단계별 결과 남기기 (.work/) ---------------------------------------------
+# **15분 걸린 번역이 3차에서 깨지면 처음부터였다.** GUI는 아무것도 남기지 않고
+# 메모리에서만 돌았고, CLI는 확장자가 파편적이라 어느 것이 어느 단계인지 규칙이 없었다.
+
+from checker import work as _wk  # noqa: E402
+
+with _t17tf.TemporaryDirectory() as _wkd:
+    _wksub = Path(_wkd) / "ep01.srt"
+    _wksub.write_text("1\n00:00:01,000 --> 00:00:03,000\n원문\n", encoding="utf-8")
+    _w = _wk.Work.beside(_wksub)
+    # **원본을 덮어쓰지 않는다**(규칙 7). 폴더를 따로 만들고 그 안에만 쓴다.
+    ok("자막 옆에 폴더를 잡는다", _w.root.name == "ep01.work", _w.root.name)
+    ok("잡기만 하고 만들지는 않는다", not _w.root.exists())
+    ok("기록이 없으면 빈 것을 돌려준다", _w.manifest()["steps"] == [])
+
+    _wkfirst = [_PEvent(1, 1000, 3000, "1차"), _PEvent(2, 4000, 6000, "둘")]
+    _w.save("02-first", _wkfirst, model="exaone3.5:7.8b", seconds=12.34)
+    _w.save_source({1: "First line", 2: "Second"})
+    ok("자막을 남긴다", (_w.root / "02-first.srt").is_file())
+    ok("원본은 그대로", _wksub.read_text(encoding="utf-8").strip().endswith("원문"))
+    # 감수가 오역을 보려면 번호별 원문이 반드시 있어야 한다.
+    ok("원문을 남기고 되읽는다", _w.read_source() == {1: "First line", 2: "Second"},
+       str(_w.read_source()))
+
+    _wksecond = [_PEvent(1, 1000, 3000, "2차"), _PEvent(2, 4000, 6000, "둘")]
+    _w.save("03-revise-2차", _wksecond, extra={"changed": 1, "role": "감수"})
+    ok("회차마다 따로 남긴다", _w.steps() == ["02-first", "03-revise-2차"],
+       str(_w.steps()))
+    ok("마지막 단계에서 이어 할 수 있다", _w.last()[0] == "03-revise-2차",
+       _w.last()[0])
+    ok("되읽은 자막이 같다", [e.text for e in _w.read("03-revise-2차")] == ["2차", "둘"],
+       str([e.text for e in _w.read("03-revise-2차")]))
+    # 회차 사이를 견줄 수 있어야 어느 회차에서 나빠졌는지 알 수 있다.
+    ok("회차를 견준다",
+       _wk.diff(_w.read("02-first"), _w.read("03-revise-2차"))
+       == [{"event_index": 1, "before": "1차", "after": "2차"}],
+       str(_wk.diff(_w.read("02-first"), _w.read("03-revise-2차"))))
+
+    # **타임코드는 첫 단계에서 굳는다.** 이후 단계가 옮기면 잡아 기록한다 —
+    # 받은 타임코드를 건드리는 것이 실무에서 가장 비싼 사고다(규칙 8).
+    _wkmoved = [_PEvent(1, 1500, 3000, "3차"), _PEvent(2, 4000, 6000, "둘")]
+    _entry = _w.save("04-polish", _wkmoved)
+    ok("타임코드가 움직이면 기록에 남는다", _entry.get("timecodes_moved") == [1],
+       str(_entry.get("timecodes_moved")))
+    ok("요약에 경고로 나온다", "타임코드가 1곳 움직였습니다" in _w.summary(),
+       _w.summary()[-200:])
+    # **예외를 올리지 않는다.** 남기는 것은 보험이고, 막을지는 어댑터가 정한다.
+    ok("저장은 예외를 올리지 않는다", (_w.root / "04-polish.srt").is_file())
+
+    # 손으로 고치다 깨뜨릴 수 있다. 깨진 기록 때문에 작업이 멈추면 안 된다.
+    (_w.root / "manifest.json").write_text("{망가짐", encoding="utf-8")
+    ok("기록이 깨져도 터지지 않는다", _w.manifest()["steps"] == [],
+       str(_w.manifest())[:60])
+    ok("없는 단계를 읽으면 빈 목록", _w.read("없는단계") == [])
+    ok("아무것도 없으면 last가 빈 값", _wk.Work(Path(_wkd) / "없음").last() == ("", []))
+
+
 # --- 결과 ---------------------------------------------------------------
 
 print(f"통과 {PASSED}건")

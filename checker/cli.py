@@ -426,8 +426,23 @@ def _run_one(path: Path, profile: dict, args, backend) -> dict | None:
         _add_knp(glossary, args, path)
 
         say = lambda m: print(f"    {m}", file=sys.stderr)   # noqa: E731
+
+        # **깨졌을 때 처음부터 하지 않게 단계마다 남긴다.** 원본은 건드리지 않는다 —
+        # 폴더를 따로 만들고 그 안에만 쓴다(규칙 7).
+        work = None
+        if not getattr(args, "no_work", False):
+            from .work import Work
+            work = Work.beside(path)
+            work.save_source({e.index: e.text for e in events})
+
+        import time as _time
+        _began = _time.monotonic()
         first = stage_translate(events, profile, translator=translator,
                                 glossary=glossary, progress=say)
+        if work:
+            work.save("02-first", first.events, model=translator.model,
+                      seconds=_time.monotonic() - _began,
+                      extra={"flags": len(first.extra.get("flags") or [])})
         translated = first.events
         report["translation_notes"] = first.extra["notes_by_index"]
         # **위반이 아니라 플래그다.** 부정·숫자는 추정이므로 지적 목록에 섞지 않는다.
@@ -446,6 +461,14 @@ def _run_one(path: Path, profile: dict, args, backend) -> dict | None:
                                  max_rounds=(args.max_passes - 1
                                              if args.max_passes > args.passes else 0),
                                  settle_at=args.settle_at,
+                                 # **회차마다 남긴다.** 회차 사이를 견줄 수 있어야
+                                 # 어느 회차에서 나빠졌는지 알 수 있다.
+                                 on_round=((lambda label, role, evs, changed:
+                                            work.save(f"03-revise-{label}", evs,
+                                                      model=translator.model,
+                                                      extra={"changed": changed,
+                                                             "role": role}))
+                                           if work else None),
                                  # 캐릭터 시트가 있으면 **정한 말투대로 쓰게** 한다.
                                  # 같은 시트가 T17 검사도 돌린다 — 정하고, 쓰고,
                                  # 검사하는 것이 한 자료다.
@@ -478,6 +501,10 @@ def _run_one(path: Path, profile: dict, args, backend) -> dict | None:
                 "summary": checked.extra["summary"],
                 "worst": [d.to_dict() for d in checked.extra["worst"]],
             }
+
+        if work:
+            report["work_dir"] = str(work.root)
+            report["work_steps"] = work.steps()
 
         out_path = args.out or path.with_suffix(".ko.srt")
         write_srt(translated, out_path)
@@ -919,6 +946,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--web", action="store_true",
                     help="규범 용례에 없는 것을 위키백과에서도 찾는다. "
                          "**낱말만 보낸다** — 대사는 나가지 않는다. 기본은 끔")
+    ap.add_argument("--no-work", action="store_true",
+                    help="단계별 결과를 <자막이름>.work/에 남기지 않는다. 기본은 "
+                         "남긴다 — 15분 걸린 번역이 3차에서 깨지면 처음부터 하게 되고, "
+                         "그것이 실사용에서 가장 비쌌다")
     ap.add_argument("--backtranslate", action="store_true",
                     help="번역을 원어로 되돌려 원문과 견준다. 같은 언어끼리 견주므로 "
                          "낱말로 잴 수 있고, 어긋난 자리를 원문·번역·역번역 3단으로 "

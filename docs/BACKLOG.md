@@ -3,7 +3,7 @@
 이 파일은 **작업을 이어받기 위해** 있다. `CLAUDE.md`가 "이미 틀렸다가 바로잡은 규칙"을
 담고, 이 파일은 **아직 안 한 것과 왜 그 순서인지**를 담는다.
 
-마지막 갱신: 2026-08-12 · 마지막 커밋 `ff0768e`+T8 · 시험 733건 통과
+마지막 갱신: 2026-08-12 · 마지막 커밋 `dd65a41`+T9 · 시험 749건 통과
 
 ---
 
@@ -16,8 +16,8 @@
 **시험을 먼저 돌려 기준선을 잡는다.**
 
 ```bash
-python3 tests/run_tests.py                                    # 711건 (GUI 제외)
-cmd.exe /c "..\korean-subtitle-corrector\.venv\Scripts\python.exe tests\run_tests.py"   # 733건 (PySide6 포함)
+python3 tests/run_tests.py                                    # 727건 (GUI 제외)
+cmd.exe /c "..\korean-subtitle-corrector\.venv\Scripts\python.exe tests\run_tests.py"   # 749건 (PySide6 포함)
 ```
 
 시스템 `python3`에는 PySide6가 없다. GUI를 건드리면 반드시 venv 쪽으로도 돌린다.
@@ -78,6 +78,9 @@ recall 100%는 사전 커버리지가 상한이라 원리적으로 불가능하�
   권장은 규정이 아니다(규칙 4·5).
 - **`AGENTS.md`** — opencode·Codex는 `AGENTS.md`를 자동으로 읽고 `CLAUDE.md`는 읽지
   않는다. 규칙이 도구에 따라 빠지지 않게 입구를 만들었다.
+- **`work.py` + `.work/` 폴더.** 단계마다 남긴다 — CLI와 GUI 둘 다. 회차마다 따로
+  남기므로 회차 사이를 견줄 수 있다. 타임코드는 첫 단계에서 굳고 이후 옮기면 기록에
+  경고로 남는다. **남기기가 실패해도 본 작업은 멈추지 않는다.**
 - **누적 표류 가드.** `revise(baseline=...)`가 **1차 대비**로도 재므로, 회차마다
   1.4배씩 늘어 원문 대비 2배가 되는 일이 막힌다(실측 2.70배 -> 1.40배).
 - **수렴 조건과 멈춘 이유.** `--max-passes`/`--settle-at`. **상한에 걸린 것은 아직 덜
@@ -296,7 +299,7 @@ recall 100%는 사전 커버리지가 상한이라 원리적으로 불가능하�
 공짜지만(LLM 안 씀) 실사용에서 값을 재 본 뒤 넣는다 — 위반이 0이 되지 않는 자막도
 있어서 그것만으로 끊으면 늘 상한까지 돈다.
 
-### T9. `.work/` 중간 산출물 + manifest
+### ~~T9. `.work/` 중간 산출물 + manifest~~ 〔끝남〕
 
 지금 CLI는 `.source.srt`/`.draft.srt`/`.notes.srt`/`.review.srt`/`.ko.srt`/`.fixed.srt`로
 파편적이고, **GUI는 아무것도 남기지 않는다**(메모리에서만 돈다). 15분 돌린 번역이
@@ -316,7 +319,23 @@ recall 100%는 사전 커버리지가 상한이라 원리적으로 불가능하�
 지킬 것: 원본을 덮어쓰지 않는다(규칙 7), `01-generate.srt`의 타임코드는 이후 불변
 (각 단계 끝에 `--lock-timecodes` 검증), 전부 로컬.
 
-이게 있으면: 단계 단독 재실행, 회차 간 diff, 단계별 모델 다르게, 새 단계 추가.
+실제로 나오는 것:
+
+```
+ep01.work/
+    manifest.json      단계별 모델·시각·걸린 시간·바뀐 줄·역할
+    01-source.json     번호별 원문
+    02-first.srt
+    03-revise-2차.srt
+    03-revise-3차.srt
+```
+
+`Work.last()`가 마지막 단계와 그 자막을 준다 — **여기서 이어 하면 된다.**
+`work.diff(a, b)`로 회차를 견준다.
+
+**아직 안 한 것:** 이어 하기를 UI/CLI 명령으로 노출하지 않았다. 지금은 `.work/` 안의
+`.srt`를 열면 되지만, `--resume` 같은 것이 있으면 더 낫다. 그리고 `stage_generate`
+경로(전사)는 아직 남기지 않는다 — 번역이 가장 비싼 자리라 거기부터 했다.
 
 ### T10. UI에 단계 노출
 

@@ -610,7 +610,9 @@ class MainWindow(QMainWindow):
                                 # **설정이 죽어 있었다.** `translate_model`은 설정
                                 # 화면에 있는데 아무도 읽지 않아, 사용자가 모델을
                                 # 바꿔도 아무 일이 없었다.
-                                model=getattr(self, "_prefs", {}).get("translate_model"))
+                                model=getattr(self, "_prefs", {}).get("translate_model"),
+                                # 자막을 아직 저장하지 않았으면 남길 자리가 없다.
+                                work_beside=self.subtitle_path)
 
         def done(result):
             events, notes, revisions = result

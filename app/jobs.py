@@ -114,10 +114,14 @@ class TranslateJob(Job):
     """
 
     def __init__(self, events, profile: dict, passes: int, knp: Path | None,
-                 model: str | None = None, cast: dict | None = None):
+                 model: str | None = None, cast: dict | None = None,
+                 work_beside: Path | None = None):
         super().__init__()
         self.events, self.profile, self.passes, self.knp = events, profile, passes, knp
         self.model, self.cast = model, cast
+        # **여기가 원래 아무것도 남기지 않던 곳이다.** 15분 걸린 번역이 3차에서
+        # 깨지면 처음부터 해야 했다.
+        self.work_beside = work_beside
 
     def run(self) -> None:
         def work():
@@ -132,9 +136,19 @@ class TranslateJob(Job):
                 added = glossary.merge_knp(self.knp)
                 self.say(f"KNP에서 용어 {added}개")
 
+            work = None
+            if self.work_beside:
+                from checker.work import Work
+                work = Work.beside(self.work_beside)
+                work.save_source({e.index: e.text for e in self.events})
+                self.say(f"단계별 결과를 남깁니다: {work.root.name}")
+
             source = [Event(e.index, e.start_ms, e.end_ms, e.text) for e in self.events]
             first = stage_translate(source, self.profile, translator=translator,
                                     glossary=glossary, progress=self.say)
+            if work:
+                work.save("02-first", first.events, model=translator.model,
+                          extra={"flags": len(first.extra.get("flags") or [])})
             # 타임코드가 움직였으면 쓰지 않는다. 조용히 넘기면 사람은 고정된 줄 알고
             # 기계는 옮긴 상태로 납품물이 나간다.
             if first.violations:
@@ -145,7 +159,14 @@ class TranslateJob(Job):
                 later = stage_revise(events, self.profile, translator=translator,
                                      source={e.index: e.text for e in source},
                                      glossary=glossary, rounds=self.passes - 1,
-                                     cast=self.cast, progress=self.say)
+                                     cast=self.cast,
+                                     on_round=((lambda label, role, evs, changed:
+                                                work.save(f"03-revise-{label}", evs,
+                                                          model=translator.model,
+                                                          extra={"changed": changed,
+                                                                 "role": role}))
+                                               if work else None),
+                                     progress=self.say)
                 events, revisions = later.events, later.extra["revisions"]
                 for row in later.extra["rounds"]:
                     self.say(f"{row['stage']}({row['role']}) {row['changed']}곳 고침")
