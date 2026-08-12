@@ -4,7 +4,7 @@
   "description": "넷플릭스 규정(SDH·번역)과 한국어 맞춤법으로 자막을 검사하고 고칠 수 있는 것을 고칩니다. 위반은 조항 번호와 함께 리포트로 남습니다.",
   "version": "0.1.0",
   "author": "tigermorning",
-  "url": "https://github.com/tigermorning/subtitle-editor",
+  "url": "https://github.com/tigermorning/subtitle-tc-generator",
   "menu": "Tools",
   "minSeVersion": "5.0.0",
   "executables": {

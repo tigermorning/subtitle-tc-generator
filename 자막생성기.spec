@@ -38,12 +38,12 @@ pyz = PYZ(a.pure)
 exe = EXE(
     pyz, a.scripts, [],
     exclude_binaries=True,
-    name="자막편집기",
+    name="자막생성기",
     console=False,            # 검은 창을 띄우지 않는다
     icon=None,
 )
 coll = COLLECT(
     exe, a.binaries, a.datas,
     strip=False, upx=False,
-    name="자막편집기",
+    name="자막생성기",
 )

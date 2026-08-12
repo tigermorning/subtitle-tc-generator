@@ -100,7 +100,7 @@ def collect() -> list[dict]:
 
 def as_text(rows: list[dict] | None = None) -> str:
     rows = rows or collect()
-    lines = ["자막 편집기 진단", ""]
+    lines = ["자막 및 TC 생성기 진단", ""]
     for row in rows:
         mark = "OK  " if row["ok"] else "없음"
         lines.append(f"  [{mark}] {row['name']:20} {row['detail']}")

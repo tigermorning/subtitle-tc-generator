@@ -167,7 +167,7 @@ namespace Nikse.SubtitleEdit.PluginLogic
 
             if (_repo == null)
             {
-                Say("검사기 저장소를 찾지 못했습니다. [폴더 지정]을 눌러 subtitle-editor 폴더를 알려 주세요.");
+                Say("검사기 저장소를 찾지 못했습니다. [폴더 지정]을 눌러 subtitle-tc-generator 폴더를 알려 주세요.");
                 var pick = new Button { Text = "폴더 지정", Width = 90 };
                 pick.Click += (s, e) => PickRepo();
                 buttons.Controls.Add(pick);
@@ -216,7 +216,7 @@ namespace Nikse.SubtitleEdit.PluginLogic
 
         private void PickRepo()
         {
-            using (var dialog = new FolderBrowserDialog { Description = "subtitle-editor 폴더를 고르세요" })
+            using (var dialog = new FolderBrowserDialog { Description = "subtitle-tc-generator 폴더를 고르세요" })
             {
                 if (dialog.ShowDialog(this) != DialogResult.OK)
                 {

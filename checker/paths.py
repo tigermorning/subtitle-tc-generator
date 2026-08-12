@@ -16,13 +16,36 @@ from pathlib import Path
 
 
 def user_data() -> Path:
-    """사용자 자료 폴더. Windows는 `%APPDATA%\\자막편집기`."""
+    """사용자 자료 폴더. Windows는 `%APPDATA%\\자막생성기`.
+
+    **옛 이름(`자막편집기`) 폴더가 이미 있으면 그것을 계속 쓴다.** 저장소 이름을
+    바꿨다고 사용자 자료를 잃게 하면 안 된다(2026-08-12 결정) — 여기에는
+    `settings.json`, 로그, 발주처 규정 프로파일, 그리고 whisper 모델
+    (`ggml-large-v3-turbo.bin` 약 1.5GB)이 들어 있다. 이름만 바꾸면 사용자는 설정을
+    잃고 모델을 다시 받아야 한다.
+
+    **옮기지 않는다.** 1.5GB를 이동하는 코드는 그 자체가 실패 지점이다(권한, 중간에
+    끊김, 드라이브 부족). 옛 폴더를 그냥 계속 읽는 쪽이 잃을 것이 없다. 새로 쓰는
+    사람만 새 이름을 갖는다.
+
+    이름 길이도 봤다. `자막생성기`는 `자막편집기`와 같은 5자다 — whisper가 한글 경로
+    모델을 못 여는 문제를 하드링크로 우회해 두었는데(`transcribe.py::_ascii_model_path`)
+    경로 길이가 그대로라 그 우회를 다시 시험하지 않는다.
+
+    표시 이름(창 제목·진단 창)은 새 이름을 쓴다. **표시 이름과 저장 위치는 별개다.**
+    """
+    # **환경변수 이름은 바꾸지 않는다.** 테스트·문서·사용자 설정이 참조하는 공개
+    # 계약이다(2026-08-12: 이름을 바꿨다가 테스트 두 건이 깨져 되돌렸다). 표시 이름과
+    # 계약은 별개다 — 폴더 이름도 같은 이유로 옛 것을 계속 읽는다.
     override = os.environ.get("SUBTITLE_EDITOR_HOME")
     if override:
         return Path(override)
     appdata = os.environ.get("APPDATA")
     base = Path(appdata) if appdata else Path.home() / ".config"
-    return base / "자막편집기"
+    new, old = base / "자막생성기", base / "자막편집기"
+    if not new.exists() and old.exists():
+        return old
+    return new
 
 
 def model_dirs() -> list[Path]:

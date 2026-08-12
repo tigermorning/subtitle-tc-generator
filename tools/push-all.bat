@@ -1,5 +1,5 @@
 @echo off
-rem Push both repositories (subtitle editor + Korean corrector).
+rem Push both repositories (subtitle & TC generator + Korean corrector).
 rem Double-click this file, or run it from a terminal.
 rem
 rem NOTE: keep this file ASCII-only. cmd parses batch files byte-wise using the
@@ -13,7 +13,7 @@ set "EDITOR=%HERE%.."
 set "CORRECTOR=%HERE%..\..\korean-subtitle-corrector"
 
 set "FAILED="
-call :push "subtitle-editor" "%EDITOR%"
+call :push "subtitle-tc-generator" "%EDITOR%"
 call :push "korean-subtitle-corrector" "%CORRECTOR%"
 
 echo.

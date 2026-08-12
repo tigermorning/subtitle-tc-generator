@@ -1,4 +1,4 @@
-"""독립 실행 자막 편집기 — 시작점.
+"""독립 실행 자막 및 TC 생성기 — 시작점.
 
     python -m app
 
@@ -38,7 +38,7 @@ def main() -> int:
     from .window import MainWindow
 
     application = QApplication(sys.argv)
-    application.setApplicationName("자막 편집기")
+    application.setApplicationName("자막 및 TC 생성기")
     window = MainWindow()
     window.show()
     return application.exec()

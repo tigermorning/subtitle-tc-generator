@@ -411,5 +411,5 @@ class SettingsDialog(QDialog):
                   f"#\n"
                   f"# {self.platform}/ko-{self.kind}를 상속하고 **다른 값만** 적었다.\n"
                   f"# 공식 기준이 개정되면 이 파일도 따라 바뀐다.\n"
-                  f"# 자막 편집기의 '작업 기준' 창에서 만들었다.\n\n")
+                  f"# 자막 및 TC 생성기의 '작업 기준' 창에서 만들었다.\n\n")
         return header + yaml.safe_dump(data, allow_unicode=True, sort_keys=False)

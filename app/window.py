@@ -58,7 +58,7 @@ class MainWindow(QMainWindow):
         """
         super().__init__()
         self._restore = restore
-        self.setWindowTitle("자막 편집기")
+        self.setWindowTitle("자막 및 TC 생성기")
         self.resize(1280, 760)
 
         self._preview_loaded = False
@@ -67,7 +67,7 @@ class MainWindow(QMainWindow):
         self.model = SubtitleModel()
         # 편집 중인 내용을 영상에 얹기 위한 임시 파일. **원본과 따로 둔다** —
         # 미리 보기 때문에 원본이 바뀌면 안 된다.
-        self._preview_path = Path(tempfile.gettempdir()) / "subtitle-editor-preview.srt"
+        self._preview_path = Path(tempfile.gettempdir()) / "subtitle-tc-generator-preview.srt"
 
         self._threads: list = []          # 실을 붙잡아 둔다. 놓으면 프로그램이 죽는다
         self._build()
@@ -1002,7 +1002,7 @@ class MainWindow(QMainWindow):
 
     def _settings(self):
         from PySide6.QtCore import QSettings
-        return QSettings("자막편집기", "layout")
+        return QSettings("자막생성기", "layout")
 
     def _restore_layout(self) -> None:
         """지난번 나눠 놓은 면적을 되살린다. 매번 다시 잡게 하지 않는다."""

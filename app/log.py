@@ -4,7 +4,7 @@
 확인할 것이 아무것도 없었다(2026-08-12). 오래 걸리는 일은 겉으로 조용하기 때문에,
 돌고 있는지 멈춘 것인지 구분되지 않는다.
 
-로그는 `%APPDATA%\\자막편집기\\log.txt`에 쌓인다. 진단 창에서 자리를 알려 준다.
+로그는 `%APPDATA%\\자막생성기\\log.txt`에 쌓인다(옛 폴더가 있으면 거기). 진단 창에서 자리를 알려 준다.
 """
 
 from __future__ import annotations
@@ -19,9 +19,11 @@ _handle = None
 
 
 def log_path() -> Path:
-    appdata = os.environ.get("APPDATA")
-    base = Path(appdata) if appdata else Path.home() / ".config"
-    folder = base / "자막편집기"
+    # 폴더 계산을 여기서 다시 하지 않는다. 옛 이름 폴더를 계속 읽는 규칙이
+    # `checker/paths.py::user_root` 한 곳에만 있어야 두 벌이 어긋나지 않는다.
+    from checker.paths import user_data
+
+    folder = user_data()
     folder.mkdir(parents=True, exist_ok=True)
     return folder / "log.txt"
 

@@ -185,7 +185,7 @@ def transcribe(video: Path, language: str = "auto", model: str | None = None,
     model_path = find_model(model)
 
     # 작업 폴더는 영상 옆에 둔다 — 상대 경로가 짧아지고 드라이브가 같아진다.
-    work = video.resolve().parent / ".subtitle-editor-work"
+    work = video.resolve().parent / ".subtitle-tc-generator-work"
     work.mkdir(exist_ok=True)
     out_name = "transcript.srt"
     try:
