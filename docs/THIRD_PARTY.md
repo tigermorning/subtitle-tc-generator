@@ -37,10 +37,37 @@ PyInstaller가 별도 파일(`_internal/PySide6/`)로 넣으므로 조건을 만
 | Ollama·번역 모델 | 5GB. 번역을 안 쓰는 사람에게 강요할 수 없다 |
 | 한국어 교정기 | 별개 프로그램이다. 있으면 빌려 쓰고 없으면 규정 검사만 한다 |
 
-## Subtitle Edit
+## Subtitle Edit (MIT)
 
-**코드를 쓰지 않는다.** SE는 GPL이고, 우리는 플러그인으로 **호출**만 했다.
-독립 프로그램에는 SE 코드가 한 줄도 들어가지 않는다.
+**거의 안 쓴다. 다만 "한 줄도 없다"는 것은 사실이 아니었다** — 2026-08-14에 공식
+저장소(`subtitleedit-src`, 얕은 클론)를 실제로 열어 대조하고 이 절을 고쳤다.
+
+**라이선스가 바뀌어 있다.** `LICENSE`와 `installer/LICENSE.rtf` 둘 다 **MIT**다
+(Copyright (c) 2026 Nikolaj Olsson). 여기 GPL이라고 적어 두었던 것은 옛 정보다.
+MIT는 저작권 표시만 함께 넣으면 되므로 우리 배포에 조건이 걸리지 않는다.
+**다만 우리가 옮긴 부분이 옛 GPL 판에서 온 것이면 그 판의 조건을 따른다** — 아래
+두 자리는 현재 판(MIT)의 파일과 대조해 확인했다.
+
+SE에서 온 것 둘:
+
+| 자리 | 무엇 | 왜 옮겼나 |
+|---|---|---|
+| `plugin/se4/IPlugin.cs` | 플러그인 인터페이스 선언 24행 | **계약이라 바꿀 수 없다.** SE가 리플렉션으로 이 이름을 찾는다. 한 글자만 달라도 플러그인을 못 알아본다 |
+| `checker/text.py::_CJK_RANGES` | CJK 유니코드 블록 11개 | SE `src/libse/Common/TextLengthCalculator/CalcCJK.cs::IsCjk`와 **같은 표다.** 글자 수를 SE와 다르게 세면 같은 자막에 두 프로그램이 다른 답을 낸다 |
+
+`IPlugin.cs`는 본 저장소가 아니라 `SubtitleEdit/plugins` 쪽에서 왔다(파일 첫 줄에
+출처를 적어 두었다). **그 저장소의 라이선스는 아직 직접 확인하지 않았다.**
+
+**그 밖에는 코드가 아니라 계약과 사실만 따랐다** — SE5 플러그인 JSON 규약
+(`checker/plugin.py`), 북마크 파일 형식(`checker/bookmarks.py`), 장면 전환·파형에
+쓰는 ffmpeg 필터(`checker/media.py`), 작업자 손버릇에서 온 단축키 배치
+(`app/shortcuts.py`). 구현은 전부 우리 것이다. 배포물(`dist/`)에 SE 파일은 없다.
+
+**빌려 쓰는 자리 둘(배포물에 들어가지는 않는다).** `app/runtime.py`가 libmpv를,
+`checker/media.py`가 ffmpeg을 `%APPDATA%\Subtitle Edit\`에서도 찾는다. libmpv 쪽은
+**우리 것을 먼저 보고**(`bin/`, 실행 파일 옆) 없을 때만 거기까지 가며, 배포물에는
+`_internal/libmpv-2.dll`이 실려 있으므로 SE가 없어도 돈다. 주석에 "개발 중 임시"라고
+적혀 있는 그대로다.
 
 ## 배포물 옆에 두는 것
 
