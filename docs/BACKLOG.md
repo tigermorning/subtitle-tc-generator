@@ -3,7 +3,28 @@
 이 파일은 **작업을 이어받기 위해** 있다. `CLAUDE.md`가 "이미 틀렸다가 바로잡은 규칙"을
 담고, 이 파일은 **아직 안 한 것과 왜 그 순서인지**를 담는다.
 
-마지막 갱신: 2026-08-12 · 마지막 커밋 `25ce0d3`+비동기 mpv · 시험 776건 통과
+마지막 갱신: **2026-08-14** · 시험 758건 통과(시스템 파이썬) · 작업 트리 깨끗
+
+## 0-Z. 2026-08-14 마감 — 이날 끝낸 것과 남긴 것
+
+**끝낸 것** (자세한 것은 커밋 메시지에)
+
+- 폴더 이름을 저장소 이름에 맞췄다(`subtitle-editor` → `subtitle-tc-generator`).
+  데스크톱 바로가기·문서 경로까지. 옛 이름은 SE 플러그인과 교정기가 대체 경로로 계속 본다
+- **pre-commit 훅**(`tools/hooks/pre-commit`) — 시험이 실패하면 커밋이 안 만들어진다.
+  규칙 9가 글에서 기계로 옮겨졌다. 새 클론에서 `git config core.hooksPath tools/hooks`
+- **README 전면 재작성.** 08-12 15:03에서 멈춰 있었다(GUI·생성·번역·`.work/`·장르·
+  캐릭터가 통째로 빠져 있었고, 방향도 "SE보다 나은 편집기"로 낡아 있었다)
+- 편집기 시절 문서 셋에 현재 방향을 붙였다(브리프·SE 코드 분석·상용화 목록)
+- **디즈니·쿠팡 번역 아이콘 넷**을 만들었다. 프로파일은 08-11부터 있었는데 쓸 수단이 없었다
+- **작업자 자료 정독** — 이미지 127장과 본문 2,076행 전부. 값을 옮긴 문서:
+  `rules/sources/작업자-자료/이미지-정독.md`
+- 그 결과 반영: 겹침 처리 기본값(디즈니 `dialogue_only`·쿠팡 `keep_both`),
+  말줄임표 전략 검사(DC35·CC35·S35), 번역 프롬프트의 지양 목록(2차·3차)
+- **교정기와의 계약을 기계로 고정했다.** `corrector_info()`가 교정기의
+  `tools/check_public_api.py`를 실행하고, 계약이 깨지면 이쪽 시험이 실패한다 → 훅이 막는다
+
+**남긴 것은 아래 §0-A와 §3·§4에 그대로 있다.** 가장 위는 여전히 멈춤(AppHangB1) 확인이다.
 
 ---
 
@@ -74,8 +95,8 @@ cmd.exe /c "..\korean-subtitle-corrector\.venv\Scripts\python.exe -m PyInstaller
 **시험을 먼저 돌려 기준선을 잡는다.**
 
 ```bash
-python3 tests/run_tests.py                                    # 747건 (GUI 제외)
-cmd.exe /c "..\korean-subtitle-corrector\.venv\Scripts\python.exe tests\run_tests.py"   # 776건 (PySide6 포함)
+python3 tests/run_tests.py                                    # 758건 (GUI 제외)
+cmd.exe /c "..\korean-subtitle-corrector\.venv\Scripts\python.exe tests\run_tests.py"   # PySide6 포함(더 많다)
 ```
 
 시스템 `python3`에는 PySide6가 없다. GUI를 건드리면 반드시 venv 쪽으로도 돌린다.
