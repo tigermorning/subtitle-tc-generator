@@ -158,11 +158,29 @@ cmd.exe /c "..\korean-subtitle-corrector\.venv\Scripts\python.exe -m PyInstaller
   표시 시간 **2750ms**(사람 1752), 줄당 **41자**(사람 7.5), 자막 149개(정답 202).
   → **우리는 너무 길게 띄우고 한 자막에 너무 많이 담는다.**
 
-### 지금 있는 것
+### 지금 있는 것 — **지우지 마라**
 
     tools/corpus_build.py       f8f82bb에서 넣고 99daf2c에서 고쳤다
-    .tmp/corpus/phm_bluray/     pairs.jsonl · stats.json · flags.jsonl (git 무시)
-    .tmp/gt/                    clip.mkv(274MB) · 정답 슬라이스 · 파일럿 결과
+    .tmp/corpus/phm_bluray/     pairs.jsonl · stats.json · flags.jsonl   1.9MB
+    .tmp/gt/                    파일럿 자료 한 벌                        262MB
+
+`.tmp/`는 git이 무시하고 **빌드 작업 폴더이기도 하다**(`--workpath .tmp\build`).
+청소하다 같이 날아가기 쉬우므로 **`.tmp/gt`와 `.tmp/corpus`는 남긴다**(사용자 지시,
+2026-08-14 — 다음 세션에서 large-v3-turbo로 같은 클립을 다시 재기 위해서다).
+
+날아갔으면 되살린다. **키프레임 시각을 그대로 써야 한다** — 임의 지점에서 자르면
+`-c copy`가 키프레임으로 스냅해 정답과 수백 ms 어긋난 채 시작하고, 그러면 재려는 값과
+오차가 같은 크기가 된다.
+
+    영화: ..\영화B\영화B_릴리스\
+          영화B_릴리스.mkv
+    트랙: 0:2 영어 · 0:3 영어 SDH · 0:23 한국어
+    클립: -ss 4198.778 -t 600 -c copy      (70~80분. 대사가 가장 빽빽한 10분)
+    정답: 뽑은 자막을 4198.778초만큼 당기고 0~600초에 완전히 들어가는 큐만 남긴다
+          -> clip_en 202큐 · clip_en_sdh 226큐 · clip_ko 191큐
+
+이 폴더의 `out_en.srt`와 `eval_en.json`은 **`ggml-base`로 낸 첫 회차**다. 다음 회차와
+견주려고 남긴 것이므로 덮어쓰지 말고 새 이름으로 낸다.
 
 ### 다음에 할 일 — 이 순서로
 
