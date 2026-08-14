@@ -3012,6 +3012,29 @@ else:
 
 
 
+# --- 말줄임표는 후략에만 (2026-08-14, 작업자 자료 [영상번역] 문장부호) -------
+
+# 이 자리의 `ev`는 앞에서 다른 것으로 덮여 있다. 헬퍼를 새로 둔다.
+def _ev2(text: str) -> dict:
+    return {"index": 1, "start_ms": 0, "end_ms": 3000, "text": text}
+
+
+def _fires(text: str, rule_id: str, profile) -> bool:
+    return rule_id in ids(check_events([_ev2(text)], profile))
+
+
+_cp = load_profile("coupang", "ko", "sdh")
+_dp = load_profile("disney", "ko", "sdh")
+
+ok("전략 말줄임표를 잡는다", _fires("...그리고 우리는 갔다", "CC35", _cp))
+ok("전각 말줄임표도 잡는다", _fires("- …그래서 말이야", "CC35", _cp))
+ok("후략은 잡지 않는다", not _fires("말을 하다가...", "CC35", _cp))
+# 자료가 '노래가 이어짐'을 가사 말줄임표로 알리라고 시킨다. 그것까지 잡으면
+# 자료가 시킨 표기를 위반으로 부르는 것이 된다.
+ok("노래 줄은 보지 않는다", not _fires("♪ ...노래가 이어진다 ♪", "CC35", _cp))
+ok("디즈니도 같은 검사를 든다", _fires("...그리고", "DC35", _dp))
+
+
 # --- 결과 ---------------------------------------------------------------
 
 print(f"통과 {PASSED}건")

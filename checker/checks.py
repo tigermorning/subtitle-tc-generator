@@ -1103,3 +1103,26 @@ def _conjunctive_comma(ev: Event, ctx: dict):
         if m:
             out.append((i, f"{m.group(1)}, — 접속부사 뒤에는 쉼표를 쓰지 않습니다"))
     return out
+
+
+@check("ellipsis_leading")
+def _ellipsis_leading(ev: Event, ctx: dict):
+    """줄 맨 앞의 말줄임표. **전략·중략은 쓰지 않고 후략만 쓴다.**
+
+    자료(작업 기본 원칙 [영상번역] 문장부호): "전략, 중략은 불가능하고 후략만 가능".
+    말줄임표를 쓰는 자리는 셋 다 말끝이다 — 화자가 의도적으로 흐릴 때, 다른 화자가
+    끊었을 때, 스스로 끊을 때.
+
+    **노래 줄은 보지 않는다.** 배경 노래가 이어지는 것을 알리려고 가사에 말줄임표를
+    쓰라고 같은 자료가 지시한다(`노래+대사` 절). 음표가 든 줄에서 이 검사를 걸면
+    자료가 시킨 표기를 위반으로 부르게 된다.
+    """
+    out = []
+    for i, line in enumerate(ev.lines, 1):
+        s = strip_tags(line).strip()
+        if "♪" in s:
+            continue
+        m = re.match(r"^-?\s*(…|\.\.\.)", s)
+        if m:
+            out.append((i, f"{m.group(1)} — 앞을 줄이는 말줄임표(전략)는 쓰지 않습니다"))
+    return out
