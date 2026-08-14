@@ -8,7 +8,7 @@
 **자막 및 TC 생성기.** 전문 번역가·자막 작업자용 도구다. 영상 하나에서
 전사 → 대조 → 번역 → 재분할 → 스포팅까지 이어 붙인다.
 
-- 저장소: `subtitle-tc-generator` (로컬 폴더 이름은 아직 `subtitle-editor`)
+- 저장소: `subtitle-tc-generator` (로컬 폴더 이름도 2026-08-14에 맞췄다)
 - 한국어 교정은 **여기서 하지 않는다.** 옆 프로젝트
   [korean-subtitle-corrector](https://github.com/tigermorning/korean-subtitle-corrector)를
   라이브러리로 부른다(`checker/korean.py`). 자막 지식은 여기가, 한국어 규범 지식은

@@ -100,7 +100,9 @@ recall 100%는 사전 커버리지가 상한이라 원리적으로 불가능하�
 | `korean-subtitle-corrector` | 규칙 + 국립국어원 API로 한국어를 교정한다. **AI 안 쓴다**(MQ2에서 실측으로 "쓰지 말라"는 답이 나왔다) |
 | `subtitle-tc-generator` (이 저장소) | 전사·번역·타임코드. 교정기를 라이브러리로 부른다(`checker/korean.py`) |
 
-폴더 이름은 아직 `subtitle-editor`다. 원격은 `subtitle-tc-generator`.
+로컬 폴더 이름도 `subtitle-tc-generator`로 맞췄다(2026-08-14). 옛 이름
+`subtitle-editor`는 SE 플러그인(`Runner.cs`)과 교정기 `survey.py`가 **대체 경로로
+계속 본다** — 옛 설치본을 깨지 않으려는 것이지 되돌린 것이 아니다.
 
 ### 단계 모델 (합의된 목표 그림)
 
