@@ -1,0 +1,48 @@
+#!/bin/sh
+# 커밋 직전에 시험을 돌린다. 실패하면 커밋이 만들어지지 않는다.
+#
+# 왜 있나. CLAUDE.md 규칙 9("테스트가 0으로 끝날 때만 커밋한다")는 글로 적혀 있었고
+# 그럼에도 세 번 뚫렸다. 파이프(| tail)가 종료 코드를 가리고, 세미콜론(;)이 실패를
+# 넘겼다. 훅은 git이 돌리므로 명령을 어떻게 잇든 상관없다. 규칙이 글에서 기계로
+# 넘어가는 자리가 여기다.
+#
+# 이 파일은 저장소에 들어 있다(.git/hooks/는 클론을 따라가지 않는다). 새 클론이나
+# 워크트리에서 한 번 켠다:  git config core.hooksPath tools/hooks
+#
+# WSL과 Windows git-bash 양쪽에서 돈다. 파이썬 이름이 서로 달라서 찾아 쓴다.
+
+ROOT=$(git rev-parse --show-toplevel) || exit 1
+cd "$ROOT" || exit 1
+
+PY=""
+for candidate in python3 python py; do
+    if command -v "$candidate" >/dev/null 2>&1 && "$candidate" -c "import sys" >/dev/null 2>&1; then
+        PY="$candidate"
+        break
+    fi
+done
+
+if [ -z "$PY" ]; then
+    echo "pre-commit: 파이썬을 찾지 못했다."
+    echo "  시험을 못 돌리면 통과했다고 말할 수 없으므로 커밋을 막는다."
+    echo "  정말 건너뛰려면: git commit --no-verify  (그러면 판단은 사람 몫이다)"
+    exit 1
+fi
+
+echo "pre-commit: tests/run_tests.py"
+if ! "$PY" tests/run_tests.py; then
+    echo ""
+    echo "pre-commit: 시험이 실패했다. 커밋하지 않는다."
+    exit 1
+fi
+
+# 시스템 파이썬에는 PySide6가 없어 GUI 시험이 빠진다(747건 대 776건). 화면을
+# 건드렸으면 사람이 venv 쪽으로도 돌려야 한다. 막지는 않는다 — 훅이 특정 venv의
+# 존재를 강제하면 다른 기계에서 커밋이 아예 안 된다.
+if git diff --cached --name-only | grep -q '^app/'; then
+    echo ""
+    echo "pre-commit: app/ 을 건드렸다. PySide6까지 도는 776건은 훅이 못 돌린다:"
+    echo "  cmd.exe /c \"..\\korean-subtitle-corrector\\.venv\\Scripts\\python.exe tests\\run_tests.py\""
+fi
+
+exit 0
