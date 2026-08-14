@@ -32,23 +32,25 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from checker import load_profile, ProfileError
 from checker.model import Event
 from checker.parsers import parse
+from checker.text import count_chars, chars_per_second, strip_tags
 # 내부 이름을 쓴다. 이 도구가 남으면 media.py에서 공개로 올린다.
 from checker.media import _find, _as_tool_path  # noqa: E402
 
-TAG = re.compile(r"</?[a-zA-Z][^>]*>")
-# `{\an8}` 같은 배치 지시. **글자가 아니다.** 이것을 세면 줄당 글자 수가 부풀고,
-# 부푼 값으로 사람 자막을 "16자 초과"라고 지적하게 된다(실제로 그랬다).
-OVERRIDE = re.compile(r"\{[^}]*\}")
 SPEAKER = re.compile(r"^[\[(][^\])]{0,20}[\])]\s*")
 DASH = re.compile(r"^-\s*")
 AN = re.compile(r"\{\\an(\d)\}")
 
+# 트랙의 언어 코드(ISO 639-2)를 프로파일의 코드로 옮긴다. **없으면 없는 것으로 둔다** —
+# 프로파일이 없는 언어에 있는 언어의 잣대를 대면 그것이 오답 공장이다.
+LANG = {"kor": "ko", "eng": "en"}
+
 
 def bare(text: str) -> str:
-    """태그·배치 지시·화자 표시·대화 하이픈을 뗀 글자. 길이를 잴 때만 쓴다."""
-    out = OVERRIDE.sub("", TAG.sub("", text))
+    """화자 표시와 대화 하이픈까지 뗀 글자. 태그·배치 지시는 `strip_tags`가 뗀다."""
+    out = strip_tags(text)
     return "\n".join(DASH.sub("", SPEAKER.sub("", ln).strip()).strip()
                      for ln in out.split("\n")).strip()
 
@@ -118,43 +120,76 @@ def group(src: list[Event], tgt: list[Event]) -> list[dict]:
     return pairs
 
 
-def flags_for(events: list[Event], lang: str) -> list[dict]:
+def flags_for(events: list[Event], lang: str, limits: dict | None) -> list[dict]:
     """사람 자막에서 눈에 걸린 자리. **고치지 않고 남긴다.**
 
-    수치는 넷플릭스 한국어 기준을 잣대로 쓴다(줄당 16자·최대 두 줄·최소 노출
-    0.833초·최대 7초). 발주처가 다르면 잣대가 달라지므로 **위반이 아니라 지적**이다.
+    **지적을 세 종류로 갈라 둔다.** 섞으면 "사람이 틀렸다"와 "잣대가 다르다"가 한
+    목록에 들어가고, 그러면 목록 전체를 못 믿게 된다.
+
+        오류      언어와 규정에 상관없이 틀린 것 (빈 자막, 뒤집힌 타임코드, 안 닫은 태그)
+        규정      프로파일이 있을 때만. 그 발주처·그 언어의 값으로만 잰다
+        이상치    프로파일이 없을 때. 그 트랙 자체의 분포에서 크게 벗어난 자리
+
+    **글자 수 규정은 언어마다 다르다.** 한국어는 줄당 16자에 CJK 1자·그 외 0.5자로
+    세고, 영어는 줄당 42자에 전부 1자다. 그래서 값을 코드에 박지 않고 프로파일에서
+    읽는다(`checker/text.py`가 가중치를 적용한다). 프로파일이 없는 언어에는
+    **아무 규정도 대지 않는다** — 있는 언어의 값을 빌려 쓰면 그것이 오답 공장이다.
     """
+    import statistics as st
+    weights = (limits or {}).get("char_weights")
+    dur = [e.duration_ms for e in events if e.duration_ms > 0]
+    cps_all = [chars_per_second(e.text, e.duration_ms, weights)
+               for e in events if e.duration_ms > 0 and bare(e.text)]
+    # 분포 이상치의 잣대는 그 트랙 자신이다. 상·하위 1%만 본다.
+    hi_cps = st.quantiles(cps_all, n=100)[98] if len(cps_all) > 20 else None
+    lo_dur = st.quantiles(dur, n=100)[0] if len(dur) > 20 else None
+
     out = []
     for k, e in enumerate(events):
         t = bare(e.text)
         lines = [ln for ln in t.split("\n") if ln.strip()]
         why = []
+        # ── 오류 (언어 무관) ────────────────────────────────────────────
         if not t:
-            why.append("빈 자막")
-        if e.duration_ms < 833:
-            why.append(f"노출 {e.duration_ms}ms — 0.833초 미만")
-        if e.duration_ms > 7000:
-            why.append(f"노출 {e.duration_ms}ms — 7초 초과")
-        if len(lines) > 2:
-            why.append(f"{len(lines)}줄 — 두 줄 초과")
-        if lang == "kor":
-            over = [len(ln) for ln in lines if len(ln) > 16]
-            if over:
-                why.append(f"줄당 {max(over)}자 — 16자 초과")
-        if t and e.duration_ms:
-            cps = len(t.replace("\n", "")) / (e.duration_ms / 1000)
-            if cps > 20:
-                why.append(f"{cps:.1f}자/초 — 읽기 속도 초과")
-        # **프레임 간격은 지적하지 않는다.** 넷플릭스는 2020-07-24에 그 규정을 삭제했다.
-        # 이 릴리스의 원어 트랙은 자막을 붙여 놓는데(간격 중앙값 1ms), 그것을 위반으로
-        # 세면 사람 자막의 61%가 지적된다 — 오류가 아니라 잣대가 다른 것이다.
-        if k + 1 < len(events):
-            gap = events[k + 1].start_ms - e.end_ms
-            if gap < 0:
-                why.append(f"다음 자막과 {-gap}ms 겹침")
+            why.append(("오류", "빈 자막"))
+        if e.duration_ms <= 0:
+            why.append(("오류", f"길이 {e.duration_ms}ms — 시작이 끝보다 뒤"))
+        if e.text.count("<i>") != e.text.count("</i>"):
+            why.append(("오류", "이탤릭 태그를 열고 닫지 않았다"))
+        if k + 1 < len(events) and events[k + 1].start_ms < e.end_ms:
+            why.append(("오류",
+                        f"다음 자막과 {e.end_ms - events[k+1].start_ms}ms 겹침"))
+        # ── 규정 (프로파일이 있을 때만) ─────────────────────────────────
+        if limits:
+            d = limits.get("duration_ms") or {}
+            if d.get("min") and 0 < e.duration_ms < d["min"]:
+                why.append(("규정", f"노출 {e.duration_ms}ms — 최소 {d['min']}ms 미만"))
+            if d.get("max") and e.duration_ms > d["max"]:
+                why.append(("규정", f"노출 {e.duration_ms}ms — 최대 {d['max']}ms 초과"))
+            if limits.get("max_lines") and len(lines) > limits["max_lines"]:
+                why.append(("규정", f"{len(lines)}줄 — 최대 {limits['max_lines']}줄 초과"))
+            cap = limits.get("chars_per_line")
+            if cap:
+                over = [count_chars(ln, weights) for ln in lines]
+                if over and max(over) > cap:
+                    why.append(("규정", f"줄당 {max(over):.1f}자 — {cap}자 초과"))
+            rs = (limits.get("reading_speed_cps") or {}).get("adult")
+            if rs and t and e.duration_ms > 0:
+                cps = chars_per_second(e.text, e.duration_ms, weights)
+                if cps > rs:
+                    why.append(("규정", f"{cps:.1f}자/초 — 읽기 속도 {rs} 초과"))
+        # ── 이상치 (프로파일이 없을 때) ─────────────────────────────────
+        else:
+            if hi_cps and t and e.duration_ms > 0:
+                cps = chars_per_second(e.text, e.duration_ms, weights)
+                if cps > hi_cps:
+                    why.append(("이상치", f"{cps:.1f}자/초 — 이 트랙 상위 1%"))
+            if lo_dur and 0 < e.duration_ms < lo_dur:
+                why.append(("이상치", f"노출 {e.duration_ms}ms — 이 트랙 하위 1%"))
         if why:
-            out.append({"index": e.index, "start_ms": e.start_ms,
-                        "text": e.text, "why": why})
+            out.append({"index": e.index, "start_ms": e.start_ms, "text": e.text,
+                        "kinds": sorted({k_ for k_, _ in why}),
+                        "why": [f"[{k_}] {w}" for k_, w in why]})
     return out
 
 
@@ -182,7 +217,9 @@ def profile_evidence(events: list[Event]) -> dict:
     return {"배치 지시": an, "감싼 방식": marker}
 
 
-def stats_for(events: list[Event], lang: str) -> dict:
+def stats_for(events: list[Event], lang: str, weights: dict | None = None) -> dict:
+    """실측 분포. **글자 수는 그 언어의 가중치로 센다** — 한국어는 CJK 1자·그 외
+    0.5자, 영어는 전부 1자다. 가중치 없이 센 값끼리는 언어를 넘어 비교할 수 없다."""
     import statistics as st
     dur = [e.duration_ms for e in events]
     chars, cps, lines, gaps = [], [], [], []
@@ -190,10 +227,10 @@ def stats_for(events: list[Event], lang: str) -> dict:
         t = bare(e.text)
         ls = [ln for ln in t.split("\n") if ln.strip()]
         if ls:
-            chars.append(max(len(ln) for ln in ls))
+            chars.append(max(count_chars(ln, weights) for ln in ls))
             lines.append(len(ls))
         if t and e.duration_ms:
-            cps.append(len(t.replace("\n", "")) / (e.duration_ms / 1000))
+            cps.append(chars_per_second(e.text, e.duration_ms, weights))
         if k + 1 < len(events):
             gaps.append(events[k + 1].start_ms - e.end_ms)
     def q(v, p):
@@ -219,6 +256,11 @@ def main() -> int:
     ap.add_argument("--target", default="kor", help="목표 트랙 언어 코드")
     ap.add_argument("--all-langs", action="store_true",
                     help="다른 언어 트랙도 전부 뽑아 둔다(쌍은 만들지 않는다)")
+    ap.add_argument("-p", "--platform",
+                    help="발주처를 알 때만 준다. 주면 그 발주처·그 언어의 규정으로 "
+                         "재고, 안 주면 규정을 대지 않고 분포 이상치만 낸다")
+    ap.add_argument("-k", "--kind", choices=["sdh", "translation"],
+                    default="translation")
     a = ap.parse_args()
 
     if not a.video.is_file():
@@ -266,13 +308,34 @@ def main() -> int:
     pairs = group(src, tgt)
     both = [p for p in pairs if p["n_source"] and p["n_target"]]
 
-    meta = {"video": a.video.name, "pivot": a.pivot, "target": a.target}
+    def limits_for(iso3: str) -> dict | None:
+        """그 언어의 규정. 발주처를 모르거나 그 언어 프로파일이 없으면 **없는 것으로
+        둔다.** 글자 수·읽기 속도는 언어마다 다르므로 빌려 쓸 수 없다."""
+        code = LANG.get(iso3)
+        if not (a.platform and code):
+            return None
+        try:
+            return load_profile(a.platform, code, a.kind).get("limits")
+        except (ProfileError, Exception):
+            return None
+
+    src_lim, tgt_lim = limits_for(src_t.lang), limits_for(tgt_t.lang)
+    for name, iso3, lim in (("원어", src_t.lang, src_lim),
+                            ("목표", tgt_t.lang, tgt_lim)):
+        if lim:
+            print(f"{name}({iso3}) 규정: 줄당 {lim.get('chars_per_line')}자 · "
+                  f"{(lim.get('reading_speed_cps') or {}).get('adult')}자/초")
+        else:
+            print(f"{name}({iso3}) 규정 없음 — 분포 이상치만 냅니다")
+
+    meta = {"video": a.video.name, "pivot": a.pivot, "target": a.target,
+            "platform": a.platform or "", "kind": a.kind}
     with (a.out / "pairs.jsonl").open("w", encoding="utf-8") as f:
         for p in pairs:
             f.write(json.dumps({**meta, **p}, ensure_ascii=False) + "\n")
     with (a.out / "flags.jsonl").open("w", encoding="utf-8") as f:
-        for lang, evs in ((a.pivot, src), (a.target, tgt)):
-            for row in flags_for(evs, lang):
+        for lang, evs, lim in ((a.pivot, src, src_lim), (a.target, tgt, tgt_lim)):
+            for row in flags_for(evs, lang, lim):
                 f.write(json.dumps({**meta, "lang": lang, **row},
                                    ensure_ascii=False) + "\n")
     merged = sum(1 for p in both if p["n_source"] > 1 or p["n_target"] > 1)
@@ -283,8 +346,8 @@ def main() -> int:
                   "원어만": sum(1 for p in pairs if not p["n_target"]),
                   "목표만": sum(1 for p in pairs if not p["n_source"]),
                   "합쳐진 묶음": merged},
-        "source": stats_for(src, a.pivot),
-        "target": stats_for(tgt, a.target),
+        "source": stats_for(src, a.pivot, (src_lim or {}).get("char_weights")),
+        "target": stats_for(tgt, a.target, (tgt_lim or {}).get("char_weights")),
         "프로파일 근거": profile_evidence(tgt),
         "화면자막 후보": [
             {"start_ms": p["start_ms"], "text": p["target"]}
