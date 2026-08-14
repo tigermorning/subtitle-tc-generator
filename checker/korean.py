@@ -156,6 +156,57 @@ def find_corrector(explicit: str | None = None) -> Path | None:
     return None
 
 
+def corrector_info(explicit: str | None = None) -> dict:
+    """붙어 있는 교정기가 **무엇이고 계약이 맞는지** 말한다.
+
+    두 저장소는 라이브러리로 물려 있다. 교정기가 함수 이름이나 반환 모양을 바꾸면
+    이쪽이 깨지는데, **그 사고는 실사용 중에야 드러난다** — 우리 시험은 가짜 백엔드로
+    돌기 때문이다(그래야 kiwipiepy 310MB와 API 키 없이 돈다).
+
+    그래서 계약을 여기서 다시 정의하지 않고 **교정기가 스스로 들고 있는 검사기를
+    실행한다**(`tools/check_public_api.py`). 계약이 한 곳에만 있어야 두 벌이 갈라지지
+    않는다. 교정기가 그 파일을 갖고 있지 않으면(옛 판) 그 사실을 그대로 말한다.
+
+    반환: {found, path, commit, contract, detail}
+      contract — "ok" | "broken" | "unknown"(검사기 없음) | "no-corrector"
+    """
+    import subprocess
+
+    found = find_corrector(explicit)
+    if not found:
+        return {"found": False, "path": None, "commit": None,
+                "contract": "no-corrector", "detail": "교정기를 찾지 못했습니다."}
+
+    root = found.expanduser().resolve()
+    info = {"found": True, "path": str(root), "commit": None,
+            "contract": "unknown", "detail": ""}
+
+    try:  # 어느 판이 붙어 있는지. 실패해도 검사는 계속한다.
+        out = subprocess.run(["git", "-C", str(root), "rev-parse", "--short", "HEAD"],
+                             capture_output=True, text=True, timeout=10)
+        if out.returncode == 0:
+            info["commit"] = out.stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+    checker_script = root / "tools" / "check_public_api.py"
+    if not checker_script.is_file():
+        info["detail"] = ("교정기에 tools/check_public_api.py가 없습니다 — "
+                          "계약을 확인하지 못했습니다.")
+        return info
+
+    try:
+        out = subprocess.run([sys.executable, str(checker_script)],
+                             capture_output=True, text=True, timeout=60, cwd=str(root))
+    except (OSError, subprocess.SubprocessError) as e:
+        info["detail"] = f"계약 검사를 돌리지 못했습니다: {e}"
+        return info
+
+    info["contract"] = "ok" if out.returncode == 0 else "broken"
+    info["detail"] = (out.stdout or out.stderr).strip()
+    return info
+
+
 def _load_corrector_env(root_path: Path) -> None:
     """교정기의 `.env`를 읽어 환경에 올린다.
 

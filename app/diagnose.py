@@ -88,13 +88,25 @@ def collect() -> list[dict]:
         out.append(_line("번역(로컬 모델)", False, how=str(exc).splitlines()[0]))
 
     # --- 한국어 교정기 --------------------------------------------------
+    # **어느 판이 붙어 있고 계약이 맞는지까지 말한다.** 두 저장소가 라이브러리로
+    # 물려 있어서, 교정기가 함수 모양을 바꾸면 이쪽이 깨진다. 그 사고는 실사용
+    # 중에야 드러나므로 진단이 미리 짚어 준다(2026-08-14).
     try:
-        from checker.korean import find_corrector
-        found = find_corrector()
-    except Exception:
-        found = None
-    out.append(_line("한국어 교정기", found, found,
+        from checker.korean import corrector_info
+        info = corrector_info()
+    except Exception as exc:
+        info = {"found": False, "path": None, "commit": None,
+                "contract": "no-corrector", "detail": str(exc).splitlines()[0]}
+
+    out.append(_line("한국어 교정기", info["found"], info["path"],
                      "편집기 폴더 옆에 두거나 KSC_PATH로 알려 주세요"))
+    if info["found"]:
+        label = {"ok": "맞습니다", "broken": "어긋났습니다",
+                 "unknown": "확인하지 못했습니다"}.get(info["contract"], info["contract"])
+        how = info["detail"] if info["contract"] != "ok" else ""
+        out.append(_line("교정기 계약", info["contract"] == "ok",
+                         f"{label}{' · ' + info['commit'] if info['commit'] else ''}",
+                         how or "교정기의 tools/check_public_api.py가 판정합니다"))
     return out
 
 
