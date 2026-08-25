@@ -1,0 +1,36 @@
+# 규정(`rules/netflix/common.yaml`·`en-translation.yaml`)이 비워 둔 자리를
+# 실제 자막에서 관측한 값으로 채운다. 규칙 11 — `origin: learned`은 지우지 않는다.
+#
+# 2026-08-25: 드라마A(회차 6개), **한국어 원어 → 영어 번역**. 이 작품은
+# 한국어가 원어다 — 진짜 번역 방향이 맞다(`ko-translation.yaml`의 영화E와
+# 반대 방향). **한 작품뿐이다** — 규칙 11: 아직 규정으로 승격하지 않는다.
+#
+# 규정이 이미 값을 정한 항목(줄당 글자 수 42자, 읽기 속도 20자/초)은 여기 없다.
+
+schema_version: 1
+platform: netflix
+language: en
+kind: translation
+source:
+  official: false
+  origin: learned
+  from:
+    작품:
+      - {제목: "드라마A S01", 형태: "드라마 6부작", 원어: 한국어, 자막_쌍: 1219}
+    줄_합계: 3930
+  measured: "2026-08-25"
+
+observed:
+  duration_ms:
+    중앙값: 1900
+    p5: 967
+    p95: 3667
+    범위: [833, 6233]
+  gap_ms:
+    중앙값: 67
+    p5: 66
+  lines:
+    한_줄: 2715
+    두_줄: 1215
+    세_줄_이상: 0
+    전체_대사자막: 3930

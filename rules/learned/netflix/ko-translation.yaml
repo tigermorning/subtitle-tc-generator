@@ -1,0 +1,42 @@
+# 규정(`rules/netflix/common.yaml`·`ko-translation.yaml`)이 비워 둔 자리를
+# 실제 자막에서 관측한 값으로 채운다. 규칙 11 — `origin: learned`은 지우지 않는다.
+#
+# **드라마A는 여기 없다.** 그 작품은 한국어가 원어다(2026-08-25에
+# 확인) — "한국어 SDH"는 있어도 "한국어 번역"은 없다. 원어 그대로인 자막을
+# 번역 통계에 섞으면 다른 성격의 자료가 섞인다(사용자 지적). 그 작품의 SDH는
+# `ko-sdh.yaml`에 있고, 그 작품에서 나온 진짜 번역(영어·일본어·중국어로 옮긴 것)은
+# `en-translation.yaml`·`ja-translation.yaml`·`zh-translation.yaml`에 있다.
+#
+# 그래서 지금은 영화E(영화 1편, 영어 원어 → 한국어 번역) **한 편뿐**이다.
+# 규칙 11: "한 작품에서만 나온 것은 규정이 아니라 그 작품의 습관이다."
+#
+# 규정이 이미 값을 정한 항목(줄당 글자 수 16자, 읽기 속도 12자/초)은 여기 없다.
+
+schema_version: 1
+platform: netflix
+language: ko
+kind: translation
+source:
+  official: false
+  origin: learned
+  from:
+    작품:
+      - {제목: "영화E (2026)", 형태: 영화, 원어: 영어, 자막_쌍: 1091}
+    줄_합계: 1207
+  measured: "2026-08-25"
+
+observed:
+  duration_ms:
+    # 규정(common.yaml)은 833~7000ms 범위만 정한다.
+    중앙값: 1833
+    p5: 957
+    p95: 3667
+    범위: [833, 6958]
+  gap_ms:
+    중앙값: 500
+    p5: 1
+  lines:
+    한_줄: 904
+    두_줄: 303
+    세_줄_이상: 0
+    전체_대사자막: 1207

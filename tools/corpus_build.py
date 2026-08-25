@@ -150,7 +150,12 @@ def flags_for(events: list[Event], lang: str, limits: dict | None) -> list[dict]
         lines = [ln for ln in t.split("\n") if ln.strip()]
         why = []
         # ── 오류 (언어 무관) ────────────────────────────────────────────
-        if not t:
+        # **`bare()`가 아니라 `strip_tags()`로 빈 자막을 가린다.** `bare()`는
+        # 화자 표시까지 떼는데, SDH의 `[흥미로운 음악]`처럼 대사 없이 효과음만
+        # 있는 자막은 `SPEAKER` 정규식이 통째로 먹어 버려 `bare()`가 ""를 낸다.
+        # 그건 빈 자막이 아니라 대사가 없는 정상 SDH 자막이다(실측: 회차 하나에서
+        # 121건이 이렇게 오탐됐다). 태그만 뗀 값으로 진짜 빈 자막만 가린다.
+        if not strip_tags(e.text).strip():
             why.append(("오류", "빈 자막"))
         if e.duration_ms <= 0:
             why.append(("오류", f"길이 {e.duration_ms}ms — 시작이 끝보다 뒤"))
@@ -261,6 +266,9 @@ def main() -> int:
                          "재고, 안 주면 규정을 대지 않고 분포 이상치만 낸다")
     ap.add_argument("-k", "--kind", choices=["sdh", "translation"],
                     default="translation")
+    ap.add_argument("--target-title-hint", default="",
+                    help="목표 언어 트랙이 여럿(예: 중국어 간체/번체)일 때 제목에서 "
+                         "찾을 낱말. 못 찾으면 짐작하지 않고 실패한다")
     a = ap.parse_args()
 
     if not a.video.is_file():
@@ -280,26 +288,58 @@ def main() -> int:
               file=sys.stderr)
         return 1
 
-    def pick(lang: str) -> Track | None:
-        same = [t for t in text_tracks if t.lang == lang]
-        if not same:
-            return None
-        plain = [t for t in same if "sdh" not in t.title.lower()
-                 and "hi" not in t.title.lower().split()]
-        return (plain or same)[0]
+    def pick(lang: str, want_sdh: bool = False, title_hint: str = "") -> Track | None:
+        """그 언어 트랙 중 하나를 고른다.
 
-    wanted = [t for t in (pick(a.pivot), pick(a.target)) if t]
+        **forced는 절대 고르지 않는다.** 전체 대사가 아니라 화면에 다른 언어가
+        나올 때만 뜨는 부분 자막이라, 반쪽짜리를 완성 번역·SDH로 오인하게 된다
+        (사용자 지시, 2026-08-25 — 어떤 영상이든 예외 없음).
+
+        `want_sdh`가 참이면 SDH 트랙만 고른다. 없으면 **일반 트랙으로 대신하지
+        않는다**(`None`) — SDH와 번역은 가이드가 다르다(규칙 5). 섞으면 어느 쪽
+        지적인지 알 수 없다. 거짓이면 SDH가 아닌 일반 트랙을 고른다.
+
+        `title_hint`는 같은 언어 코드에 지역·표기 변형이 여럿일 때 쓴다
+        (예: 중국어 간체/번체가 `lang`은 둘 다 `chi`고 `title`만 다르다). 맞는
+        게 없으면 **짐작해서 아무거나 고르지 않는다** — 상위 호출부가 조용히
+        엉뚱한 변형을 쓰지 않도록 `None`을 돌려준다.
+        """
+        candidates = [t for t in text_tracks
+                      if t.lang == lang and "forced" not in t.title.lower()]
+        if not candidates:
+            return None
+
+        def is_sdh(t: Track) -> bool:
+            return "sdh" in t.title.lower() or "hi" in t.title.lower().split()
+
+        pool = [t for t in candidates if is_sdh(t)] if want_sdh else \
+               [t for t in candidates if not is_sdh(t)]
+        if not want_sdh and not pool:
+            pool = candidates
+        if not pool:
+            return None
+        if title_hint:
+            hinted = [t for t in pool if title_hint.lower() in t.title.lower()]
+            if len(pool) > 1 and not hinted:
+                return None      # 변형이 여럿인데 못 찾았다 — 아무거나 고르지 않는다
+            return (hinted or pool)[0]
+        return pool[0]
+
+    want_sdh = a.kind == "sdh"
+    wanted = [t for t in (pick(a.pivot), pick(a.target, want_sdh, a.target_title_hint)) if t]
     if a.all_langs:
-        wanted = text_tracks
+        # forced는 여기서도 뺀다 — 통으로 뽑아 두면 나중에 완성본인 줄 알고 쓴다.
+        wanted = [t for t in text_tracks if "forced" not in t.title.lower()]
     got: dict[str, Path] = {}
     for t in wanted:
         name = f"{t.lang or 'und'}_{t.index}.srt"
         if extract(a.video, t, srt_dir / name):
             got[f"{t.lang}:{t.index}"] = srt_dir / name
 
-    src_t, tgt_t = pick(a.pivot), pick(a.target)
+    src_t, tgt_t = pick(a.pivot), pick(a.target, want_sdh, a.target_title_hint)
     if not (src_t and tgt_t):
-        print(f"쌍을 만들 트랙이 없습니다 (원어 {a.pivot} / 목표 {a.target}). "
+        why = f"목표({a.target}) {'SDH' if want_sdh else '일반'} 트랙" if not tgt_t else f"원어({a.pivot}) 트랙"
+        print(f"쌍을 만들 트랙이 없습니다 — {why}이 없습니다(forced는 고르지 않습니다). "
               f"뽑기만 했습니다.", file=sys.stderr)
         return 0
 
