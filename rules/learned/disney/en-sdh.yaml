@@ -1,0 +1,40 @@
+# `rules/disney/`에 영어 프로파일이 없다(한국어만 있다) — 추측해서 만들지
+# 않는다(규칙 9). 순수 관측이다.
+#
+# 2026-08-25: 다큐A(다큐, 5화), 영어 원어 SDH. 대사 없이 효과음만
+# 있는 자막이 섞여 있어 글자 수·CPS 통계에서 뺐다 — 전체 2,959줄 중 대사
+# 있는 자막은 2,751줄이다.
+
+schema_version: 1
+platform: disney
+language: en
+kind: sdh
+source:
+  official: false
+  origin: learned
+  from:
+    작품:
+      - {제목: "다큐A (Hitler's Last Stand)", 형태: "다큐 5화", 줄_합계: 2959}
+  measured: "2026-08-25"
+
+observed:
+  duration_ms:
+    중앙값: 2961
+    p5: 1280
+    p95: 5047
+    범위: [800, 7080]
+  gap_ms:
+    중앙값: 500
+    p5: 0
+  chars_per_line_unweighted:
+    중앙값: 31.0
+    p95: 41.0
+    최대: 50.0
+  cps_unweighted:
+    중앙값: 16.3
+    p95: 24.0
+  lines:
+    한_줄: 562
+    두_줄: 2189
+    세_줄_이상: 0
+    전체_대사자막: 2751
