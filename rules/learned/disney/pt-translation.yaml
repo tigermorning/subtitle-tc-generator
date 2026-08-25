@@ -1,0 +1,39 @@
+# `rules/disney/`에 포르투갈어 프로파일이 없다 — 추측해서 만들지 않는다(규칙 9).
+# 순수 관측이다.
+#
+# 2026-08-25: 드라마C(회차 2개), 한국어 원어 → 포르투갈어 번역. 이 릴리스엔
+# 한국어 자막 트랙이 없다. 회차 2개뿐 — 규칙 11: 아직 규정으로 승격하지 않는다.
+
+schema_version: 1
+platform: disney
+language: pt
+kind: translation
+source:
+  official: false
+  origin: learned
+  from:
+    작품:
+      - {제목: "드라마C (Yumi's Cells S3)", 형태: "드라마 2화", 원어: 한국어, 줄_합계: 2032}
+  measured: "2026-08-25"
+
+observed:
+  duration_ms:
+    중앙값: 2301
+    p5: 1168
+    p95: 3948
+    범위: [1000, 5592]
+  gap_ms:
+    중앙값: 0
+    p5: 0
+  chars_per_line_unweighted:
+    중앙값: 23.0
+    p95: 42.0
+    최대: 47.0
+  cps_unweighted:
+    중앙값: 10.2
+    p95: 18.8
+  lines:
+    한_줄: 1783
+    두_줄: 233
+    세_줄_이상: 0
+    전체_대사자막: 2016
