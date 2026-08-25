@@ -61,20 +61,28 @@ class Track:
     lang: str
     title: str
     codec: str
+    forced: bool = False
 
 
 def probe_tracks(video: Path) -> list[Track]:
+    """**제목 문자열만 믿지 않는다.** 어떤 릴리스는 트랙에 제목이 아예 없다
+    (예능B 실측, 2026-08-26) — 그러면 `"forced" in title`로 거르던 기존
+    방식이 조용히 아무것도 못 거른다. mkv의 disposition 플래그(`forced=1`)는
+    제목과 별개로 붙어 있어서 그걸 함께 읽는다 — 실제로 제목 없는 한국어 트랙
+    하나가 이 플래그로만 forced임이 드러났다."""
     out = subprocess.run(
         [_find("ffprobe"), "-v", "error", "-select_streams", "s",
-         "-show_entries", "stream=index,codec_name:stream_tags=language,title",
+         "-show_entries", "stream=index,codec_name:stream_tags=language,title:stream_disposition=forced",
          "-of", "json", _as_tool_path(video)],
         capture_output=True, text=True, encoding="utf-8", errors="replace")
     data = json.loads(out.stdout or "{}")
     tracks = []
     for s in data.get("streams", []):
         tags = s.get("tags") or {}
+        disposition = s.get("disposition") or {}
         tracks.append(Track(int(s["index"]), tags.get("language", ""),
-                            tags.get("title", ""), s.get("codec_name", "")))
+                            tags.get("title", ""), s.get("codec_name", ""),
+                            forced=bool(disposition.get("forced"))))
     return tracks
 
 
@@ -305,7 +313,8 @@ def main() -> int:
         엉뚱한 변형을 쓰지 않도록 `None`을 돌려준다.
         """
         candidates = [t for t in text_tracks
-                      if t.lang == lang and "forced" not in t.title.lower()]
+                      if t.lang == lang and not t.forced
+                      and "forced" not in t.title.lower()]
         if not candidates:
             return None
 
@@ -329,7 +338,8 @@ def main() -> int:
     wanted = [t for t in (pick(a.pivot), pick(a.target, want_sdh, a.target_title_hint)) if t]
     if a.all_langs:
         # forced는 여기서도 뺀다 — 통으로 뽑아 두면 나중에 완성본인 줄 알고 쓴다.
-        wanted = [t for t in text_tracks if "forced" not in t.title.lower()]
+        wanted = [t for t in text_tracks
+                  if not t.forced and "forced" not in t.title.lower()]
     got: dict[str, Path] = {}
     for t in wanted:
         name = f"{t.lang or 'und'}_{t.index}.srt"
