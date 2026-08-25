@@ -1,0 +1,48 @@
+# `rules/hbo/`가 없다 — 새 발주처, 공식 문건 없음. 추측해서 만들지 않는다
+# (규칙 9). 순수 관측이다. **HBO 첫 학습 자료다.**
+#
+# 2026-08-26: 드라마C(드라마, E04~06), 한국어 원어 → 영어 번역.
+# 릴리스 폴더 이름은 "DSNP"(디즈니+)였지만, 이 영어 트랙만 제목에 "HBO
+# Ver."라고 따로 적혀 있었다 — 디즈니+로 넣지 않고 HBO로 따로 열었다
+# (`viki/en-translation.yaml`과 같은 이유).
+#
+# 같은 트랙 세트의 "Viki Ver."와 값이 뚜렷이 다르다 — 노출 시간 중앙값이
+# 이쪽은 1666ms, Viki 쪽은 2209ms. 발주처가 다르면 값도 다르다는 걸
+# 다시 확인해 준다.
+#
+# 회차 3개뿐 — 규칙 11: 아직 규정으로 승격하지 않는다.
+
+schema_version: 1
+platform: hbo
+language: en
+kind: translation
+source:
+  official: false
+  origin: learned
+  from:
+    작품:
+      - {제목: "드라마C (Yumi's Cells S3)", 형태: "드라마 3화(E04~06)",
+         원어: 한국어, 자막_트랙: "English (HBO Ver.)", 줄_합계: 3006}
+  measured: "2026-08-26"
+
+observed:
+  duration_ms:
+    중앙값: 1666
+    p5: 1000
+    p95: 3167
+    범위: [1000, 5417]
+  gap_ms:
+    중앙값: 583
+    p5: 83
+  chars_per_line_unweighted:
+    중앙값: 24.0
+    p95: 38.0
+    최대: 42.0
+  cps_unweighted:
+    중앙값: 14.5
+    p95: 24.6
+  lines:
+    한_줄: 2370
+    두_줄: 636
+    세_줄_이상: 0
+    전체_대사자막: 3006
