@@ -1,0 +1,40 @@
+# `rules/coupang/`에 영어 프로파일이 없다(한국어만 있다) — 추측해서 만들지
+# 않는다(규칙 9). 순수 관측이다.
+#
+# 2026-08-26: 드라마E E05(쿠팡플레이), 한국어
+# 원어 → 영어 번역. 회차 1개뿐.
+
+schema_version: 1
+platform: coupang
+language: en
+kind: translation
+source:
+  official: false
+  origin: learned
+  from:
+    작품:
+      - {제목: "드라마E E05", 형태: "드라마 1화",
+         원어: 한국어, 줄_합계: 532}
+  measured: "2026-08-26"
+
+observed:
+  duration_ms:
+    중앙값: 1793
+    p5: 959
+    p95: 3670
+    범위: [834, 6006]
+  gap_ms:
+    중앙값: 959
+    p5: 83
+  chars_per_line_unweighted:
+    중앙값: 24.0
+    p95: 39.0
+    최대: 42.0
+  cps_unweighted:
+    중앙값: 13.8
+    p95: 24.0
+  lines:
+    한_줄: 397
+    두_줄: 135
+    세_줄_이상: 0
+    전체_대사자막: 532
