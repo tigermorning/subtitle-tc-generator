@@ -1,0 +1,39 @@
+# `rules/bluray/`가 없다 — 발주처를 모른다(규칙 9). 순수 관측이다.
+#
+# 2026-08-25: 영화C, 디스크 내장 영어 SDH SRT 트랙. 영화 1편뿐.
+# 대사 없이 효과음만 있는 자막(예: [explosion])이 102개 섞여 있어 글자 수·CPS
+# 통계에서 뺐다 — 전체 1,551줄 중 대사 있는 자막은 1,449줄이다.
+
+schema_version: 1
+platform: bluray
+language: en
+kind: sdh
+source:
+  official: false
+  origin: learned
+  from:
+    작품:
+      - {제목: "영화C", 형태: 영화, 줄_합계: 1551}
+  measured: "2026-08-25"
+
+observed:
+  duration_ms:
+    중앙값: 2030
+    p5: 1329
+    p95: 3971
+    범위: [1030, 9369]
+  gap_ms:
+    중앙값: 1
+    p5: 1
+  chars_per_line_unweighted:
+    중앙값: 23.0
+    p95: 31.0
+    최대: 34.0
+  cps_unweighted:
+    중앙값: 13.3
+    p95: 25.6
+  lines:
+    한_줄: 746
+    두_줄: 703
+    세_줄_이상: 0
+    전체_대사자막: 1449

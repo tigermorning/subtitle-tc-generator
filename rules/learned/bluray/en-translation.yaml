@@ -1,0 +1,37 @@
+# `rules/bluray/`가 없다 — 발주처를 모른다(규칙 9). 순수 관측이다.
+#
+# 2026-08-25: 영화C, 디스크 내장 영어 SRT 트랙(원어). 영화 1편뿐.
+
+schema_version: 1
+platform: bluray
+language: en
+kind: translation
+source:
+  official: false
+  origin: learned
+  from:
+    작품:
+      - {제목: "영화C", 형태: 영화, 줄_합계: 1328}
+  measured: "2026-08-25"
+
+observed:
+  duration_ms:
+    중앙값: 2002
+    p5: 1306
+    p95: 4140
+    범위: [1030, 9369]
+  gap_ms:
+    중앙값: 1
+    p5: 1
+  chars_per_line_unweighted:
+    중앙값: 22.0
+    p95: 31.0
+    최대: 34.0
+  cps_unweighted:
+    중앙값: 12.9
+    p95: 24.1
+  lines:
+    한_줄: 754
+    두_줄: 574
+    세_줄_이상: 0
+    전체_대사자막: 1328

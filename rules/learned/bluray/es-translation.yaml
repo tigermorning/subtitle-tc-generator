@@ -1,0 +1,37 @@
+# `rules/bluray/`가 없다 — 발주처를 모른다(규칙 9). 순수 관측이다.
+#
+# 2026-08-25: 영화C, 디스크 내장 스페인어(중남미) SRT 트랙. 영화 1편뿐.
+
+schema_version: 1
+platform: bluray
+language: es
+kind: translation
+source:
+  official: false
+  origin: learned
+  from:
+    작품:
+      - {제목: "영화C", 형태: 영화, 표기: "중남미 스페인어", 줄_합계: 1215}
+  measured: "2026-08-25"
+
+observed:
+  duration_ms:
+    중앙값: 2002
+    p5: 1126
+    p95: 4337
+    범위: [1000, 7007]
+  gap_ms:
+    중앙값: 125
+    p5: 125
+  chars_per_line_unweighted:
+    중앙값: 26.0
+    p95: 39.0
+    최대: 42.0
+  cps_unweighted:
+    중앙값: 13.8
+    p95: 24.0
+  lines:
+    한_줄: 850
+    두_줄: 365
+    세_줄_이상: 0
+    전체_대사자막: 1215

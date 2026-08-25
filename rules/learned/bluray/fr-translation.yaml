@@ -1,0 +1,37 @@
+# `rules/bluray/`가 없다 — 발주처를 모른다(규칙 9). 순수 관측이다.
+#
+# 2026-08-25: 영화C, 디스크 내장 프랑스어(캐나다) SRT 트랙. 영화 1편뿐.
+
+schema_version: 1
+platform: bluray
+language: fr
+kind: translation
+source:
+  official: false
+  origin: learned
+  from:
+    작품:
+      - {제목: "영화C", 형태: 영화, 표기: "캐나다 프랑스어", 줄_합계: 1271}
+  measured: "2026-08-25"
+
+observed:
+  duration_ms:
+    중앙값: 1793
+    p5: 1001
+    p95: 4170
+    범위: [1000, 7007]
+  gap_ms:
+    중앙값: 501
+    p5: 166
+  chars_per_line_unweighted:
+    중앙값: 26.0
+    p95: 40.0
+    최대: 42.0
+  cps_unweighted:
+    중앙값: 15.0
+    p95: 25.9
+  lines:
+    한_줄: 948
+    두_줄: 323
+    세_줄_이상: 0
+    전체_대사자막: 1271
