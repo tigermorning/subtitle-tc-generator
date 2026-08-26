@@ -360,19 +360,48 @@ def make_translator(model: str | None = None, prefer_cli: bool | None = None):
 #
 # 그래서 여기 남는 것은 **오역 금지**와 **구조 보존**뿐이다. 구조는 1차에서 지켜야
 # 한다 — 번호가 타임코드에 걸려 있어서 뒤 단계가 복구할 수 없다.
-SYSTEM = (
-    "당신은 영상 번역가입니다. 영어 대사를 한국어 자막으로 **1차 번역**합니다.\n"
-    "**볼 것은 하나입니다 — 뜻이 틀리지 않는 것.**\n"
-    "\n"
-    "- 투박하거나 딱딱한 한국어는 괜찮습니다. 다듬는 것은 2차·3차에서 합니다.\n"
-    "- **오역은 괜찮지 않습니다.** 뜻을 모르면 지어내지 말고 원문을 그대로 두세요.\n"
-    "- 부정(not·never·no), 숫자, 사람·장소 이름을 빠뜨리지 마세요. 뜻이 뒤집힙니다.\n"
-    "- 원문의 단어에 매달리지 말고 **의미**를 옮깁니다.\n"
-    "- 말투는 **존댓말로 통일**합니다. 인물 관계에 맞추는 것은 2차에서 합니다.\n"
-    "- 자막은 한 줄에 하나입니다. **번호를 합치거나 나누지 마세요.**\n"
-    "- 대괄호 안의 화자명·효과음, 음표, 태그는 그대로 둡니다.\n"
-    "- 설명을 덧붙이지 말고 번역만 냅니다."
-)
+# **목표 언어별로 다른 프롬프트다 — 하나를 문자열 치환만으로 돌려쓰지 않는다.**
+# 언어마다 1차에서 볼 것 자체가 다르다. 한국어는 존댓말/반말이라는 문법 범주가
+# 있어 "일단 존댓말로 통일, 관계 맞추기는 2차에서"라는 지시가 필요하지만 영어에는
+# 그 범주 자체가 없다 — 지시를 억지로 넣으면 없는 문제에 답을 강요하는 것이다.
+# 새 언어를 추가할 때도 그 언어에 실제로 있는 1차 쟁점만 넣는다(규칙 9 — 자료
+# 없는 것을 추측해서 채우지 않는다. 언어별 문체 규정 조사가 먼저다).
+SYSTEM_BY_LANG: dict[str, str] = {
+    "ko": (
+        "당신은 영상 번역가입니다. 원어 대사를 한국어 자막으로 **1차 번역**합니다.\n"
+        "**볼 것은 하나입니다 — 뜻이 틀리지 않는 것.**\n"
+        "\n"
+        "- 투박하거나 딱딱한 한국어는 괜찮습니다. 다듬는 것은 2차·3차에서 합니다.\n"
+        "- **오역은 괜찮지 않습니다.** 뜻을 모르면 지어내지 말고 원문을 그대로 두세요.\n"
+        "- 부정(not·never·no), 숫자, 사람·장소 이름을 빠뜨리지 마세요. 뜻이 뒤집힙니다.\n"
+        "- 원문의 단어에 매달리지 말고 **의미**를 옮깁니다.\n"
+        "- 말투는 **존댓말로 통일**합니다. 인물 관계에 맞추는 것은 2차에서 합니다.\n"
+        "- 자막은 한 줄에 하나입니다. **번호를 합치거나 나누지 마세요.**\n"
+        "- 대괄호 안의 화자명·효과음, 음표, 태그는 그대로 둡니다.\n"
+        "- 설명을 덧붙이지 말고 번역만 냅니다."
+    ),
+    "en": (
+        "당신은 영상 번역가입니다. 원어 대사를 영어 자막으로 **1차 번역**합니다.\n"
+        "**볼 것은 하나입니다 — 뜻이 틀리지 않는 것.**\n"
+        "\n"
+        "- 투박하거나 직역투인 영어는 괜찮습니다. 다듬는 것은 2차·3차에서 합니다.\n"
+        "- **오역은 괜찮지 않습니다.** 뜻을 모르면 지어내지 말고 원문을 그대로 두세요.\n"
+        "- 부정(not·never·no에 해당하는 원어 표현), 숫자, 사람·장소 이름을 빠뜨리지 "
+        "마세요. 뜻이 뒤집힙니다.\n"
+        "- 원문의 단어에 매달리지 말고 **의미**를 옮깁니다.\n"
+        "- 자막은 한 줄에 하나입니다. **번호를 합치거나 나누지 마세요.**\n"
+        "- 대괄호 안의 화자명·효과음, 음표, 태그는 그대로 둡니다.\n"
+        "- 설명을 덧붙이지 말고 번역만 냅니다."
+    ),
+}
+
+# 자료(에이전시 지침 등)로 확인되기 전까지 늘리지 않는다 — 지원하지 않는
+# 언어가 오면 조용히 한국어로 떨어지는 대신 명확히 실패한다(규칙 9).
+LANG_NAMES: dict[str, str] = {"ko": "한국어", "en": "영어"}
+
+# 하위 호환: 예전에는 이 이름 하나뿐이었다. 옛 코드·시험이 여전히 이 이름으로
+# 한국어 1차 프롬프트를 본다.
+SYSTEM = SYSTEM_BY_LANG["ko"]
 
 
 @dataclass
@@ -439,7 +468,7 @@ def _parse_numbered(reply: str, expected: list[int]) -> dict[int, str]:
 
 def translate_events(events: list[Event], translator, glossary: Glossary | None = None,
                      batch: int = 12, context: int = 3,
-                     progress=None) -> list[TranslatedCue]:
+                     progress=None, target_lang: str = "ko") -> list[TranslatedCue]:
     """자막을 묶어 번역한다. **묶는 이유는 맥락이다.**
 
     한 줄씩 보내면 빠르지만 대명사와 말투가 자막마다 흔들린다. 앞의 몇 줄을
@@ -447,7 +476,20 @@ def translate_events(events: list[Event], translator, glossary: Glossary | None 
 
     번호가 빠지거나 개수가 어긋나면 그 자막만 다시 한 줄씩 묻는다 — 통째로 다시
     돌리면 잘 나온 것까지 흔들린다.
+
+    `target_lang`은 프로파일의 `language`(예: `-l en`)를 그대로 받는다 —
+    "이 자막이 무슨 언어로 나가야 하는가"는 이미 그 값이 담고 있다. 지원하지
+    않는 언어면 조용히 한국어로 떨어지지 않고 실패한다(규칙 9 — 자료 없이
+    프롬프트를 지어내지 않는다).
     """
+    if target_lang not in SYSTEM_BY_LANG:
+        raise TranslatorUnavailable(
+            f"목표 언어 '{target_lang}' 번역 프롬프트가 없습니다. "
+            f"지원 언어: {', '.join(SYSTEM_BY_LANG)}. 새 언어는 그 언어의 1차 번역 "
+            "쟁점을 조사해서 SYSTEM_BY_LANG에 넣어야 합니다 — 추측해서 채우지 않습니다.")
+    system = SYSTEM_BY_LANG[target_lang]
+    lang_name = LANG_NAMES[target_lang]
+
     say = progress or (lambda _m: None)
     glossary = glossary or Glossary()
     out: list[TranslatedCue] = []
@@ -465,12 +507,12 @@ def translate_events(events: list[Event], translator, glossary: Glossary | None 
 
         numbered = "\n".join(f"{ev.index}. {body}"
                              for ev, (body, _) in zip(chunk, protected))
-        prompt = (f"{before}다음 자막을 한국어로 옮기세요. "
+        prompt = (f"{before}다음 자막을 {lang_name}로 옮기세요. "
                   f"**번호를 그대로 붙여 같은 개수로** 내세요."
                   f"{glossary.hint()}\n\n{numbered}")
 
         say(f"번역 {start + 1}~{start + len(chunk)} / {len(events)}")
-        reply = translator.ask(SYSTEM, prompt)
+        reply = translator.ask(system, prompt)
         got = _parse_numbered(reply, [ev.index for ev in chunk])
 
         for ev, (body, frame) in zip(chunk, protected):
@@ -479,7 +521,7 @@ def translate_events(events: list[Event], translator, glossary: Glossary | None 
             if not text:
                 # 한 줄만 다시 묻는다. 그래도 안 되면 원문을 남긴다 — 빈 자막은
                 # 사람이 못 보고 지나치지만 원문은 눈에 띈다.
-                retry = translator.ask(SYSTEM, f"한국어 자막으로 옮기세요:\n{body}")
+                retry = translator.ask(system, f"{lang_name} 자막으로 옮기세요:\n{body}")
                 text = retry.strip().split("\n")[0].strip()
                 note = "번역이 흔들려 다시 물었습니다 — 확인이 필요합니다"
             if not text:

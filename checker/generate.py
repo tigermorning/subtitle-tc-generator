@@ -194,9 +194,12 @@ def generate(video: Path, profile: dict, script: Path | None = None,
             from .writers import write_srt
             write_srt(events, Path(keep_source))
             say(f"원어 자막을 남겼습니다: {keep_source}")
-        say(f"한국어로 옮깁니다 — 자막 {len(events)}개")
+        target_lang = profile.get("language") or "ko"
+        target_name = {"ko": "한국어", "en": "영어"}.get(target_lang, target_lang)
+        say(f"{target_name}로 옮깁니다 — 자막 {len(events)}개")
         sources = {e.index: e.text for e in events}
-        cues = translate_events(events, translator, glossary, progress=say)
+        cues = translate_events(events, translator, glossary, progress=say,
+                                target_lang=target_lang)
         for cue in cues:
             if cue.note:
                 notes.append((cue.index, cue.note))
