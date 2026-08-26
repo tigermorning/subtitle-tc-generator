@@ -262,7 +262,8 @@ def apply_spotting(events: list[Event], suggestions: list) -> int:
 
 def suggest_spotting(events: list[Event], speech: list[tuple[int, int]], fps: float,
                      tolerance_frames: int = 4,
-                     detector: str = "loudness") -> list[SpotSuggestion]:
+                     detector: str = "loudness",
+                     max_shift_ms: int = 2000) -> list[SpotSuggestion]:
     """말소리 구간과 견줘 인점·아웃점을 제안한다.
 
     **자동으로 고치지 않는다.** 말소리 검출은 음량 기준이라 배경음악이 크면 경계가
@@ -270,6 +271,18 @@ def suggest_spotting(events: list[Event], speech: list[tuple[int, int]], fps: fl
     고르도록 제안만 낸다.
 
     `tolerance_frames`보다 적게 어긋난 것은 말하지 않는다 — 이미 규정 안이다.
+
+    **`max_shift_ms`보다 크게 옮기는 제안은 내지 않는다.** 예능·토크쇼처럼 여러
+    사람이 끊김 없이 겹쳐 말하면 VAD·음량 검출은 그 전부를 하나의 긴 말소리
+    구간으로 묶어 버린다. 그러면 아웃점이 "이 자막이 담은 말이 끝나는 자리"가
+    아니라 "근처 말소리 구간이 끝나는 자리"로 끌려간다 — 다음 자막이 한참 뒤에야
+    시작하면 그 사이 배경 잡담·박수·노래까지 아웃점에 얹힌다(예능A
+    16회 정답 대조에서 실측, 2026-08-26 — 자막 여러 개가 정확히 7000ms·4000ms
+    상한에 걸려서야 멈췄다. 상한이 없었다면 몇 초를 더 끌려갔을 것이다).
+    이런 자리는 근거가 이 자막 하나를 가리키는 게 아니라 넓은 구간을 가리키는
+    것이므로, **크게 옮기는 대신 아무 말도 하지 않는다** — 전사·재분할이 만든
+    원래 값을 그대로 두고 검사(C01·S02)가 사람에게 맡긴다. 규칙 4와 같은 논리:
+    여유(LEADS)는 몇 프레임 다듬는 값이지, 몇 초를 새로 정하는 값이 아니다.
     """
     if not speech:
         return []
@@ -299,7 +312,8 @@ def suggest_spotting(events: list[Event], speech: list[tuple[int, int]], fps: fl
             voice_end = min(voice_end, next_start)
 
         want_start = voice_start - lead_in[1] * frame
-        if abs(ev.start_ms - want_start) > tolerance:
+        start_shift = abs(ev.start_ms - want_start)
+        if tolerance < start_shift <= max_shift_ms:
             out.append(SpotSuggestion(
                 ev.index, "start_ms", ev.start_ms, int(round(want_start)),
                 f"말소리 시작 {voice_start}ms의 {lead_in[0]}~{lead_in[1]}프레임 앞"))
@@ -309,7 +323,8 @@ def suggest_spotting(events: list[Event], speech: list[tuple[int, int]], fps: fl
             # 여유 프레임을 더한 뒤에도 다음 인점을 넘지 않게 한다.
             # 간격 확보는 converge()가 따로 본다.
             want_end = min(want_end, next_start)
-        if abs(ev.end_ms - want_end) > tolerance:
+        end_shift = abs(ev.end_ms - want_end)
+        if tolerance < end_shift <= max_shift_ms:
             out.append(SpotSuggestion(
                 ev.index, "end_ms", ev.end_ms, int(round(want_end)),
                 f"말소리 끝 {voice_end}ms의 {lead_out[0]}~{lead_out[1]}프레임 뒤"))
