@@ -452,6 +452,22 @@ def _restore(text: str, frame: tuple[str, str, bool]) -> str:
     return f"{head}{joiner_head}{text}{joiner_tail}{tail}"
 
 
+def _strip_markdown_wrap(text: str) -> str:
+    """모델이 가끔 번역문 전체를 마크다운 강조(`**...**`·`__...__`)로 감싸 낸다.
+
+    자막에 그대로 나가면 글자 그대로 별표가 남는다(실측: 예능A 15회 영어
+    번역 127곳, 영화F 한국어 번역 76곳, 2026-08-27). **통째로
+    감싼 것만 벗긴다** — 대사 중간의 낱말 강조나 욕설 마스킹(`sh*t`)은 건드리지
+    않는다. 그건 감싸는 게 아니라 안에 박힌 것이다.
+    """
+    stripped = text.strip()
+    for marker in ("**", "__"):
+        if (stripped.startswith(marker) and stripped.endswith(marker)
+                and len(stripped) > 2 * len(marker)):
+            return stripped[len(marker):-len(marker)].strip()
+    return text
+
+
 def _parse_numbered(reply: str, expected: list[int]) -> dict[int, str]:
     """`3. 번역문` 꼴을 읽는다. 모델이 어떻게 답하든 번호를 붙잡는다."""
     found: dict[int, str] = {}
@@ -463,7 +479,7 @@ def _parse_numbered(reply: str, expected: list[int]) -> dict[int, str]:
             found[current] = m.group(2).strip()
         elif current is not None and line.strip():
             found[current] += "\n" + line.strip()
-    return {k: v.strip() for k, v in found.items() if v.strip()}
+    return {k: _strip_markdown_wrap(v.strip()) for k, v in found.items() if v.strip()}
 
 
 def translate_events(events: list[Event], translator, glossary: Glossary | None = None,
@@ -522,7 +538,7 @@ def translate_events(events: list[Event], translator, glossary: Glossary | None 
                 # 한 줄만 다시 묻는다. 그래도 안 되면 원문을 남긴다 — 빈 자막은
                 # 사람이 못 보고 지나치지만 원문은 눈에 띈다.
                 retry = translator.ask(system, f"{lang_name} 자막으로 옮기세요:\n{body}")
-                text = retry.strip().split("\n")[0].strip()
+                text = _strip_markdown_wrap(retry.strip().split("\n")[0].strip())
                 note = "번역이 흔들려 다시 물었습니다 — 확인이 필요합니다"
             if not text:
                 text, note = ev.text, "번역하지 못했습니다 — 원문을 남겼습니다"
