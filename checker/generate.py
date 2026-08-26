@@ -114,10 +114,37 @@ def generate(video: Path, profile: dict, script: Path | None = None,
         fps = media.fps or 23.976
     say(f"영상: {media.duration_ms / 1000:.0f}초, {fps:.3f}fps")
 
+    # 말소리 구간을 전사보다 먼저 찾는다. 완전한 침묵(로고·크레딧 구간)에서
+    # whisper가 같은 말을 반복하는 환각을 내는 것을 걸러내려면 전사 직후에
+    # 말소리 위치가 있어야 한다(아래 필터링 참고).
+    speech, how = find_speech(video, method=speech_method,
+                              duration_ms=media.duration_ms, progress=say)
+    say(f"말소리 구간 {len(speech)}개 ({'모델' if how == 'vad' else '음량'})")
+
     segments = transcribe(video, language=language, model=model,
                           use_gpu=use_gpu, progress=say, keep=keep_transcript)
     if not segments:
         return Draft([], [], {"transcript": 0})
+
+    # **말소리 구간과 전혀 안 겹치는 조각은 뺀다.** whisper는 완전한 침묵에서도
+    # 자신 있게 글자를 만들어 낸다 — 흔한 실패 모드다(2026-08-26, 영화D·영화F
+    # and Monsters 두 영화의 오프닝 로고 구간에서 밀리초까지 같은 타임스탬프에
+    # "네! 네! 네!"·"헤이 헤이 헤이" 같은 반복이 나온 것으로 확인). 실제 말소리가
+    # 조금이라도 있으면 VAD가 잡으므로, 겹치는 구간이 하나도 없는 조각은 소리가
+    # 아니라 지어낸 것으로 본다. 지우지 않고 세어서 알린다(추정 자동 삭제가
+    # 아니라 근거 있는 필터임 — 규칙 4).
+    if speech:
+        def _has_speech(seg) -> bool:
+            return any(s < seg.end_ms and seg.start_ms < e for s, e in speech)
+
+        kept = [s for s in segments if _has_speech(s)]
+        dropped = len(segments) - len(kept)
+        if dropped:
+            say(f"말소리와 전혀 안 겹치는 전사 조각 {dropped}개를 뺐습니다"
+                " — 침묵에서 whisper가 지어낸 것으로 보입니다")
+        segments = kept
+        if not segments:
+            return Draft([], [], {"transcript": 0})
 
     notes: list[tuple[int, str]] = []
     stats: dict = {"transcript": len(segments)}
@@ -176,9 +203,6 @@ def generate(video: Path, profile: dict, script: Path | None = None,
         events = to_events(cues, events)
         stats["translated"] = len(cues)
 
-    speech, how = find_speech(video, method=speech_method,
-                              duration_ms=media.duration_ms, progress=say)
-    say(f"말소리 구간 {len(speech)}개 ({'모델' if how == 'vad' else '음량'})")
     before, origins = len(events), []
     events = resplit_all(events, profile, speech, origins)
     say(f"자막 {before}개를 의미 단위로 다시 나눠 {len(events)}개")
