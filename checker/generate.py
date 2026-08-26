@@ -133,8 +133,29 @@ def generate(video: Path, profile: dict, script: Path | None = None,
     # 조금이라도 있으면 VAD가 잡으므로, 겹치는 구간이 하나도 없는 조각은 소리가
     # 아니라 지어낸 것으로 본다. 지우지 않고 세어서 알린다(추정 자동 삭제가
     # 아니라 근거 있는 필터임 — 규칙 4).
+    #
+    # **VAD의 오디오 읽기 자체가 도중에 멎을 수 있다.** 컨테이너 손상 등으로
+    # ffmpeg이 오디오를 끝까지 못 읽으면 `speech`가 영상 길이보다 훨씬 짧게
+    # 끝난다 — 그 뒤는 "침묵"이 아니라 "검출을 못 한 구간"이다. 실측(2026-08-27,
+    # 예능A 15회): VAD는 3113초에서 멎었는데 whisper 전사는 3478초까지
+    # 멀쩡했다. 이 구분 없이 필터를 걸었더니 **실제 대사가 있는 마지막 6분이
+    # 통째로 삭제되는 사고**가 났다 — 막으려던 문제(침묵 환각)보다 더 큰 손실이라
+    # 반드시 갈라야 한다.
     if speech:
+        speech_end = max(e for _, e in speech)
+        coverage_gap = media.duration_ms - speech_end
+        # 30초는 여유값이다. 진짜 무음 엔딩(크레딧 등)은 이보다 짧은 게 보통이고,
+        # 몇 분 단위로 벌어지면 검출 자체가 멎었다고 본다.
+        undetected_after = coverage_gap > 30_000
+
+        if undetected_after:
+            say(f"말소리 검출이 영상 끝보다 {coverage_gap / 1000:.0f}초 일찍 "
+                "멎었습니다 — 그 뒤는 침묵으로 보지 않고 그대로 둡니다"
+                "(검출 자체가 못 미쳤을 수 있습니다)")
+
         def _has_speech(seg) -> bool:
+            if undetected_after and seg.start_ms >= speech_end:
+                return True   # 검출이 못 미친 구간 — 걸러내지 않는다
             return any(s < seg.end_ms and seg.start_ms < e for s, e in speech)
 
         kept = [s for s in segments if _has_speech(s)]
