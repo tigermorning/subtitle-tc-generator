@@ -62,13 +62,29 @@ class OllamaEmbedder:
             "Ollama를 찾지 못했습니다. 번역과 같은 서버를 씁니다 — "
             "winget install Ollama.Ollama 로 설치하세요.")
 
+    # **한 번에 너무 많이 보내면 Ollama가 죽는다.** 실측(2026-08-27,
+    # paraphrase-multilingual): 200개는 되는데 400개는 매번
+    # "내부 토크나이저 프로세스에 못 붙음"(ECONNREFUSED, 매번 다른 포트) 오류로
+    # 실패했다 — Ollama 쪽 배치 처리 한계로 보인다(우리 코드 문제가 아니다).
+    # 넉넉히 여유를 두고 100개씩 나눠 보낸다.
+    CHUNK_SIZE = 100
+
     def embed_batch(self, texts: list[str]) -> list[list[float]]:
         """빈 문자열은 걸러서 보낸다(모델이 오류를 낸다) — 자리는 0벡터로 채운다."""
         indices = [i for i, t in enumerate(texts) if t.strip()]
         if not indices:
             return [[] for _ in texts]
-        body = json.dumps({"model": self.model,
-                           "input": [texts[i] for i in indices]}).encode("utf-8")
+
+        out: list[list[float]] = [[] for _ in texts]
+        for start in range(0, len(indices), self.CHUNK_SIZE):
+            chunk_indices = indices[start:start + self.CHUNK_SIZE]
+            vectors = self._embed_request([texts[i] for i in chunk_indices])
+            for i, vec in zip(chunk_indices, vectors):
+                out[i] = vec
+        return out
+
+    def _embed_request(self, texts: list[str]) -> list[list[float]]:
+        body = json.dumps({"model": self.model, "input": texts}).encode("utf-8")
         req = urllib.request.Request(f"{self.host}/api/embed", data=body,
                                      headers={"Content-Type": "application/json"})
         try:
@@ -84,11 +100,7 @@ class OllamaEmbedder:
         except urllib.error.URLError as exc:
             raise EmbeddingUnavailable(f"Ollama에 닿지 못했습니다: {exc.reason}") from exc
 
-        got = data.get("embeddings") or []
-        out: list[list[float]] = [[] for _ in texts]
-        for i, vec in zip(indices, got):
-            out[i] = vec
-        return out
+        return data.get("embeddings") or []
 
 
 def cosine(a: list[float], b: list[float]) -> float:
