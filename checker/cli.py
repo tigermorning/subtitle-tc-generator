@@ -876,6 +876,11 @@ def _generate_mode(args, ap) -> int:
                 print(f"    {n:>3}건  {rule_id}  {message}")
         if unfixable:
             print("  자동 표시지만 기계가 못 고치는 것: " + ", ".join(unfixable))
+        unimplemented = result.extra["report"].get("unimplemented_checks") or []
+        if unimplemented:
+            # --check 모드는 이미 이 줄을 낸다(193행). --generate만 빠져 있었다 —
+            # 검사하지 않은 것을 조용히 "통과"로 보이게 하면 규칙 9를 어긴다.
+            print(f"  미구현 검사 {len(unimplemented)}건: " + ", ".join(unimplemented))
 
     write_srt(events, out)
     print(f"\n자막을 저장했습니다: {out}  (자막 {len(events)}개)")

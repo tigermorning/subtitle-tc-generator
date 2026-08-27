@@ -730,6 +730,53 @@ def _speaker_consistency(events: list[Event], ctx: dict):
     return out
 
 
+def _normalize_for_repetition(text: str) -> str:
+    """반복 판정용 정규화. 화자 하이픈·문장부호·공백 차이는 같은 대사로 본다."""
+    text = strip_tags(text)
+    text = re.sub(r"^-+\s*", "", text.strip())
+    text = re.sub(r"[^\w가-힣]", "", text)
+    return text.lower()
+
+
+@doc_check("heavy_repetition_subtitled")
+def _heavy_repetition(events: list[Event], ctx: dict):
+    """같은 대사를 몰아서 여러 번 반복할 때(놀람·강조·같은 질문 되풀이) 자막도
+    매번 새 큐로 만들면 규정(Netflix ET13, "반복이 과하면 처음 2~3회만
+    자막화합니다")을 넘는다.
+
+    **정확히 같은 문자열일 때만 잡는다** — 문장부호·화자 하이픈·공백 차이는
+    무시하지만(정규화), 뜻은 같고 표현만 다른 반복(바꿔 말하기)은 사람이 봐야 할
+    영역이라 이 검사가 임의로 묶지 않는다. `auto: false`인 이유도 같다 — 몇 번째부터
+    지울지, 어떻게 압축할지는 규정이 정하지 않고 사람이 고른다(규칙 3).
+
+    실측(예능A 15회 영어 번역, 2026-08-27): 정답 자막은 반복되는 실제 대사를
+    한 큐로 압축해 냈는데("-Okay, I'm sorry.\\n-Aren't you Mr. Cho?"), 우리
+    초안은 같은 대사를 4개 큐로 쪼개 냈다. `regroup.py`·`resplit.py`는 이 판단을
+    할 수 없다 — 개수를 줄이려면 뜻을 압축해야 하고, 그건 재분할이 아니라
+    번역·표현의 영역이다.
+    """
+    threshold = 3  # "처음 2~3회만" — 4번째부터 지적
+    out = []
+    run: list[Event] = []
+
+    def flush():
+        if len(run) > threshold:
+            for ev in run[threshold:]:
+                out.append((ev.index, None,
+                            f"같은 대사가 {len(run)}번 연달아 나옵니다"
+                            f"(처음 {threshold}개만 자막화, 이건 {run.index(ev) + 1}번째)"))
+
+    for ev in events:
+        key = _normalize_for_repetition(ev.text)
+        if run and key and _normalize_for_repetition(run[-1].text) == key:
+            run.append(ev)
+            continue
+        flush()
+        run = [ev] if key else []
+    flush()
+    return out
+
+
 # --- 실무 자료에서 나온 검사 ---------------------------------------------
 #
 # 작업자가 실제 작업하며 정리한 자료(rules/sources/작업자-자료)에서 왔다.
