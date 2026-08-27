@@ -28,6 +28,7 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
 
+from . import word_sense
 from .model import Event
 
 # 번역하지 않고 그대로 넘길 것들. 화자명·효과음·음표는 표기 규정의 영역이라
@@ -564,9 +565,11 @@ def translate_events(events: list[Event], translator, glossary: Glossary | None 
 
         numbered = "\n".join(f"{ev.index}. {body}"
                              for ev, (body, _) in zip(chunk, protected))
+        # 이 배치의 원문에 실제로 걸리는 표현만 붙인다 — word_sense.hint 참고.
+        sense_hint = word_sense.hint(" ".join(ev.text for ev in chunk))
         prompt = (f"{before}다음 자막을 {lang_name}로 옮기세요. "
                   f"**번호를 그대로 붙여 같은 개수로** 내세요."
-                  f"{glossary.hint()}\n\n{numbered}")
+                  f"{glossary.hint()}{sense_hint}\n\n{numbered}")
 
         say(f"번역 {start + 1}~{start + len(chunk)} / {len(events)}")
         reply = translator.ask(system, prompt)

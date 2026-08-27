@@ -9,9 +9,11 @@
 # `ko-sdh-effects.yaml`처럼 필요할 때 찾아보는 참고 자료로 둔다.
 #
 # **검사가 아니라 참고다.** 목록에 없다고 문제없는 것이 아니고, 있다고 반드시
-# 그 뜻인 것도 아니다 — 문맥이 최종 판단이다. 아직 이 파일을 읽는 코드는 없다
-# (요청받은 범위는 분리 보관까지다. 자동 조회에 쓰려면 `checker/lexicon.py`처럼
-# 별도로 붙여야 한다).
+# 그 뜻인 것도 아니다 — 문맥이 최종 판단이다. `checker/word_sense.py`가 이 파일을
+# 읽어 배치 원문에 실제로 걸리는 표현만 골라 1차 번역 프롬프트에 힌트로 붙인다
+# (`translate.py`의 `translate_events`). 한국어 교정기(`korean.py`)의
+# 국립국어원 API들(어문규범·표준국어대사전·우리말샘·사투리)은 전부 한국어
+# 단일언어 자원이라 이 역할을 대신할 수 없다(2026-08-27, 사용자 확인).
 
 schema_version: 1
 kind: lexicon
@@ -55,6 +57,7 @@ entries:
   - phrase: "problem (음식·섭취 맥락)"
     note: "'중독'이라는 뜻. addict/addiction이 너무 직접적이라 problem으로 순화해 쓴다."
   - phrase: "it's one thing to~, (it's) another thing to~"
+    match: "one thing to"
     note: "앞은 별거 아니고 뒤가 대단하다는 구조 — 앞을 한다고 뒤도 되는 건 아니다."
   - phrase: "fire / fires"
     note: "fire=불, fires=발포·발사."
