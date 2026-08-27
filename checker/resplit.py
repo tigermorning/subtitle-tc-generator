@@ -51,21 +51,43 @@ def _split_points(text: str) -> list[int]:
     return [pos for _rank, pos in points]
 
 
-def split_text(text: str, max_chars: float, weights: dict | None = None) -> list[str]:
+def split_text(text: str, max_chars: float, weights: dict | None = None,
+              force_sentence_split: bool = False) -> list[str]:
     """`max_chars`를 넘지 않게 의미 단위로 자른다.
 
     가운데에 가까운 자리를 고른다 — 한쪽만 길게 남으면 다음 조각이 또 잘려야 한다.
+
+    `force_sentence_split`이 참이면 **글자 수 안에 들어가도** 문장이 끝나는
+    자리(마침표·물음표·느낌표 뒤)가 중간에 있으면 거기서도 자른다. 예능처럼
+    빠르게 주고받는 대화는 서로 다른 발화 여러 개가 번역 후에도 글자 수 한도
+    안에 들어가는 일이 흔하다(2026-08-27, 예능A 15회 영어 번역 실측 —
+    한국어 쪽 병합 개수는 정답 SDH와 거의 같았는데 번역된 영어 최종 자막
+    개수는 정답의 79%에 그쳤다. 원인은 병합이 아니라 여기였다). 한 자막에
+    서로 다른 발화가 남아 있으면 겉보기엔 안 잘렸어도 정답과는 다른 단위다.
     """
     text = text.strip()
-    if not text or count_chars(text, weights) <= max_chars:
-        return [text] if text else []
+    if not text:
+        return []
+
+    if force_sentence_split:
+        internal = [m.start() for m in SENTENCE_END.finditer(text)]
+        if internal:
+            pos = internal[0]
+            left, right = text[:pos].strip(), text[pos:].strip()
+            if left and right:
+                return ([left] if count_chars(left, weights) <= max_chars
+                        else split_text(left, max_chars, weights, force_sentence_split)) + \
+                       split_text(right, max_chars, weights, force_sentence_split)
+
+    if count_chars(text, weights) <= max_chars:
+        return [text]
 
     for pos in _split_points(text):
         left, right = text[:pos].strip(), text[pos:].strip()
         if not left or not right:
             continue
         if count_chars(left, weights) <= max_chars:
-            return [left] + split_text(right, max_chars, weights)
+            return [left] + split_text(right, max_chars, weights, force_sentence_split)
 
     # 끊을 자리가 없다(한 어절이 너무 길다). 자르지 않고 그대로 둔다 —
     # 억지로 글자 중간을 자르면 말이 깨진다. 검사가 길다고 잡아 줄 것이다.
@@ -112,9 +134,10 @@ def _snap_to_silence(spans: list[tuple[int, int]],
 
 def resplit(event: Event, max_chars_per_cue: float,
             weights: dict | None = None,
-            speech: list[tuple[int, int]] | None = None) -> list[Event]:
+            speech: list[tuple[int, int]] | None = None,
+            force_sentence_split: bool = False) -> list[Event]:
     """자막 하나를 여러 개로 나눈다. 나눌 필요가 없으면 그대로 돌려준다."""
-    pieces = split_text(event.text, max_chars_per_cue, weights)
+    pieces = split_text(event.text, max_chars_per_cue, weights, force_sentence_split)
     if len(pieces) <= 1:
         return [event]
 
@@ -138,10 +161,11 @@ def resplit_all(events: list[Event], profile: dict,
     per_line = limits.get("chars_per_line") or 42
     max_lines = limits.get("max_lines") or 2
     weights = limits.get("char_weights")
+    force_sentence_split = bool((profile.get("timecode") or {}).get("force_sentence_split"))
 
     out: list[Event] = []
     for ev in events:
-        pieces = resplit(ev, per_line * max_lines, weights, speech)
+        pieces = resplit(ev, per_line * max_lines, weights, speech, force_sentence_split)
         out.extend(pieces)
         if origins is not None:
             origins.extend([ev.index] * len(pieces))
