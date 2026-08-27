@@ -842,6 +842,8 @@ def _generate_mode(args, ap) -> int:
                          speech_method=args.speech, diarize=args.diarize,
                          glossary=glossary,
                          keep_source=out.with_suffix(".source.srt") if translator else None,
+                         passes=args.passes, max_passes=args.max_passes,
+                         settle_at=args.settle_at, cast=getattr(args, "_cast", None),
                          progress=print)
     except DiarizationUnavailable as exc:
         print(f"[오류] {exc}")
@@ -907,6 +909,12 @@ def _generate_mode(args, ap) -> int:
             # --check 모드는 이미 이 줄을 낸다(193행). --generate만 빠져 있었다 —
             # 검사하지 않은 것을 조용히 "통과"로 보이게 하면 규칙 9를 어긴다.
             print(f"  미구현 검사 {len(unimplemented)}건: " + ", ".join(unimplemented))
+
+    if draft.revisions:
+        from .revise import report as revision_report
+        print(f"\n{revision_report(draft.revisions, show=6)}")
+        if draft.stats.get("revision_stopped_because"):
+            print(f"  {draft.stats['revision_stopped_because']}")
 
     write_srt(events, out)
     print(f"\n자막을 저장했습니다: {out}  (자막 {len(events)}개)")

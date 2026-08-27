@@ -33,6 +33,8 @@ class Draft:
     stats: dict = field(default_factory=dict)
     # 자막 번호 -> 원어. 번역했다면 번역 전 글자를 남긴다. **자막은 두 벌이다.**
     sources: dict[int, str] = field(default_factory=dict)
+    # 2차·3차에서 바뀐 내역. `passes`가 1이면(기본) 비어 있다.
+    revisions: list = field(default_factory=list)
 
 
 # 대본의 화자 표시. `SARAH:`, `Mrs. Kim:`, `철수:` 꼴을 잡는다. 대사 안의 콜론
@@ -99,11 +101,24 @@ def generate(video: Path, profile: dict, script: Path | None = None,
              keep_transcript: Path | None = None, translator=None,
              glossary=None, keep_source: Path | None = None,
              speech_method: str = "auto", diarize: bool = False,
+             passes: int = 1, max_passes: int = 0, settle_at: int = 0,
+             cast: dict[str, str] | None = None,
              progress=None) -> Draft:
     """영상에서 자막 초안을 만든다.
 
     `translator`를 주면 원어를 한국어로 옮긴다. **번역이 먼저, 재분할이 나중이다** —
     원어 기준으로 끊어 놓으면 한국어가 거기에 갇힌다(사용자 지적).
+
+    `passes`가 1보다 크면 1차 뒤에 2차·3차(감수·윤문)도 돈다 — **재분할보다
+    먼저다.** 둘 다 "③ 번역" 안의 하위 단계이기 때문이다(`revise.py` 첫머리
+    — 1차·2차·3차 전부 번역 단계다, `regroup.py`가 아니다). 재분할 뒤에 돌면
+    3차가 만든 최종 글자 수가 아니라 1차의 투박한 글자 수로 자막을 나누게
+    된다.
+
+    **실측(2026-08-27)**: `--generate --passes 3`가 조용히 1차만 돌고
+    2차·3차를 건너뛴 적이 있다 — `--passes`가 `--generate`가 아닌 다른 모드
+    (받은 TC에 번역만 얹는 경로)에만 연결돼 있었다. 이 함수 자체에 붙여서
+    다시는 그 경로 분기에 좌우되지 않게 한다.
     """
     from .transcribe import transcribe   # ffmpeg이 없어도 이 모듈은 import 되게
 
@@ -217,6 +232,7 @@ def generate(video: Path, profile: dict, script: Path | None = None,
             say("화자명은 넣지 못했습니다 — 대본이 없으면 누가 말했는지 알 수 없습니다."
                 " 영상을 보며 사람이 넣어야 합니다(--script로 대본을 주면 붙입니다).")
 
+    revisions_out: list = []
     if translator is not None:
         from .translate import to_events, translate_events
         if keep_source:
@@ -234,6 +250,19 @@ def generate(video: Path, profile: dict, script: Path | None = None,
                 notes.append((cue.index, cue.note))
         events = to_events(cues, events)
         stats["translated"] = len(cues)
+
+        if passes > 1:
+            from .pipeline import stage_revise
+            later = stage_revise(
+                events, profile, translator=translator, source=sources,
+                glossary=glossary, rounds=passes - 1,
+                max_rounds=(max_passes - 1 if max_passes > passes else 0),
+                settle_at=settle_at, cast=cast, target_lang=target_lang,
+                progress=say)
+            events = later.events
+            revisions_out = later.extra["revisions"]
+            stats["revision_rounds"] = later.extra["rounds"]
+            stats["revision_stopped_because"] = later.extra["stopped_because"]
 
     before, origins = len(events), []
     events = resplit_all(events, profile, speech, origins)
@@ -274,7 +303,7 @@ def generate(video: Path, profile: dict, script: Path | None = None,
             if old_index in sources:
                 moved_sources[new_index] = sources[old_index]
 
-    return Draft(result.events, notes, stats, moved_sources)
+    return Draft(result.events, notes, stats, moved_sources, revisions_out)
 
 
 def _to_events(cues: list[AlignedCue], notes: list[tuple[int, str]]) -> list[Event]:
