@@ -810,6 +810,15 @@ def _generate_mode(args, ap) -> int:
     print(f"프로파일: {profile.get('platform')} {profile.get('language')} "
           f"{profile.get('kind')}")
 
+    if args.dry_run:
+        from . import preflight
+        checks = preflight.run(args.video, profile, translate=args.translate,
+                               diarize=args.diarize, speech_method=args.speech,
+                               translate_model=args.translate_model,
+                               whisper_model=args.whisper_model)
+        print(preflight.report(checks))
+        return 1 if any(not c.ok for c in checks) else 0
+
     translator = glossary = None
     if args.translate:
         from .translate import Glossary, TranslatorUnavailable, make_translator
@@ -1053,6 +1062,12 @@ def main(argv: list[str] | None = None) -> int:
     gen.add_argument("--no-check", action="store_true",
                      help="만들기만 하고 검사·교정은 건너뛴다. 기본은 만든 뒤 "
                           "검사까지 하고 고칠 수 있는 것을 고친다")
+    gen.add_argument("--dry-run", action="store_true",
+                     help="실행하지 않고 환경(ffmpeg·모델·Ollama·화자 분리·디스크 "
+                          "공간)만 점검한다. 전사·번역은 몇 분~몇십 분 걸리므로 "
+                          "환경 문제로 중간에 멈추는 것을 미리 잡는다. 번역·TC "
+                          "로직 자체의 정확도는 이 점검으로 못 잡는다 — 그건 "
+                          "실행해야 안다")
     gen.add_argument("--translate", action="store_true",
                      help="원어를 한국어 초벌로 옮긴다. 모델은 이 컴퓨터에서 돈다"
                           "(원고가 밖으로 나가지 않는다)")

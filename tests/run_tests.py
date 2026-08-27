@@ -3239,6 +3239,27 @@ ok("가장 안 맞는 자막이 잘 맞는 자막보다 먼저 나온다",
    < text_section.index(f"#{best_pair.truth.index:>3}"), text_section)
 
 
+# --- 미리 점검(--dry-run) --------------------------------------------------
+# 오늘(2026-08-27) 실제로 겪은 실패들(torch 충돌·DLL 못 찾음·디스크 부족·
+# HF 토큰 없음·Ollama 응답 없음)이 전사·번역을 10~20분 돌리고 나서야
+# 드러났다 — 실행 전에 환경만 빠르게 본다.
+
+from checker import preflight as _pf  # noqa: E402
+
+_pf_checks = _pf.run(Path("없는영상.mkv"), translate=False, diarize=False)
+ok("없는 영상은 실패로 잡는다",
+   any(not c.ok and "영상" in c.name for c in _pf_checks))
+ok("예외를 올리지 않는다(실패도 결과로 담는다)", isinstance(_pf_checks, list))
+
+_pf_report = _pf.report([_pf.Check("가짜 항목", True, "세부")])
+ok("통과 항목을 보여 준다", "가짜 항목" in _pf_report and "세부" in _pf_report)
+_pf_report_fail = _pf.report([_pf.Check("가짜 항목", False, "이유")])
+ok("실패 개수를 요약한다", "1건 실패" in _pf_report_fail)
+_pf_report_ok = _pf.report([_pf.Check("가짜 항목", True)])
+ok("전부 통과하면 그렇게 말하되 로직은 보장 안 한다고 밝힌다",
+   "실행해 봐야" in _pf_report_ok)
+
+
 # --- 결과 ---------------------------------------------------------------
 
 print(f"통과 {PASSED}건")
