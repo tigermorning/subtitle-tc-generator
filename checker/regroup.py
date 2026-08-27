@@ -36,25 +36,43 @@ MAX_GAP_MS = 250
 
 
 def merge_cues(events: list[Event], max_duration_ms: int = MAX_DURATION_MS,
-               max_gap_ms: int = MAX_GAP_MS) -> list[Event]:
+               max_gap_ms: int = MAX_GAP_MS,
+               speaker_turns: list[tuple[int, int, str]] | None = None) -> list[Event]:
     """이어지는 자막을 합친다. 번호는 다시 매긴다.
 
-    합치는 조건은 둘뿐이다.
+    합치는 조건은 셋이다.
 
         사이가 `max_gap_ms` 이내로 붙어 있다   (말이 이어지고 있다)
         합쳐도 `max_duration_ms`를 넘지 않는다 (한 화면에 오래 머물지 않는다)
+        **화자가 바뀌지 않았다**(`speaker_turns`를 줬을 때만 본다)
 
     말이 끊긴 자리(간격이 넓은 자리)는 합치지 않는다. 거기가 사람도 끊는 자리다.
+
+    **화자 판단은 `diarize.py`가 준 것이 있을 때만 본다.** 없으면(기본값)
+    예전처럼 간격·길이만 본다 — 화자 분리는 별도 모델(`--diarize`)이 필요한
+    선택 기능이라 없어도 기존 동작이 그대로다. 화자표를 모르는 쪽(짧은 침묵
+    사이 등)은 "같은 화자"로 보고 합친다 — 모르는 것을 억지로 갈라놓지 않는다
+    (규칙 4와 같은 정신 — 확실하지 않으면 손해가 적은 쪽으로 둔다. 잘못 합쳐도
+    사람이 나중에 갈라놓을 수 있지만, 잘못 가르면 문장이 부서진 채로 남는다).
     """
     if max_duration_ms <= 0:
         return events
+
+    from .diarize import speaker_at
 
     out: list[Event] = []
     for event in events:
         if out:
             previous = out[-1]
             gap = event.start_ms - previous.end_ms
-            if 0 <= gap <= max_gap_ms and (event.end_ms - previous.start_ms) <= max_duration_ms:
+            speaker_changed = False
+            if speaker_turns:
+                prev_speaker = speaker_at(previous.end_ms, speaker_turns)
+                cur_speaker = speaker_at(event.start_ms, speaker_turns)
+                speaker_changed = bool(prev_speaker and cur_speaker
+                                       and prev_speaker != cur_speaker)
+            if (not speaker_changed and 0 <= gap <= max_gap_ms
+                    and (event.end_ms - previous.start_ms) <= max_duration_ms):
                 previous.end_ms = event.end_ms
                 previous.text = f"{previous.text} {event.text}".strip()
                 continue

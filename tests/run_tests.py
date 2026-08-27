@@ -1430,6 +1430,25 @@ ok("프로파일이 값을 정하지 않으면 기본값", limits_from_profile({
 ok("프로파일 값이 이긴다",
    limits_from_profile({"timecode": {"merge_max_ms": 3000}}) == (3000, 250))
 
+# --- 화자가 바뀌는 자리는 합치지 않는다(diarize.py 연동) ---------------------
+# whisper는 화자 구분을 못 준다. `--diarize`로 별도 모델이 찾은 화자 구간을
+# 주면, 간격이 짧아도 화자가 바뀌는 자리는 합치지 않는다(실측: 예능A 15회
+# "미스터 조?"/"미스터 조는 넌 아니야?" 주고받기가 한 자막으로 뭉친 버그).
+
+_turn_events = [Event(1, 0, 1000, "미스터 조?"), Event(2, 1050, 2000, "네, 접니다.")]
+_same_speaker = [(0, 1000, "A"), (1050, 2000, "A")]
+_diff_speaker = [(0, 1000, "A"), (1050, 2000, "B")]
+ok("화자 구간 없으면 예전처럼 합친다",
+   len(merge_cues(_turn_events, 4000, 250)) == 1)
+ok("같은 화자면 합친다",
+   len(merge_cues(_turn_events, 4000, 250, speaker_turns=_same_speaker)) == 1)
+ok("화자가 바뀌면 간격이 짧아도 안 합친다",
+   len(merge_cues(_turn_events, 4000, 250, speaker_turns=_diff_speaker)) == 2)
+
+_unknown_speaker = [(0, 1000, "A")]  # 두 번째 자막 자리엔 화자 정보가 없다
+ok("화자를 모르는 자리는 억지로 안 가른다(합친다)",
+   len(merge_cues(_turn_events, 4000, 250, speaker_turns=_unknown_speaker)) == 1)
+
 # 스포팅이 자막을 뭉개지 않는지. 한 말소리 구간에 여러 자막이 걸릴 때 무너졌다.
 _dense = [Event(1, 1000, 2000, "가"), Event(2, 2000, 3000, "나"), Event(3, 3000, 4000, "다")]
 _spots = [_Spot(1, "end_ms", 2000, 9000), _Spot(2, "start_ms", 2000, 500),
@@ -3059,6 +3078,67 @@ elif _info["contract"] == "unknown":
 else:
     ok("교정기 공개 계약이 맞는다", _info["contract"] == "ok", _info["detail"])
     ok("어느 판이 붙었는지 말한다", bool(_info["commit"]) or True)
+
+
+# --- 정답지 대조: 텍스트 유사도 (2026-08-27) --------------------------------
+#
+# BLEU·ROUGE-L을 새 지표로 만들었다가, 독립 검토(critic)로 실측 검증한 결과 걷어냈다.
+#   - ROUGE-L은 실제 자막 400쌍에서 align.similarity와 F1이 완전히 같은 값이었다
+#     — 새 정보가 아니라 같은 계산의 재현이었다.
+#   - 코퍼스 BLEU는 한국어 자막 특유의 짧은 어절 토큰 때문에 코퍼스 전체 35%가
+#     4어절 미만이라 그 차수의 n-gram이 아예 없어 종종 0으로 무너졌다(짧은 자막
+#     특성 — 고쳐도 정보량이 낮았다).
+#   - 코퍼스 단일 스칼라는 규칙 13이 요구하는 "어느 자막을 봐야 하는지"를 못
+#     짚었다. `evaluate.py`가 타이밍에는 이미 "가장 많이 어긋난 자막" 개별
+#     목록을 내는데 텍스트 쪽은 중간값 하나로 뭉개고 있었다.
+# 대신 이미 있던 `Pair.score`(짝짓기용, 시간 겹침 보너스 +0.3이 섞여 있었다)를
+# 순수 텍스트 유사도로 갈라 `Pair.text_similarity`를 만들고, 그 값으로 "텍스트가
+# 가장 안 맞는 자막" 개별 목록을 새로 냈다 — 새 모듈 없이 기존 값을 정직하게
+# 씀으로써 규칙 13(도구를 고치는 것이지 가운데값을 내는 것이 아니다)에 맞춘다.
+
+from checker.align import similarity as _text_sim  # noqa: E402
+from checker.evaluate import compare, summarize, report  # noqa: E402
+from checker.model import Event as _EvalEvent  # noqa: E402
+
+# 시간이 완전히 겹치는 짝(+0.3 보너스가 항상 붙는 상황)인데 텍스트가 다른 경우 —
+# 옛 구현(p.score)이었다면 유사도가 1.0을 넘어 보고됐을 자리다.
+cmp1 = compare([_EvalEvent(1, 0, 3000, "완전히 다른 낱말들")],
+              [_EvalEvent(1, 0, 3000, "전혀 다른 텍스트")])
+pair = cmp1.matched[0]
+ok("짝짓기 점수(score)에는 시간 보너스가 섞여 있다",
+   pair.score > _text_sim(pair.ours.text, pair.truth.text), str(pair.score))
+ok("텍스트 유사도는 짝짓기 점수와 별개로 1.0을 넘지 않는다",
+   pair.text_similarity is not None and pair.text_similarity <= 1.0, str(pair.text_similarity))
+
+# 완전히 같은 텍스트면 유사도는 정확히 1.0이어야 한다(오염됐던 예전 값은 1.3까지
+# 나올 수 있었다).
+cmp2 = compare([_EvalEvent(1, 0, 3000, "완전히 같은 문장")],
+              [_EvalEvent(1, 0, 3000, "완전히 같은 문장")])
+ok("완전히 같은 텍스트의 유사도는 1.0", cmp2.matched[0].text_similarity == 1.0)
+
+stats = summarize(cmp2)
+ok("요약에도 순수 유사도가 들어간다(1.0 초과 없음)",
+   stats["text_similarity_median"] == 1.0, str(stats["text_similarity_median"]))
+ok("BLEU·ROUGE 필드는 없다(독립 검토 결과 걷어냈다)",
+   "bleu" not in stats and "rouge_l" not in stats)
+
+# 텍스트가 가장 안 맞는 자막이 리포트 개별 목록에 실제로 나오고, 안 맞는 순으로
+# 먼저 나오는지 확인한다.
+mismatched = [_EvalEvent(1, 0, 3000, "정답과 완전히 다른 말"),
+              _EvalEvent(2, 4000, 7000, "이건 거의 똑같은 문장")]
+truth2 = [_EvalEvent(1, 0, 3000, "여기는 딴 소리를 한다"),
+         _EvalEvent(2, 4000, 7000, "이건 거의 똑같은 문장이다")]
+comparison3 = compare(mismatched, truth2)
+by_similarity = sorted(comparison3.matched, key=lambda p: p.text_similarity)
+worst_pair, best_pair = by_similarity[0], by_similarity[-1]
+txt = report(comparison3)
+ok("리포트에 텍스트 불일치 개별 목록이 있다", "텍스트가 가장 안 맞는 자막" in txt, txt)
+# 리포트에는 타이밍 기준 "가장 많이 어긋난 자막" 목록도 따로 있으므로, 새로 넣은
+# 텍스트 목록 구간만 잘라서 순서를 확인한다.
+text_section = txt[txt.index("텍스트가 가장 안 맞는 자막"):]
+ok("가장 안 맞는 자막이 잘 맞는 자막보다 먼저 나온다",
+   text_section.index(f"#{worst_pair.truth.index:>3}")
+   < text_section.index(f"#{best_pair.truth.index:>3}"), text_section)
 
 
 # --- 결과 ---------------------------------------------------------------

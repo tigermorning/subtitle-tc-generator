@@ -98,7 +98,8 @@ def generate(video: Path, profile: dict, script: Path | None = None,
              fps: float | None = None, use_gpu: bool = True,
              keep_transcript: Path | None = None, translator=None,
              glossary=None, keep_source: Path | None = None,
-             speech_method: str = "auto", progress=None) -> Draft:
+             speech_method: str = "auto", diarize: bool = False,
+             progress=None) -> Draft:
     """영상에서 자막 초안을 만든다.
 
     `translator`를 주면 원어를 한국어로 옮긴다. **번역이 먼저, 재분할이 나중이다** —
@@ -200,12 +201,19 @@ def generate(video: Path, profile: dict, script: Path | None = None,
         from .regroup import limits_from_profile, merge_cues
         raw = [Event(i, s.start_ms, s.end_ms, s.text) for i, s in enumerate(segments, 1)]
         max_ms, max_gap = limits_from_profile(profile)
-        events = merge_cues(raw, max_ms, max_gap)
+
+        speaker_turns = None
+        if diarize:
+            from .diarize import find_speaker_turns
+            speaker_turns = find_speaker_turns(video, progress=say)
+
+        events = merge_cues(raw, max_ms, max_gap, speaker_turns=speaker_turns)
         if len(events) != len(raw):
             say(f"전사 조각 {len(raw)}개를 자막 {len(events)}개로 묶었습니다")
         if profile.get("kind") == "sdh":
-            # **화자명은 대본에서 온다.** whisper는 누가 말했는지 구분하지 못한다
-            # (화자 분리는 별도 모델이 필요하다). 못 넣은 것을 넣은 척하지 않는다.
+            # **화자명은 대본에서 온다.** `--diarize`를 켜도 마찬가지다 — 화자
+            # 분리는 "1번 화자와 2번 화자가 다른 사람"까지만 알려 주고, 그 사람이
+            # 누구인지(이름)는 안 준다. 이름을 지어내지 않는다(규칙 3).
             say("화자명은 넣지 못했습니다 — 대본이 없으면 누가 말했는지 알 수 없습니다."
                 " 영상을 보며 사람이 넣어야 합니다(--script로 대본을 주면 붙입니다).")
 

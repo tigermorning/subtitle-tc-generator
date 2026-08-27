@@ -783,6 +783,7 @@ def _generate_mode(args, ap) -> int:
     """영상 -> 자막 초안. 검사 경로와 섞지 않는다 — 입력도 출력도 다르다."""
     from .generate import generate, notes_srt
     from .media import MediaToolUnavailable
+    from .diarize import DiarizationUnavailable
 
     if not args.video:
         ap.error("--generate에는 --video가 필요합니다")
@@ -816,10 +817,13 @@ def _generate_mode(args, ap) -> int:
         draft = generate(args.video, profile, script=args.script,
                          language=args.whisper_lang, model=args.whisper_model,
                          fps=None, use_gpu=not args.cpu, translator=translator,
-                         speech_method=args.speech,
+                         speech_method=args.speech, diarize=args.diarize,
                          glossary=glossary,
                          keep_source=out.with_suffix(".source.srt") if translator else None,
                          progress=print)
+    except DiarizationUnavailable as exc:
+        print(f"[오류] {exc}")
+        return 2
     except MediaToolUnavailable as exc:
         print(f"[오류] {exc}")
         return 2
@@ -1023,6 +1027,10 @@ def main(argv: list[str] | None = None) -> int:
     gen.add_argument("--speech", choices=["auto", "vad", "loudness"], default="auto",
                      help="말소리를 어떻게 찾을지. auto는 모델(VAD)을 먼저 쓰고 "
                           "없으면 음량으로 돌아간다")
+    gen.add_argument("--diarize", action="store_true",
+                     help="화자가 바뀌는 자리를 찾아 병합 때 넘지 않는다(pyannote.audio "
+                          "필요, 없으면 오류 — 조용히 건너뛰지 않는다). 화자 '이름'은 "
+                          "여전히 못 준다, 몇 번째 화자인지만 구분한다")
     gen.add_argument("--cpu", action="store_true",
                      help="GPU를 쓰지 않는다(느리다). 기본은 GPU")
     gen.add_argument("--no-check", action="store_true",
