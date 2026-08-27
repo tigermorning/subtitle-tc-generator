@@ -468,6 +468,35 @@ def _strip_markdown_wrap(text: str) -> str:
     return text
 
 
+_META_NOTE = re.compile(r"^\**(참고|note)\**\s*[:：]", re.IGNORECASE)
+
+
+def _strip_trailing_notes(text: str) -> str:
+    """모델이 번역 끝에 `**참고:** ...` 같은 자기 설명을 덧붙일 때가 있다(실측:
+    예능A 15회 영어 번역, 2026-08-27). `_parse_numbered`는 번호 없는 줄을 무조건
+    앞 번호의 이어지는 문장으로 본다 — 그래서 이 설명이 번역문에 그대로 붙는다.
+    설명이 시작되는 줄부터 잘라 버린다. 번역만 내고 설명은 붙이지 말라는 지시를
+    프롬프트에 이미 넣었지만(`SYSTEM_BY_LANG`), 모델이 가끔 어긴다."""
+    lines = []
+    for line in text.split("\n"):
+        if _META_NOTE.match(line.strip()):
+            break
+        lines.append(line)
+    return "\n".join(lines).strip()
+
+
+def _strip_self_revision(text: str) -> str:
+    """모델이 `원래 번역 → 고친 번역` 꼴로 자기 수정을 번역문 안에 남길 때가
+    있다(실측: 예능A 15회 영어 번역 13곳, 2026-08-27). 프롬프트 자체가 용어집
+    힌트(`Glossary.hint`)와 앞부분 맥락 재진술에 `A → B` 형식을 쓰고 있어, 모델이
+    그 형식을 따라 하는 것으로 보인다 — 화살표 앞은 버리고 **마지막(고친) 쪽만**
+    남긴다. 자막 대사에 화살표가 실제로 나올 일은 없다."""
+    text = re.sub(r"^\s*→\s*", "", text)
+    if " → " in text:
+        text = text.rsplit(" → ", 1)[-1]
+    return text.strip()
+
+
 def _parse_numbered(reply: str, expected: list[int]) -> dict[int, str]:
     """`3. 번역문` 꼴을 읽는다. 모델이 어떻게 답하든 번호를 붙잡는다."""
     found: dict[int, str] = {}
@@ -479,7 +508,9 @@ def _parse_numbered(reply: str, expected: list[int]) -> dict[int, str]:
             found[current] = m.group(2).strip()
         elif current is not None and line.strip():
             found[current] += "\n" + line.strip()
-    return {k: _strip_markdown_wrap(v.strip()) for k, v in found.items() if v.strip()}
+    cleaned = {k: _strip_self_revision(_strip_markdown_wrap(_strip_trailing_notes(v.strip())))
+               for k, v in found.items()}
+    return {k: v for k, v in cleaned.items() if v}
 
 
 def translate_events(events: list[Event], translator, glossary: Glossary | None = None,
@@ -538,7 +569,8 @@ def translate_events(events: list[Event], translator, glossary: Glossary | None 
                 # 한 줄만 다시 묻는다. 그래도 안 되면 원문을 남긴다 — 빈 자막은
                 # 사람이 못 보고 지나치지만 원문은 눈에 띈다.
                 retry = translator.ask(system, f"{lang_name} 자막으로 옮기세요:\n{body}")
-                text = _strip_markdown_wrap(retry.strip().split("\n")[0].strip())
+                text = _strip_self_revision(_strip_markdown_wrap(
+                    retry.strip().split("\n")[0].strip()))
                 note = "번역이 흔들려 다시 물었습니다 — 확인이 필요합니다"
             if not text:
                 text, note = ev.text, "번역하지 못했습니다 — 원문을 남겼습니다"
