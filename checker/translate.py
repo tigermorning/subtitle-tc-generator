@@ -459,16 +459,26 @@ def _strip_markdown_wrap(text: str) -> str:
     번역 127곳, 영화F 한국어 번역 76곳, 2026-08-27). **통째로
     감싼 것만 벗긴다** — 대사 중간의 낱말 강조나 욕설 마스킹(`sh*t`)은 건드리지
     않는다. 그건 감싸는 게 아니라 안에 박힌 것이다.
+
+    **2인 화자 하이픈은 감싸기 앞에 온다.** `-**대사**`처럼 하이픈이 별표
+    바깥에 있으면 `startswith("**")`가 실패해 못 벗겼다(실측: 예능A 15회
+    "-**What year did you debut?**", 2026-08-27). 하이픈을 떼어 뒀다가 다시
+    붙인다.
     """
     stripped = text.strip()
+    dash = ""
+    m = re.match(r"^-\s*", stripped)
+    if m:
+        dash, stripped = m.group(0), stripped[m.end():]
     for marker in ("**", "__"):
         if (stripped.startswith(marker) and stripped.endswith(marker)
                 and len(stripped) > 2 * len(marker)):
-            return stripped[len(marker):-len(marker)].strip()
+            return dash + stripped[len(marker):-len(marker)].strip()
     return text
 
 
-_META_NOTE = re.compile(r"^\**(참고|note)\**\s*[:：]", re.IGNORECASE)
+_META_NOTE = re.compile(
+    r"^(\**(참고|note)\**\s*[:：]|\*\s+\S)", re.IGNORECASE)
 
 
 def _strip_trailing_notes(text: str) -> str:
@@ -569,8 +579,8 @@ def translate_events(events: list[Event], translator, glossary: Glossary | None 
                 # 한 줄만 다시 묻는다. 그래도 안 되면 원문을 남긴다 — 빈 자막은
                 # 사람이 못 보고 지나치지만 원문은 눈에 띈다.
                 retry = translator.ask(system, f"{lang_name} 자막으로 옮기세요:\n{body}")
-                text = _strip_self_revision(_strip_markdown_wrap(
-                    retry.strip().split("\n")[0].strip()))
+                text = _strip_self_revision(_strip_markdown_wrap(_strip_trailing_notes(
+                    retry.strip().split("\n")[0].strip())))
                 note = "번역이 흔들려 다시 물었습니다 — 확인이 필요합니다"
             if not text:
                 text, note = ev.text, "번역하지 못했습니다 — 원문을 남겼습니다"

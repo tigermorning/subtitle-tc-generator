@@ -1059,7 +1059,8 @@ ok("자막 수만큼 노트를 낸다", _out.count("-->") == 2)
 # 받아 어떻게 되돌리는지**를 잡는다 — 사고는 거기서 났다.
 
 from checker.translate import (  # noqa: E402
-    Glossary, _parse_numbered, _protect, _restore, to_events, translate_events)
+    Glossary, _parse_numbered, _protect, _restore, _strip_markdown_wrap,
+    _strip_trailing_notes, to_events, translate_events)
 
 body, frame = _protect("<i>She never did learn to knock.</i>")
 ok("이탤릭 태그를 떼고 보낸다", body == "She never did learn to knock.")
@@ -1083,6 +1084,21 @@ ok("번호 붙은 답을 읽는다", got == {1: "진심이야?", 2: "20분이나
 ok("엉뚱한 번호는 버린다", _parse_numbered("7. 남의 자막\n", [1, 2]) == {})
 ok("이어지는 줄은 앞 번호에 붙인다",
    _parse_numbered("1. 첫 줄\n둘째 줄\n", [1]) == {1: "첫 줄\n둘째 줄"})
+
+# 2인 화자 하이픈이 마크다운 강조 바깥에 있어도 벗긴다(실측: 예능A 15회
+# "-**What year did you debut?**", 2026-08-27).
+ok("하이픈 뒤 강조를 벗긴다",
+   _strip_markdown_wrap("-**What year did you debut?**") == "-What year did you debut?")
+ok("하이픈 없는 강조도 그대로 벗긴다",
+   _strip_markdown_wrap("**Hello there.**") == "Hello there.")
+
+# `*` 글머리표로 시작하는 설명도 참고: 줄과 같이 자른다(실측: "* Character
+# names and specific terms were kept as provided.", 2026-08-27).
+ok("별표 글머리 설명을 자른다",
+   _strip_trailing_notes("* Character names and specific terms were kept as provided.") == "")
+ok("본문 뒤에 붙은 별표 설명도 자른다",
+   _strip_trailing_notes("Hello there.\n* Character names were kept as provided.")
+   == "Hello there.")
 
 
 class _FakeTranslator:
