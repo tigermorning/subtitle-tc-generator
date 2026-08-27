@@ -12,6 +12,10 @@ block≠블록 같은 것). 원어를 아예 안 보는 교정기로는 잡을 �
 무관하게 걸릴 수 있다 — 모델에게 참고하라고 보여 줄 뿐 강제하지 않는다. 그래서
 자막 배치 전체가 아니라 **그 배치의 원문에 실제로 나온 표현만** 골라 붙인다 —
 27개를 매번 다 보여 주면 프롬프트만 커지고 안 걸리는 표현은 소음이 된다.
+
+`en-ko-word-sense-dict.yaml`이 있으면 Merriam-Webster·Oxford 공식 뜻풀이를
+손으로 쓴 note 뒤에 덧붙인다. 이 캐시는 `tools/enrich_word_sense.py`가 사람이
+가끔 돌려 채운다 — 번역 실행 경로 자체는 네트워크를 타지 않는다.
 """
 
 from __future__ import annotations
@@ -25,6 +29,13 @@ import yaml
 
 LEXICON_PATH = Path(__file__).resolve().parent.parent / "rules" / "lexicon" / "en-ko-word-sense.yaml"
 
+# `tools/enrich_word_sense.py`가 채운다. 매번 사전 API를 부르지 않고(규칙6 —
+# 로컬 전용), 사람이 항목을 늘릴 때 한 번만 조회해서 구워 넣는다. 후보가
+# 영상마다 새로 생기는 고유명사(교정기 쪽)와 달리 이 목록은 사람이 정하는
+# 고정 목록이라 실시간 조회가 필요 없다(2026-08-27, 사용자 확인).
+DICT_CACHE_PATH = (Path(__file__).resolve().parent.parent / "rules" / "lexicon"
+                    / "en-ko-word-sense-dict.yaml")
+
 _PAREN = re.compile(r"\([^()]*\)")
 
 
@@ -32,6 +43,7 @@ _PAREN = re.compile(r"\([^()]*\)")
 class SenseEntry:
     phrase: str
     note: str
+    variants: tuple[str, ...]
     patterns: tuple[re.Pattern, ...]
 
 
@@ -61,11 +73,51 @@ def _load() -> tuple[SenseEntry, ...]:
         # 항목)는 사전에 `match`로 직접 지정한다.
         override = raw.get("match")
         variants = [override] if override else _variants(phrase)
+        variants = [v for v in variants if v]
         patterns = tuple(re.compile(rf"\b{re.escape(v)}\b", re.IGNORECASE)
-                         for v in variants if v)
+                         for v in variants)
         if patterns:
-            entries.append(SenseEntry(phrase, note, patterns))
+            entries.append(SenseEntry(phrase, note, tuple(variants), patterns))
     return tuple(entries)
+
+
+def trigger_words() -> list[str]:
+    """강화 스크립트(`tools/enrich_word_sense.py`)가 사전 API에 보낼 낱말 목록.
+
+    중복 없이, 사전에 실린 순서대로 낸다 — 낱말 하나씩만 나간다(규칙6)."""
+    seen: list[str] = []
+    lowered: set[str] = set()
+    for entry in _load():
+        for v in entry.variants:
+            if v.lower() not in lowered:
+                seen.append(v)
+                lowered.add(v.lower())
+    return seen
+
+
+@lru_cache(maxsize=1)
+def _load_dict_cache() -> dict[str, dict]:
+    """`tools/enrich_word_sense.py`가 구워 둔 사전 API 뜻풀이. 없으면 빈 사전."""
+    if not DICT_CACHE_PATH.is_file():
+        return {}
+    data = yaml.safe_load(DICT_CACHE_PATH.read_text(encoding="utf-8")) or {}
+    return {k.lower(): v for k, v in (data.get("entries") or {}).items()}
+
+
+def _dict_note(entry: SenseEntry) -> str:
+    """공식 사전 뜻풀이 한 줄(있으면). 손으로 쓴 note를 대체하지 않고 덧붙인다."""
+    cache = _load_dict_cache()
+    for v in entry.variants:
+        hit = cache.get(v.lower())
+        if hit:
+            parts = []
+            if hit.get("mw"):
+                parts.append(f"MW「{hit['mw'][0]}」")
+            if hit.get("oxford"):
+                parts.append(f"Oxford「{hit['oxford'][0]}」")
+            if parts:
+                return " " + " / ".join(parts)
+    return ""
 
 
 def matches(text: str, limit: int = 5) -> list[SenseEntry]:
@@ -84,5 +136,5 @@ def hint(text: str, limit: int = 5) -> str:
     found = matches(text, limit)
     if not found:
         return ""
-    body = "; ".join(f"{e.phrase} → {e.note}" for e in found)
+    body = "; ".join(f"{e.phrase} → {e.note}{_dict_note(e)}" for e in found)
     return f"\n액면 뜻과 다를 수 있는 표현(참고만 하세요): {body}"
