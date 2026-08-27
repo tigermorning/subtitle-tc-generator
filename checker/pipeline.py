@@ -174,6 +174,7 @@ def stage_revise(events: list[Event], profile: dict, *, translator,
                  rounds: int = 1, first_round: int = 2, max_rounds: int = 0,
                  settle_at: int = 0, cast: dict[str, str] | None = None,
                  first_role: str = "감수", on_round=None,
+                 target_lang: str = "ko",
                  progress: Progress | None = None) -> StageResult:
     """감수를 돈다. **회차를 하드코딩하지 않고, 멈춘 이유를 기록한다.**
 
@@ -218,7 +219,7 @@ def stage_revise(events: list[Event], profile: dict, *, translator,
         current, revisions = revise(current, translator, source=source,
                                     glossary=glossary, stage=label, role=role,
                                     profile=profile, cast=cast, baseline=baseline,
-                                    progress=say)
+                                    target_lang=target_lang, progress=say)
         changed = sum(1 for r in revisions if r.changed)
         all_revisions += revisions
         per_round.append({"stage": label, "role": role, "changed": changed})
@@ -302,7 +303,8 @@ def stage_polish(events: list[Event], profile: dict, *, translator,
     say = progress or _silent
     polished = stage_revise(events, profile, translator=translator, source=source,
                             glossary=glossary, rounds=1, first_role="윤문",
-                            cast=cast, on_round=on_round, progress=say)
+                            cast=cast, on_round=on_round,
+                            target_lang=profile.get("language") or "ko", progress=say)
     checked = correct_and_check(
         polished.events, profile,
         CorrectOptions(korean=korean, corrector_path=corrector_path, backend=backend,

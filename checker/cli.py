@@ -473,6 +473,7 @@ def _run_one(path: Path, profile: dict, args, backend) -> dict | None:
                                  # 같은 시트가 T17 검사도 돌린다 — 정하고, 쓰고,
                                  # 검사하는 것이 한 자료다.
                                  cast=getattr(args, "_cast", None),
+                                 target_lang=profile.get("language") or "ko",
                                  progress=say)
             translated = later.events
             print(f"  {revision_report(later.extra['revisions'], show=6)}")

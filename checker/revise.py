@@ -35,7 +35,7 @@ from .translate import _parse_numbered
 #
 # 말투도 바뀌었다. 전에는 "말투는 1차를 따릅니다. 흔들지 마세요"였는데, 1차가 말투를
 # 정하지 않게 되었으므로(존댓말로 통일) **말투를 정하는 것이 2차의 일이다.**
-SECOND_PASS = (
+SECOND_PASS_KO = (
     "당신은 영상 번역 감수자입니다. 1차 번역을 **2차 번역**으로 다듬습니다.\n"
     "1차는 뜻만 맞춰 놓은 초벌입니다. 투박한 것이 정상이고, 그것을 여기서 고칩니다.\n"
     "\n"
@@ -62,7 +62,7 @@ SECOND_PASS = (
 # **3차가 자막다움을 담당한다.** 1차에 있던 문체·간결·문장부호 조항이 여기로 왔다.
 # 이 단계는 원문을 보지 않는다 — 한국어만 소리 내어 읽는다(작업자 자료: "영상 없이
 # 줄글로 읽으며").
-THIRD_PASS = (
+THIRD_PASS_KO = (
     "당신은 영상 번역가입니다. 자막을 소리 내어 읽으며 **자막답게** 다듬습니다.\n"
     "뜻과 용어는 2차에서 맞췄습니다. **여기서 뜻을 바꾸면 그것이 사고입니다.**\n"
     "\n"
@@ -88,6 +88,79 @@ THIRD_PASS = (
     "- 번호를 그대로 붙여 같은 개수로 냅니다. 설명하지 마세요."
 )
 
+# **영어는 한국어 규칙을 번역해서 쓰지 않는다.** 존댓말/반말, 이중 피동,
+# 인칭대명사 회피 같은 조항은 한국어 문법 범주라 영어에 그대로 옮기면 없는
+# 문제에 억지 답을 강요하게 된다(규칙 9 — 자료 없이 만들지 않는다). 대신
+# 실제로 영어 자막이 쓰는 압축 관행을 조사해서 넣었다:
+#
+#   Netflix 공식 English Timed Text Style Guide, Section I.1 —
+#     "When editing for reading speed, favor text reduction, deletion
+#      and condensing." (2026-08-27 확인, 이미 en-translation.yaml의 근거와
+#      같은 문서)
+#   Suratno & Wijaya(2018), "Text Reduction: Strategies Adopted in Audio
+#     Visual Subtitle Translation" — Antonini(2005)·Díaz-Cintas & Remael
+#     (2007)의 축소 전략 셋(제거·순화·압축)을 실제 자막 209건으로 검증한
+#     연구. 여기 3차 규칙의 구체 기법(주저·미완성 문장 제거, 동사구
+#     단순화, 능동태 선호, 겹문장 쪼개기)은 이 논문의 분류를 그대로 따랐다.
+SECOND_PASS_EN = (
+    "You are a subtitle editor. You refine a first-pass translation into a "
+    "**second pass**.\n"
+    "The first pass only got the meaning right — rough phrasing is expected, "
+    "and you fix that here.\n"
+    "\n"
+    "You check four things.\n"
+    "  1. Mistranslation — anything that says something the source didn't. "
+    "**Check this first.**\n"
+    "  2. Terminology — fixed terms not used as given.\n"
+    "  3. Context — references that don't connect to neighboring lines, or "
+    "wrong referents.\n"
+    "  4. Register — formality appropriate to the relationship between "
+    "speakers. If the relationship is unclear, default to a neutral, "
+    "professionally polite register (not stiff, not overly casual).\n"
+    "\n"
+    "Rules:\n"
+    "- Write natural English word order, not a literal transplant of the "
+    "source sentence structure.\n"
+    "- Keep register consistent for a given character once established — "
+    "don't flip a formal speaker casual mid-scene without reason.\n"
+    "- Don't overlay source-culture conventions onto English speech that "
+    "wouldn't naturally use them.\n"
+    "- Shortening for reading speed happens in the third pass. Here, "
+    "**correctness comes first.**\n"
+    "- **If there is nothing to fix, keep the first pass as-is.** Don't "
+    "change things just to change them.\n"
+    "- Keep the same numbering, same count. No explanations."
+)
+
+THIRD_PASS_EN = (
+    "You are a subtitle editor. You read the lines aloud and polish them to "
+    "**read like a subtitle**.\n"
+    "Meaning and terminology were already fixed in the second pass. "
+    "**Changing meaning here is a mistake.**\n"
+    "\n"
+    "- Check that it sounds like natural spoken English, not written prose.\n"
+    "- Shorter is better. **Cut aggressively** using these techniques "
+    "(Antonini 2005; Díaz-Cintas & Remael 2007):\n"
+    "  - Elimination: hesitations (\"um\", \"like\", \"you know\"), false "
+    "starts, abandoned/unfinished clauses, redundant restatement, and "
+    "formulaic filler (\"you know what?\", \"I mean\") that carries no "
+    "content — cut these unless they characterize the speaker.\n"
+    "  - Simplify verbal phrases: drop padding modal/aspect constructions. "
+    "\"I'm going to have to fight\" -> \"I have to fight\".\n"
+    "  - Split long compound or multi-clause sentences into short simple "
+    "ones when that reads faster.\n"
+    "  - Prefer active voice — it's shorter and reads faster than passive, "
+    "unless passive is what a native speaker would actually say.\n"
+    "  - Use contractions for natural rhythm (\"don't\", \"I'm\", \"can't\") "
+    "unless the beat calls for the full form as emphasis.\n"
+    "- Avoid comma overuse and complex punctuation (colons, semicolons) — "
+    "subtitles read at a glance, not like a printed page.\n"
+    "- Don't change meaning. Don't change terminology. Don't change the "
+    "register the second pass set.\n"
+    "- If there is nothing to cut, keep it as-is.\n"
+    "- Keep the same numbering, same count. No explanations."
+)
+
 
 @dataclass
 class Revision:
@@ -101,7 +174,16 @@ class Revision:
         return self.before.strip() != self.after.strip()
 
 
-ROLES = {"감수": SECOND_PASS, "윤문": THIRD_PASS}
+# 하위 호환: 옛 이름이 한국어 프롬프트를 가리킨다.
+SECOND_PASS = SECOND_PASS_KO
+THIRD_PASS = THIRD_PASS_KO
+
+ROLES_BY_LANG: dict[str, dict[str, str]] = {
+    "ko": {"감수": SECOND_PASS_KO, "윤문": THIRD_PASS_KO},
+    "en": {"감수": SECOND_PASS_EN, "윤문": THIRD_PASS_EN},
+}
+# 하위 호환: `target_lang`을 안 주는 옛 호출부는 여전히 한국어를 본다.
+ROLES = ROLES_BY_LANG["ko"]
 
 
 def genre_hint(profile: dict | None) -> str:
@@ -149,15 +231,18 @@ def revise(events: list[Event], translator, source: dict[int, str] | None = None
            glossary=None, stage: str = "2차", role: str = "",
            profile: dict | None = None, cast: dict[str, str] | None = None,
            baseline: dict[int, str] | None = None,
-           batch: int = 8, context: int = 2,
+           batch: int = 8, context: int = 2, target_lang: str = "ko",
            progress=None) -> tuple[list[Event], list[Revision]]:
     """자막을 다시 본다. (고친 자막, 바뀐 내역)
 
     `source`는 자막 번호별 원문이다. 감수에서는 원문이 있어야 오역을 볼 수 있다 —
-    없으면 한국어만 보고 다듬는 윤문처럼 돈다.
+    없으면 원어만 보고 다듬는 윤문처럼 돈다.
 
     `role`이 프롬프트를 고른다(`감수` 또는 `윤문`). `stage`는 사람에게 보이는
-    이름일 뿐이다.
+    이름일 뿐이다. `target_lang`이 **어느 언어의** 2차·3차인지 고른다 —
+    `translate.py`의 `target_lang`과 같은 신호다. 지원하지 않는 언어는 조용히
+    한국어로 떨어지지 않고 실패한다(규칙 9 — 그 언어의 2차·3차 쟁점을 조사해서
+    `ROLES_BY_LANG`에 넣어야 한다, 추측해서 채우지 않는다).
 
     `baseline`은 **1차 번역**이다(번호별). 회차를 여러 번 돌 때 누적 표류를 막는 데
     쓴다 — 직전 단계만 보면 매 회차 1.4배씩 늘어 원문 대비 2배가 되어도 통과한다.
@@ -173,12 +258,19 @@ def revise(events: list[Event], translator, source: dict[int, str] | None = None
         if not role:
             raise ValueError(
                 f"'{stage}'가 감수인지 윤문인지 알 수 없습니다. role을 주세요.")
-    if role not in ROLES:
-        raise ValueError(f"모르는 역할입니다: {role} (쓸 수 있는 것: {', '.join(ROLES)})")
-    system = ROLES[role]
-    # 장르와 인물별 말투는 **말투를 정하는 단계**에만 붙인다. 윤문에 붙이면 3차가
-    # 말투를 다시 만지고, 그건 2차가 정한 것을 흔드는 일이다.
-    if role == "감수":
+    if target_lang not in ROLES_BY_LANG:
+        raise ValueError(
+            f"목표 언어 '{target_lang}'의 2차·3차 프롬프트가 없습니다. "
+            f"지원 언어: {', '.join(ROLES_BY_LANG)}. 새 언어는 그 언어의 실제 자막 "
+            "압축·문체 관행을 조사해서 ROLES_BY_LANG에 넣어야 합니다.")
+    roles = ROLES_BY_LANG[target_lang]
+    if role not in roles:
+        raise ValueError(f"모르는 역할입니다: {role} (쓸 수 있는 것: {', '.join(roles)})")
+    system = roles[role]
+    # 장르와 인물별 말투는 **말투를 정하는 단계**에만, 그것도 한국어일 때만 붙인다.
+    # 존댓말/반말·'~씨' 금지 같은 조항은 한국어 문법 범주라 다른 언어 프롬프트에
+    # 섞으면 없는 문제에 억지 답을 강요하게 된다.
+    if role == "감수" and target_lang == "ko":
         system += genre_hint(profile) + cast_hint(cast)
     source = source or {}
     revisions: list[Revision] = []
@@ -191,19 +283,25 @@ def revise(events: list[Event], translator, source: dict[int, str] | None = None
         before = ""
         if context and start:
             recent = events[max(0, start - context):start]
-            before = ("앞 자막(참고만 하세요):\n"
+            before_label = "Previous lines (for reference only):" if target_lang != "ko" \
+                else "앞 자막(참고만 하세요):"
+            before = (before_label + "\n"
                       + "\n".join(f"  {e.text}" for e in recent) + "\n\n")
 
+        src_label, p1_label = ("[source]", "[pass 1]") if target_lang != "ko" \
+            else ("[원문]", "[1차]")
         lines = []
         for event in chunk:
             original = source.get(event.index)
             if original and role == "감수":
-                lines.append(f"{event.index}. [원문] {original}\n   [1차] {event.text}")
+                lines.append(f"{event.index}. {src_label} {original}\n   {p1_label} {event.text}")
             else:
                 lines.append(f"{event.index}. {event.text}")
 
+        instruction = (f"Refine the following subtitles into the {stage} pass.\n\n"
+                       if target_lang != "ko" else f"다음 자막을 {stage} 번역으로 다듬으세요.\n\n")
         prompt = (f"{before}{glossary.hint() if glossary else ''}\n"
-                  f"다음 자막을 {stage} 번역으로 다듬으세요.\n\n" + "\n".join(lines))
+                  f"{instruction}" + "\n".join(lines))
         reply = translator.ask(system, prompt)
         got = _parse_numbered(reply, [e.index for e in chunk])
 

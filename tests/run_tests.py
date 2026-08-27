@@ -1723,6 +1723,25 @@ ok("빈 원문은 견주지 않는다", not _too_different("", "무엇이든"))
 
 ok("바꾼 것이 없으면 그렇게 말한다", "없습니다" in revision_report([]))
 
+# --- 영어 2차·3차(target_lang) ----------------------------------------------
+# 존댓말/반말 같은 한국어 문법 규칙이 영어 프롬프트에 안 섞여야 한다. 지원하지
+# 않는 언어는 조용히 한국어로 떨어지지 않고 실패해야 한다(규칙 9).
+
+_en_evs = [Event(1, 0, 1000, "I do not know what happened.")]
+_en_fake = _FakeTranslator(["1. I don't know what happened.\n"])
+_en_out, _en_rev = revise(_en_evs, _en_fake, target_lang="en", stage="3차")
+ok("영어 3차도 고친 자막을 돌려준다", _en_out[0].text == "I don't know what happened.")
+
+from checker.revise import THIRD_PASS_EN as _P3_EN, SECOND_PASS_EN as _P2_EN  # noqa: E402
+ok("영어 프롬프트에 한국어 존댓말 조항이 안 섞인다",
+   "존댓말" not in _P2_EN and "존댓말" not in _P3_EN)
+
+try:
+    revise(_en_evs, _FakeTranslator(["1. x\n"]), target_lang="fr", stage="2차")
+    ok("지원 안 하는 언어는 실패한다", False)
+except ValueError as exc:
+    ok("지원 안 하는 언어는 실패한다", "fr" in str(exc))
+
 
 # --- 독립 프로그램 화면 ----------------------------------------------------
 # 화면은 PySide6가 있어야 시험할 수 있다. 없는 환경(개발용 WSL)에서는 건너뛴다 —
