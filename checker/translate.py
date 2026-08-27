@@ -479,7 +479,10 @@ def _strip_markdown_wrap(text: str) -> str:
 
 
 _META_NOTE = re.compile(
-    r"^(\**(참고|note)\**\s*[:：]|\*\s+\S)", re.IGNORECASE)
+    # "notes?"로 단수·복수 둘 다 잡는다 — "**Notes:**"(복수)는 못 잡고
+    # "Note:"(단수)만 잡던 실수가 있었다(실측: 예능A 15회 2차·3차 결과에
+    # "**Notes:**\n- Simplified..." 통째로 자막에 남음, 2026-08-27).
+    r"^(\**(참고|notes?)\**\s*[:：]|\*\s+\S)", re.IGNORECASE)
 
 
 def _strip_trailing_notes(text: str) -> str:

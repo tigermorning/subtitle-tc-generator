@@ -26,7 +26,7 @@ import re
 from dataclasses import dataclass
 
 from .model import Event
-from .translate import _parse_numbered
+from .translate import _parse_numbered, _strip_markdown_wrap, _strip_trailing_notes
 
 # **2차는 뜻과 맥락과 말투다.** 문체 규칙은 여기 없다 — 3차로 옮겼다.
 #
@@ -320,8 +320,17 @@ def revise(events: list[Event], translator, source: dict[int, str] | None = None
 
         for event in chunk:
             text = (got.get(event.index) or "").strip()
-            # 모델이 형식을 흘리면(`[2차]` 같은 표지) 걷어낸다.
-            text = re.sub(r"^\[[^\]]{1,6}\]\s*", "", text)
+            # 모델이 형식을 흘리면(`[2차]`·`[pass 2]` 같은 표지) 걷어낸다. **줄마다
+            # 본다** — `_parse_numbered`가 번호 없는 줄을 앞 번호에 이어 붙이므로,
+            # 표지가 합쳐진 문자열의 **중간 줄**에서 시작할 수 있다. `^`만 보면
+            # (문자열 전체의 맨 앞만) 그 경우를 놓친다(실측: 예능A 15회,
+            # "[pass 2] -With our contract..."가 자막에 그대로 남음, 2026-08-27).
+            text = "\n".join(re.sub(r"^\[[^\]]{1,6}\]\s*", "", line)
+                            for line in text.split("\n"))
+            # 1차와 같은 흘림(마크다운 강조로 통째로 감싸기, "참고:"/"**Notes:**"
+            # 자기 설명 덧붙이기)이 2차·3차에서도 그대로 난다 — 같은 종류의 모델이
+            # 하는 같은 실수다. 1차에서 이미 만든 걸러내기를 그대로 쓴다.
+            text = _strip_trailing_notes(_strip_markdown_wrap(text))
             # **누적 표류를 함께 막는다.** 직전 단계만 보면 2차가 1.4배, 3차가 또
             # 1.4배로 늘어 원문 대비 2배가 되어도 매 회차는 통과한다. 회차를 설정으로
             # 열어 둔 지금 이것이 실제 위험이다.

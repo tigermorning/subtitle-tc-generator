@@ -1100,6 +1100,11 @@ ok("본문 뒤에 붙은 별표 설명도 자른다",
    _strip_trailing_notes("Hello there.\n* Character names were kept as provided.")
    == "Hello there.")
 
+# 복수형 "Notes:"도 잡는다(실측: 예능A 15회 2차·3차 결과에 "**Notes:**\n-
+# Simplified..." 통째로 자막에 남음, 2026-08-27 — 전엔 단수 "Note:"만 잡았다).
+ok("복수형 참고 표제도 자른다",
+   _strip_trailing_notes("Hi.\n**Notes:**\n- Simplified for brevity.") == "Hi.")
+
 
 class _FakeTranslator:
     """정해진 답만 내는 가짜. 모자라게 답하는 상황을 일부러 만든다."""
@@ -1722,6 +1727,22 @@ ok("비슷한 길이는 다듬은 것", not _too_different("먼저 연락했어�
 ok("빈 원문은 견주지 않는다", not _too_different("", "무엇이든"))
 
 ok("바꾼 것이 없으면 그렇게 말한다", "없습니다" in revision_report([]))
+
+# **표지가 합쳐진 문자열의 중간 줄에서 시작해도 걷어낸다.** `_parse_numbered`가
+# 번호 없는 줄을 앞 번호에 이어 붙이므로, 모델이 "[pass 2]" 같은 표지를 두 번째
+# 줄에 남기면 문자열 맨 앞이 아니라 중간에 온다(실측: 예능A 15회 2차·3차
+# 결과, "[pass 2] -With our contract..."가 자막에 그대로 남음, 2026-08-27).
+_tag_evs = [Event(1, 0, 1000, "첫 줄 그리고 둘째 줄")]
+_tag_fake = _FakeTranslator(["1. 첫 줄\n[pass 2] 둘째 줄\n"])
+_tag_out, _ = revise(_tag_evs, _tag_fake, target_lang="ko", stage="3차")
+ok("표지가 중간 줄에 있어도 걷어낸다", "[pass 2]" not in _tag_out[0].text, _tag_out[0].text)
+
+# 2차·3차도 1차와 같은 모델이 내는 흘림(마크다운 강조·자기 설명)을 똑같이 겪는다
+# — 1차용 걸러내기를 그대로 재사용해야 한다.
+_notes_evs = [Event(1, 0, 1000, "다듬을 문장이다")]
+_notes_fake = _FakeTranslator(["1. 다듬은 문장\n**Notes:**\n- 이유 설명\n"])
+_notes_out, _ = revise(_notes_evs, _notes_fake, target_lang="ko", stage="3차")
+ok("2차·3차에서도 자기 설명을 걷어낸다", _notes_out[0].text == "다듬은 문장", _notes_out[0].text)
 
 # --- 영어 2차·3차(target_lang) ----------------------------------------------
 # 존댓말/반말 같은 한국어 문법 규칙이 영어 프롬프트에 안 섞여야 한다. 지원하지
