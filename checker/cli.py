@@ -768,7 +768,19 @@ def _evaluate_mode(args, ap) -> int:
         except MediaToolUnavailable:
             pass
 
-    comparison = compare(ours, truth)
+    similarity_fn = None
+    if args.semantic:
+        from .embed import EmbeddingUnavailable, OllamaEmbedder, build_similarity_fn
+        try:
+            embedder = OllamaEmbedder()
+            all_text = [e.text for e in ours] + [e.text for e in truth]
+            print(f"임베딩으로 유사도를 잽니다 — 문장 {len(set(all_text))}개(중복 제외)")
+            similarity_fn = build_similarity_fn(all_text, embedder)
+        except EmbeddingUnavailable as exc:
+            print(f"[오류] {exc}")
+            return 2
+
+    comparison = compare(ours, truth, similarity_fn=similarity_fn)
     print(f"우리 {files[0].name}  ↔  정답 {args.against.name}   ({fps:.3f}fps)")
     print()
     print(report(comparison, fps))
@@ -995,6 +1007,10 @@ def main(argv: list[str] | None = None) -> int:
                          "어긋나는지 재서, 감이 아니라 값으로 고칠 수 있게 한다")
     ap.add_argument("--eval-json", type=Path,
                     help="대조 결과를 JSON으로 남긴다(정답 파일이 쌓이면 학습 자료가 된다)")
+    ap.add_argument("--semantic", action="store_true",
+                    help="--against의 짝짓기·유사도를 글자 겹침 대신 임베딩(bge-m3, "
+                         "Ollama 필요)으로 잰다. 의역이라 글자는 안 겹쳐도 뜻이 같은 "
+                         "자리를 잡는다(2026-08-27 예능A 15회에서 발견한 문제)")
     job = ap.add_argument_group(
         "작업 기준", "작업마다 달라지는 것들. **작업 시작 전에 정한다** — "
                   "정하지 않으면 위치 검사는 하지 않는다(추측해서 옮기지 않는다)")

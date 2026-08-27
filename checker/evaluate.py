@@ -32,6 +32,10 @@ class Pair:
     ours: Event | None
     truth: Event | None
     score: float = 0.0
+    # `compare()`가 짝지을 때 쓴 유사도 함수로 이미 잰 값을 들고 다닌다 — 아래
+    # `text_similarity`가 `align.similarity()`를 다시 부르지 않고 이것을 돌려준다.
+    # `--semantic`으로 임베딩 유사도를 썼으면 보고서도 같은 값을 봐야 앞뒤가 맞는다.
+    matched_similarity: float | None = None
 
     @property
     def start_diff(self) -> int | None:
@@ -45,6 +49,21 @@ class Pair:
         if self.ours is None or self.truth is None:
             return None
         return self.ours.end_ms - self.truth.end_ms
+
+    @property
+    def text_similarity(self) -> float | None:
+        """순수 텍스트 유사도. `self.score`와 다르다.
+
+        `self.score`는 **짝짓기용**이다 — 시간이 겹치면 +0.3을 얹어서 짝을 고른다
+        (`compare()` 참고). 그 점수를 그대로 "텍스트 유사도"로 보고하면 1.0을 넘을
+        수 있어 오도한다(2026-08-27 발견). `matched_similarity`에 `compare()`가
+        짝지을 때 쓴 유사도 함수의 순수 값을 이미 저장해 뒀으므로 그것을 돌려준다
+        (기본은 글자 겹침, `--semantic`이면 임베딩 코사인 유사도 — 어느 쪽이든
+        짝짓기와 보고가 같은 잣대를 써야 앞뒤가 맞는다).
+        """
+        if self.ours is None or self.truth is None:
+            return None
+        return self.matched_similarity
 
 
 @dataclass
@@ -69,13 +88,19 @@ class Comparison:
 
 
 def compare(ours: list[Event], truth: list[Event],
-            overlap_ms: int = 2000) -> Comparison:
-    """두 자막을 짝짓는다. 정답을 기준으로 본다."""
+            overlap_ms: int = 2000, similarity_fn=None) -> Comparison:
+    """두 자막을 짝짓는다. 정답을 기준으로 본다.
+
+    `similarity_fn`을 안 주면 `align.similarity()`(글자 겹침)를 쓴다. 뜻은
+    같은데 표현이 달라 글자 겹침이 낮게 나오는 자리(의역)를 잡으려면
+    `embed.build_similarity_fn()`으로 만든 임베딩 유사도를 넘긴다(`--semantic`).
+    """
+    similarity_fn = similarity_fn or similarity
     used: set[int] = set()
     pairs: list[Pair] = []
 
     for want in truth:
-        best, best_score = None, 0.0
+        best, best_score, best_sim = None, 0.0, 0.0
         for i, have in enumerate(ours):
             if i in used:
                 continue
@@ -86,12 +111,13 @@ def compare(ours: list[Event], truth: list[Event],
             if have.start_ms > want.end_ms + overlap_ms:
                 break
             overlap = min(have.end_ms, want.end_ms) - max(have.start_ms, want.start_ms)
-            score = similarity(have.text, want.text) + (0.3 if overlap > 0 else 0.0)
+            sim = similarity_fn(have.text, want.text)
+            score = sim + (0.3 if overlap > 0 else 0.0)
             if score > best_score:
-                best, best_score = i, score
+                best, best_score, best_sim = i, score, sim
         if best is not None and best_score >= 0.3:
             used.add(best)
-            pairs.append(Pair(ours[best], want, best_score))
+            pairs.append(Pair(ours[best], want, best_score, best_sim))
         else:
             pairs.append(Pair(None, want))
 
@@ -130,6 +156,7 @@ def summarize(comparison: Comparison, fps: float = 23.976) -> dict:
 
     ours_dur = [p.ours.end_ms - p.ours.start_ms for p in matched]
     truth_dur = [p.truth.end_ms - p.truth.start_ms for p in matched]
+    text_scores = [p.text_similarity for p in matched]
 
     return {
         "counts": {
@@ -153,8 +180,7 @@ def summarize(comparison: Comparison, fps: float = 23.976) -> dict:
             "truth_median": round(median([count_chars(p.truth.text) for p in matched]), 1)
             if matched else None,
         },
-        "text_similarity_median": round(median([p.score for p in matched]), 2)
-        if matched else None,
+        "text_similarity_median": round(median(text_scores), 2) if text_scores else None,
     }
 
 
@@ -185,6 +211,10 @@ def report(comparison: Comparison, fps: float = 23.976, show: int = 12) -> str:
     chars = stats["chars_per_cue"]
     if chars["ours_median"] is not None:
         lines.append(f"자막 길이  우리 {chars['ours_median']}자 / 정답 {chars['truth_median']}자")
+    sim = stats["text_similarity_median"]
+    if sim is not None:
+        lines.append(f"텍스트 유사도  가운데값 {sim:.2f} (0~1, 완전히 같으면 1.00) — "
+                     f"참고용, 자동 교정 근거 아님(규칙 3·5)")
 
     # **어긋남이 큰 것부터 보여 준다.** 평균만 보면 무엇을 고쳐야 할지 알 수 없다.
     worst = sorted((p for p in comparison.matched),
@@ -196,6 +226,21 @@ def report(comparison: Comparison, fps: float = 23.976, show: int = 12) -> str:
             lines.append(
                 f"  #{p.truth.index:>3} 인점 {p.start_diff:+6}ms  아웃점 {p.end_diff:+6}ms"
                 f"  | {p.truth.text.replace(chr(10), ' / ')[:34]}")
+
+    # **텍스트가 가장 안 맞는 자리를 짚는다.** 가운데값 하나로는 어느 자막을 고쳐야
+    # 할지 알 수 없다 — 개별 사례를 원문·정답과 나란히 봐야 구조적 오역인지
+    # 노이즈인지 사람이 가른다(규칙 13: 도구를 검증·고치는 것이 목적이지 가운데값
+    # 하나를 내는 것이 아니다). 정답 텍스트에 이미 들어 있는 화면자막·SDH 표시까지
+    # 함께 대조되므로 번역·SDH 어느 작업에도 쓸 수 있다.
+    worst_text = sorted(comparison.matched, key=lambda p: p.text_similarity)[:show]
+    if worst_text:
+        lines.append("")
+        lines.append("텍스트가 가장 안 맞는 자막")
+        for p in worst_text:
+            lines.append(
+                f"  #{p.truth.index:>3} 유사도 {p.text_similarity:.2f}")
+            lines.append(f"       정답 {p.truth.text.replace(chr(10), ' / ')[:50]}")
+            lines.append(f"       우리 {p.ours.text.replace(chr(10), ' / ')[:50]}")
 
     if comparison.missing:
         lines.append("")
@@ -225,7 +270,10 @@ def save(comparison: Comparison, path: Path, fps: float = 23.976,
              "start_diff": p.start_diff, "end_diff": p.end_diff,
              "truth_text": p.truth.text if p.truth else None,
              "ours_text": p.ours.text if p.ours else None,
-             "similarity": round(p.score, 3)}
+             # 순수 텍스트 유사도다(Pair.text_similarity) — 짝짓기용 p.score와 다르다.
+             # 정답 파일이 쌓여 학습 자료가 될 때 짝짓기 보너스가 섞인 값이 들어가면
+             # 안 된다(규칙 11 — 학습값에는 근거가 분명해야 한다).
+             "similarity": round(p.text_similarity, 3) if p.text_similarity is not None else None}
             for p in comparison.pairs
         ],
     }

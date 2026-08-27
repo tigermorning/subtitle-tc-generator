@@ -1400,6 +1400,51 @@ _text = report(_cmp)
 ok("어긋난 자막을 보여 준다", "가장 많이 어긋난" in _text)
 ok("빠뜨린 자막을 보여 준다", "그러게요" in _text)
 
+# --- --semantic: 짝짓기·유사도를 바꿔 끼울 수 있다 ---------------------------
+# 글자는 하나도 안 겹쳐도(의역) 뜻이 같으면 짝지어야 한다. 실제 임베딩 없이
+# 가짜 유사도 함수로 이 배선만 검증한다(2026-08-27, `embed.py`).
+
+def _fake_semantic(a: str, b: str) -> float:
+    pairs = {("Mister Cho isn't that you?", "Aren't you Mr. Cho?"): 0.95}
+    return pairs.get((a, b), pairs.get((b, a), 0.0))
+
+_sem_truth = [Event(1, 1000, 3000, "Aren't you Mr. Cho?")]
+_sem_ours = [Event(1, 1000, 3000, "Mister Cho isn't that you?")]
+_char_cmp = compare(_sem_ours, _sem_truth)
+# 시간이 겹치면 +0.3 보너스가 있어 이 경우도 "짝"으로는 잡힌다 — 여기서
+# 확인할 것은 짝 여부가 아니라 **글자 유사도 값 자체가 낮다는 것**이다
+# (실측 0.182, 예능A 15회) — 임베딩 유사도(아래, 0.95)와 대비된다.
+ok("글자 유사도는 의역을 낮게 잰다",
+   _char_cmp.matched[0].text_similarity < 0.3)
+_sem_cmp = compare(_sem_ours, _sem_truth, similarity_fn=_fake_semantic)
+ok("의미 유사도 함수를 주면 의역도 짝짓는다",
+   summarize(_sem_cmp)["counts"]["matched"] == 1)
+ok("보고서의 유사도도 짝짓기에 쓴 함수의 값이다(재계산 안 함)",
+   _sem_cmp.matched[0].text_similarity == 0.95)
+
+from checker.embed import build_similarity_fn, cosine  # noqa: E402
+
+
+class _FakeEmbedder:
+    def __init__(self):
+        self.calls = 0
+
+    def embed_batch(self, texts):
+        self.calls += 1
+        # 텍스트 길이를 벡터로 쓴다 — 진짜 임베딩은 아니지만 코사인 계산·캐시
+        # 배선만 검증하면 된다.
+        return [[float(len(t)), 1.0] for t in texts]
+
+
+ok("코사인 유사도 — 같은 방향이면 1.0", cosine([1, 0], [2, 0]) == 1.0)
+ok("코사인 유사도 — 직각이면 0.0", cosine([1, 0], [0, 1]) == 0.0)
+ok("빈 벡터는 0.0(0으로 나누지 않는다)", cosine([], [1, 2]) == 0.0)
+
+_fake_embedder = _FakeEmbedder()
+_fn = build_similarity_fn(["안녕", "안녕", "다른 말"], _fake_embedder)
+ok("중복 문장은 한 번만 임베딩한다(캐시)", _fake_embedder.calls == 1)
+ok("같은 문장끼리는 유사도 1.0", abs(_fn("안녕", "안녕") - 1.0) < 1e-9)
+
 
 # --- 전사 조각 묶기 --------------------------------------------------------
 # whisper는 말이 잠깐 멎을 때마다 끊는다. 사람은 한 호흡을 한 자막에 담는다.
