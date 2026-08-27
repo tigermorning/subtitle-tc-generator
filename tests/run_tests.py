@@ -1494,6 +1494,24 @@ _unknown_speaker = [(0, 1000, "A")]  # 두 번째 자막 자리엔 화자 정보
 ok("화자를 모르는 자리는 억지로 안 가른다(합친다)",
    len(merge_cues(_turn_events, 4000, 250, speaker_turns=_unknown_speaker)) == 1)
 
+# **간격이 0인 병합**(whisper 조각이 딱 붙어 있는 흔한 경우)에서
+# `previous.end_ms == event.start_ms`가 같은 시각이 돼 화자 비교가 무의미해지는
+# 버그가 실제로 있었다(2026-08-27, 예능A 15회 실전 검증에서 발견 — 화자
+# 분리를 켜도 병합 개수가 하나도 안 바뀌었다). 각 조각 자체의 중간 지점을
+# 비교해야 이 경우도 잡힌다.
+_zero_gap_events = [Event(1, 0, 2000, "미스터 조?"), Event(2, 2000, 4000, "네, 접니다.")]
+_zero_gap_diff_speaker = [(0, 2000, "A"), (2000, 4000, "B")]
+ok("간격 0이어도 화자가 바뀌면 안 합친다",
+   len(merge_cues(_zero_gap_events, 4000, 250, speaker_turns=_zero_gap_diff_speaker)) == 2)
+
+# 세 조각 이상 이어질 때 "누적된 자막"이 아니라 "마지막 원래 조각"과 비교해야
+# 한다 — 누적본의 중간 지점을 쓰면 조각이 늘수록 엉뚱한 자리를 보게 된다.
+_three_events = [Event(1, 0, 1000, "가"), Event(2, 1000, 2000, "나"), Event(3, 2000, 3000, "다")]
+_three_speaker = [(0, 2000, "A"), (2000, 3000, "B")]
+_three_merged = merge_cues(_three_events, 4000, 250, speaker_turns=_three_speaker)
+ok("연쇄 병합에서도 화자 교체 지점을 정확히 가른다",
+   len(_three_merged) == 2 and _three_merged[0].text == "가 나")
+
 # 스포팅이 자막을 뭉개지 않는지. 한 말소리 구간에 여러 자막이 걸릴 때 무너졌다.
 _dense = [Event(1, 1000, 2000, "가"), Event(2, 2000, 3000, "나"), Event(3, 3000, 4000, "다")]
 _spots = [_Spot(1, "end_ms", 2000, 9000), _Spot(2, "start_ms", 2000, 500),

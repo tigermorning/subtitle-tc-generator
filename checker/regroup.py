@@ -61,22 +61,37 @@ def merge_cues(events: list[Event], max_duration_ms: int = MAX_DURATION_MS,
     from .diarize import speaker_at
 
     out: list[Event] = []
+    # **원래 조각의 중간 지점끼리 비교한다.** `previous.end_ms`(누적된 자막의
+    # 끝)와 `event.start_ms`(다음 조각의 시작)로 비교했더니, 간격 0인 병합
+    # (whisper 조각이 딱 붙어 있는 흔한 경우)에서 두 값이 **같은 시각**이 돼
+    # 화자 비교가 항상 "안 바뀜"으로 나왔다(실측 2026-08-27: 예능A 15회
+    # "미스터 조" 구간에서 화자 분리를 켜도 병합이 1103개로 똑같았다 — 이
+    # 버그 때문에 화자 비교가 한 번도 실제로 작동하지 않았다). `previous`는
+    # 이미 여러 조각이 합쳐진 자막이라 그 중간 지점도 못 믿는다 — 그래서
+    # "마지막으로 본 원래 조각"(`last_raw`)을 따로 들고 다니며 그 조각 자체의
+    # 중간 지점과 새 조각의 중간 지점을 비교한다. 둘 다 각 조각 안에 있는
+    # 시각이라 겹치는 경계 문제가 없다.
+    last_raw: Event | None = None
     for event in events:
-        if out:
+        if out and last_raw is not None:
             previous = out[-1]
             gap = event.start_ms - previous.end_ms
             speaker_changed = False
             if speaker_turns:
-                prev_speaker = speaker_at(previous.end_ms, speaker_turns)
-                cur_speaker = speaker_at(event.start_ms, speaker_turns)
+                prev_mid = (last_raw.start_ms + last_raw.end_ms) // 2
+                cur_mid = (event.start_ms + event.end_ms) // 2
+                prev_speaker = speaker_at(prev_mid, speaker_turns)
+                cur_speaker = speaker_at(cur_mid, speaker_turns)
                 speaker_changed = bool(prev_speaker and cur_speaker
                                        and prev_speaker != cur_speaker)
             if (not speaker_changed and 0 <= gap <= max_gap_ms
                     and (event.end_ms - previous.start_ms) <= max_duration_ms):
                 previous.end_ms = event.end_ms
                 previous.text = f"{previous.text} {event.text}".strip()
+                last_raw = event
                 continue
         out.append(Event(len(out) + 1, event.start_ms, event.end_ms, event.text))
+        last_raw = event
     return out
 
 
