@@ -9,6 +9,14 @@
 이 모듈은 pyannote.audio로 화자 구간을 찾아 `regroup.merge_cues()`에 건넨다 —
 간격이 짧아도 **화자가 바뀌는 자리는 합치지 않는다.**
 
+**실제 작업은 격리된 venv(`.venv-diarize`)의 서브프로세스가 한다.**
+pyannote.audio가 torch>=2.8.0을 요구하는데, 시스템 파이썬의 torch는 다른
+도구(torchvision 등)가 물려 써서 버전을 못 올린다 — 실제로 한 번 올렸다가
+시스템 torch를 깨뜨려 되돌린 적이 있다(2026-08-27, `docs/HANDOFF.md` 참고).
+그래서 이 모듈(시스템 파이썬에서 import된다)은 pyannote를 직접 import하지
+않는다 — `_diarize_worker.py`를 격리 venv의 파이썬으로 실행해서 결과만
+JSON으로 받는다.
+
 **밖으로 나가지 않는다.** 오디오는 이 컴퓨터를 떠나지 않는다. 모델 파일은
 Hugging Face에서 한 번 받아 로컬에 둔다(규칙 6과 같은 방식 — whisper·VAD 모델도
 같은 자리에서 받는다).
@@ -20,14 +28,11 @@ Hugging Face에서 한 번 받아 로컬에 둔다(규칙 6과 같은 방식 —
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import tempfile
 from pathlib import Path
-
-from .media import MediaToolUnavailable, _as_tool_path, _find
-
-SAMPLE_RATE = 16000
 
 # 3.1은 게이팅된 두 모델(segmentation-3.0 + speaker-diarization-3.1)을 따로
 # 동의해야 했다. community-1은 정확도가 더 낫고 화자 수 세기가 개선됐고,
@@ -38,56 +43,35 @@ DEFAULT_MODEL = "pyannote/speaker-diarization-community-1"
 
 
 class DiarizationUnavailable(Exception):
-    """pyannote.audio가 없거나, 모델·토큰이 없다."""
+    """격리 venv가 없거나, pyannote.audio·모델·토큰이 없거나, 서브프로세스가 실패했다."""
 
 
 def _find_token(explicit: str | None = None) -> str | None:
     return explicit or os.environ.get("HF_TOKEN") or os.environ.get("HUGGINGFACE_TOKEN")
 
 
-def _read_audio_wav(video: Path, work: Path) -> Path:
-    """16kHz 모노 WAV로 뽑는다. pyannote가 파일 경로를 직접 받는다."""
-    out_path = work / "diarize.wav"
-    result = subprocess.run(
-        [_find("ffmpeg"), "-hide_banner", "-nostats", "-v", "error", "-y",
-         "-i", _as_tool_path(video), "-vn", "-ac", "1", "-ar", str(SAMPLE_RATE),
-         _as_tool_path(out_path)],
-        capture_output=True, check=False,
-    )
-    if result.returncode != 0 or not out_path.is_file():
-        detail = (result.stderr or b"").decode("utf-8", "replace").strip()[:200]
-        raise MediaToolUnavailable(f"오디오를 읽지 못했습니다: {detail}")
-    return out_path
+def _find_diarize_python() -> Path:
+    """격리 venv의 파이썬을 찾는다. `DIARIZE_PYTHON`으로 다른 자리를 알려줄 수 있다."""
+    override = os.environ.get("DIARIZE_PYTHON")
+    if override and Path(override).is_file():
+        return Path(override)
 
+    repo_root = Path(__file__).resolve().parent.parent
+    candidates = [
+        repo_root / ".venv-diarize" / "Scripts" / "python.exe",   # Windows
+        repo_root / ".venv-diarize" / "bin" / "python",           # POSIX
+    ]
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
 
-def _load_pipeline(model: str, token: str | None):
-    try:
-        from pyannote.audio import Pipeline
-    except ImportError as exc:
-        raise DiarizationUnavailable(
-            "pyannote.audio가 설치돼 있지 않습니다. 받으세요:\n"
-            "  pip install pyannote.audio\n"
-            "그리고 https://hf.co/settings/tokens 에서 토큰을 만들고 "
-            f"https://huggingface.co/{DEFAULT_MODEL} 에서 이용 약관에 동의한 뒤\n"
-            "  HF_TOKEN=<토큰> 환경변수로 알려 주세요.\n"
-            "(완전한 로컬 사용은 모델을 git-lfs로 내려받아 폴더 경로를 "
-            "PYANNOTE_MODEL_DIR로 지정하세요 — 토큰이 그 뒤로는 필요 없습니다.)"
-        ) from exc
-
-    local_dir = os.environ.get("PYANNOTE_MODEL_DIR")
-    if local_dir:
-        return Pipeline.from_pretrained(local_dir)
-
-    if not token:
-        raise DiarizationUnavailable(
-            "Hugging Face 토큰이 없습니다. https://hf.co/settings/tokens 에서 "
-            "만들고, https://huggingface.co/" + DEFAULT_MODEL + " 에서 이용 약관에 "
-            "동의한 뒤 HF_TOKEN 환경변수로 알려 주세요."
-        )
-    try:
-        return Pipeline.from_pretrained(model, token=token)
-    except Exception as exc:  # 토큰은 있는데 약관 미동의 등 — pyannote가 자기 메시지를 낸다
-        raise DiarizationUnavailable(f"화자 분리 모델을 불러오지 못했습니다: {exc}") from exc
+    raise DiarizationUnavailable(
+        "화자 분리용 격리 환경(.venv-diarize)을 찾지 못했습니다. "
+        "pyannote.audio는 시스템 파이썬과 다른 torch 버전을 요구해 별도 venv에 "
+        "설치합니다(docs/HANDOFF.md 참고):\n"
+        "  python -m venv .venv-diarize\n"
+        "  .venv-diarize/Scripts/python.exe -m pip install pyannote.audio\n"
+        "다른 자리에 있으면 DIARIZE_PYTHON 환경변수로 python.exe 경로를 알려주세요.")
 
 
 def find_speaker_turns(video: Path, model: str | None = None, token: str | None = None,
@@ -98,18 +82,29 @@ def find_speaker_turns(video: Path, model: str | None = None, token: str | None 
     사람인지 다른 사람인지"만 구분하는 내부용 표다.
     """
     say = progress or (lambda _m: None)
-    pipeline = _load_pipeline(model or DEFAULT_MODEL, _find_token(token))
+    diarize_python = _find_diarize_python()
+    worker = Path(__file__).with_name("_diarize_worker.py")
 
+    env = dict(os.environ)
+    found_token = _find_token(token)
+    if found_token:
+        env["HF_TOKEN"] = found_token
+
+    say("화자를 구분합니다 — 영상 길이에 비례해 걸립니다...")
     with tempfile.TemporaryDirectory(prefix="stc-diarize-") as tmp:
-        work = Path(tmp)
-        wav = _read_audio_wav(Path(video), work)
-        say("화자를 구분합니다 — 영상 길이에 비례해 걸립니다...")
-        output = pipeline(str(wav))
+        out_json = Path(tmp) / "turns.json"
+        args = [str(diarize_python), str(worker), str(video), str(out_json)]
+        if model:
+            args.append(model)
+        result = subprocess.run(args, capture_output=True, text=True,
+                                encoding="utf-8", errors="replace", env=env)
+        if result.returncode != 0 or not out_json.is_file():
+            detail = (result.stderr or "").strip()
+            detail = detail[-500:] if detail else f"종료 코드 {result.returncode}"
+            raise DiarizationUnavailable(f"화자 분리에 실패했습니다: {detail}")
+        turns = [(int(s), int(e), str(label))
+                 for s, e, label in json.loads(out_json.read_text(encoding="utf-8"))]
 
-    turns: list[tuple[int, int, str]] = []
-    for turn, _, speaker in output.speaker_diarization:
-        turns.append((int(turn.start * 1000), int(turn.end * 1000), str(speaker)))
-    turns.sort(key=lambda t: t[0])
     say(f"화자 구간 {len(turns)}개")
     return turns
 
