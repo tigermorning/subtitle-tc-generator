@@ -22,6 +22,19 @@ spotting:
   recommended_ms: [null, 2000]      # "2초 이하" — 하한은 자료에 없다
   recommended_note: "예능·리얼다큐 권장 2초 이하 (작업자 자료 590행)"
 
+# **같은 590행 근거를 병합 단계(regroup.py)에도 적용한다** — 2026-08-27,
+# 예능A 15회 영어 번역 1453개 전수 대조로 발견: whisper 전사 조각을
+# 묶는 기본 상한(4000ms, `regroup.MAX_DURATION_MS`)이 예능 특유의 빠른 대화
+# 주고받기에는 너무 커서, 화자가 바뀌어도 계속 이어 붙였다(`regroup.py`는
+# 화자 분리를 못 한다 — whisper가 그 정보를 안 준다). 재분할(resplit)은
+# 글자 수가 넘칠 때만 다시 쪼개므로, 짧은 영어 번역문은 4000ms짜리로 뭉친
+# 채 그대로 남는다. 병합 자체를 처음부터 최종 목표(2초 이하)에 맞춰 짧게
+# 묶으면 이 문제가 원천에서 줄어든다. `regroup.limits_from_profile()`가
+# 이 값을 읽는다 — `--genre variety`를 반드시 같이 줘야 적용된다.
+timecode:
+  merge_max_ms: 2000
+  merge_max_gap_ms: 250
+
 rules:
   - id: G01
     clause: "작업자 자료 658행 / 호칭"
