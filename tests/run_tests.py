@@ -1701,7 +1701,8 @@ ok("주격 조사도 맞춘다", _fixed[1].text == "5천 달러가 없어")
 # 작업자 자료 569~579행의 단계를 그대로 나눈다. 한 번에 "잘 번역해라"라고 하면
 # 모델이 정확도·용어·말맛을 뒤섞어 어중간하게 낸다.
 
-from checker.revise import _too_different, report as revision_report, revise  # noqa: E402
+from checker.revise import (  # noqa: E402
+    Revision, _too_different, report as revision_report, revise)
 
 _evs = [Event(1, 0, 1000, "그들과 싸우기 전에 그들을 발견해야 한다"),
         Event(2, 1000, 2000, "놈들은 강하다")]
@@ -1727,6 +1728,15 @@ ok("비슷한 길이는 다듬은 것", not _too_different("먼저 연락했어�
 ok("빈 원문은 견주지 않는다", not _too_different("", "무엇이든"))
 
 ok("바꾼 것이 없으면 그렇게 말한다", "없습니다" in revision_report([]))
+
+# 여러 회차(2차·3차...) 결과를 한 목록으로 받으면 회차별로 나눠서 세야 한다 —
+# 전부 첫 회차 이름으로만 합산해 세면 뒤 회차가 고친 것까지 앞 회차가 고친
+# 것처럼 보인다(실측, 2026-08-27).
+_multi_round = [Revision(1, "가", "나", "2차"), Revision(2, "다", "라", "2차"),
+               Revision(3, "마", "바", "3차")]
+_multi_report = revision_report(_multi_round)
+ok("회차별로 나눠서 센다", "2차 2개" in _multi_report and "3차 1개" in _multi_report,
+   _multi_report)
 
 # **표지가 합쳐진 문자열의 중간 줄에서 시작해도 걷어낸다.** `_parse_numbered`가
 # 번호 없는 줄을 앞 번호에 이어 붙이므로, 모델이 "[pass 2]" 같은 표지를 두 번째

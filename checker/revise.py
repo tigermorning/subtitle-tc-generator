@@ -368,10 +368,22 @@ def _too_different(before: str, after: str, limit: float = 1.5) -> bool:
 
 
 def report(revisions: list[Revision], show: int = 20) -> str:
-    """무엇을 왜 바꿨는지. 사람이 되돌릴 수 있어야 한다."""
+    """무엇을 왜 바꿨는지. 사람이 되돌릴 수 있어야 한다.
+
+    **회차별로 나눠서 센다.** `stage_revise`는 여러 회차(2차·3차...)의 결과를
+    한 목록에 모아서 준다 — 전부 `revisions[0].stage`(맨 처음 회차) 이름으로만
+    세면, 뒤 회차가 고친 것까지 앞 회차가 고친 것처럼 보인다(실측: 예능A
+    15회, "2차에서 1207개를 고쳤습니다"라고 나왔는데 실은 2차+3차 합산값이었다
+    — 2차 대상 자막이 1114개뿐이라 1207개는 애초에 2차 혼자 낼 수 없는
+    숫자다, 2026-08-27).
+    """
     if not revisions:
         return "바꾼 자막이 없습니다."
-    lines = [f"{revisions[0].stage}에서 {len(revisions)}개를 고쳤습니다"]
+    by_stage: dict[str, int] = {}
+    for r in revisions:
+        by_stage[r.stage] = by_stage.get(r.stage, 0) + 1
+    summary = ", ".join(f"{stage} {n}개" for stage, n in by_stage.items())
+    lines = [f"고쳤습니다 — {summary} (합계 {len(revisions)}개)"]
     for revision in revisions[:show]:
         lines.append(f"  #{revision.index}")
         lines.append(f"    전: {revision.before}")
