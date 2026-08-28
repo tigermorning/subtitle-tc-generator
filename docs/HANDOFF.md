@@ -112,6 +112,23 @@ rules/learned/<플랫폼>/ 정답 자막에서 관측한 값. source.origin: lea
 `HF_TOKEN` 환경변수). Windows 사용자 환경변수는 이미 떠 있는 프로세스에
 소급 적용 안 된다 — 등록 후 새 셸이 필요하다.
 
+**2026-08-28부터 이 컴퓨터에서 `--diarize`가 막혀 있다 — 코드 문제가
+아니다.** `DLL load failed ... 애플리케이션 제어 정책` 오류가 난다.
+원인은 Windows 11 **Smart App Control**이 켜져 있어서다(`Get-CimInstance
+-Namespace root\Microsoft\Windows\Defender -ClassName
+MSFT_MpComputerStatus`의 `SmartAppControlState`가 `On`) — 서명 안 되거나
+평판 정보 없는 실행 파일·DLL을 자동 차단하는 기능인데, `.venv-diarize`의
+torch DLL이 걸린다. 어젯밤(2026-08-27)엔 됐다가 다음날 안 됐다 — 평판
+재평가가 나중에 이뤄졌을 가능성이 크다.
+
+**끄면 해결되지만 사용자가 껐다 켤 수 없는 기능이다**(마이크로소프트가
+의도적으로 단방향으로 설계 — 다시 켜려면 윈도우 초기화가 필요하다).
+그래서 **사용자 결정(2026-08-28): 끄지 않는다. `--diarize` 없이
+진행한다.** 이 컴퓨터에서 화자 분리가 다시 필요해지면 이 상태부터
+확인한다 — DLL 경로나 코드 문제로 오판해서 시간 낭비하지 않는다. 다른
+컴퓨터(예: 노트북)로 옮기면 될 수도 있다(그쪽 Smart App Control 상태에
+달렸다).
+
 ## 6. 그동안 찾아 고친 구조적 버그 (재발 방지용 요약)
 
 전부 `checker/`에 남아 자동으로 다음 영상부터 적용된다. 상세 재현 과정은
