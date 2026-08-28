@@ -332,20 +332,27 @@ def suggest_spotting(events: list[Event], speech: list[tuple[int, int]], fps: fl
     return out
 
 
-# 장면 전환 규정(작업자 자료):
-#   인점: 장면 전환에 딱 맞추거나 0.5초 이상 벌리기
-#   아웃점: 장면 전환 -2프레임에 맞추거나 0.5초 이상 벌리기
-#   쿠팡은 비적용
+# 근거: 넷플릭스 공식 "Timed Text Style Guide: Subtitle Timing Guidelines"
+#   (https://partnerhelp.netflixstudios.com/hc/en-us/articles/360051554394,
+#   확인 2026-08-28, 모든 자막에 적용 — SDH 전용 아님). **방향이 있다**:
+#   - 인점: "Where dialogue starts on the shot change or **within half a
+#     second past** the shot change, set the in-time to the first frame of
+#     the shot change" — 대사가 전환 **뒤**(늦게) 시작할 때만 당긴다.
+#   - 아웃점: "If an out-time is within half a second **of the last frame
+#     before** the shot change... set the out-time to two frames before the
+#     shot change" — 아웃점이 전환 **앞**(이르게)에 있을 때만 당긴다.
+#   대칭이 아니다 — 대사가 전환 **전에** 시작했거나 아웃점이 전환 **뒤에**
+#   있는 경우는 규정이 다루지 않는다(자연스러운 배치이므로 손댈 이유가
+#   없다). 전에는 방향을 안 가리고 "가까우면 무조건 지적"했다 — 규정에
+#   없는 경우까지 건드릴 뻔했다.
+#   쿠팡은 비적용(작업자 자료).
 SHOT_CLEARANCE_MS = 500
 SHOT_OUT_LEAD_FRAMES = 2
 
 
 def suggest_shot_snap(events: list[Event], shots: list[int], fps: float,
                       clearance_ms: int = SHOT_CLEARANCE_MS) -> list[SpotSuggestion]:
-    """장면 전환에 어설프게 걸친 타임코드를 제안한다.
-
-    규정이 말하는 것은 **어중간하지 말라**는 것이다 — 딱 붙이거나 확실히 떨어뜨리거나.
-    전환에서 `clearance_ms` 안에 있으면서 딱 맞지도 않은 자리만 지적한다.
+    """장면 전환에 어설프게 걸친 타임코드를 제안한다. 방향이 있다(위 주석).
 
     쿠팡처럼 장면 전환을 적용하지 않는 곳에서는 이 함수를 부르지 않는다
     (프로파일의 `shot_change.applied`가 판단한다).
@@ -358,30 +365,28 @@ def suggest_shot_snap(events: list[Event], shots: list[int], fps: float,
 
     for ev in events:
         for shot in shots:
-            # 인점: 전환에 딱 붙이거나 0.5초 이상 벌린다
-            delta = ev.start_ms - shot
-            if abs(delta) <= snap_tolerance:
+            # 인점: 대사가 전환 뒤 0.5초 이내에 시작할 때만 전환 첫 프레임으로 당긴다.
+            delta = ev.start_ms - shot   # 양수만 본다 — 전환보다 늦게 시작한 경우
+            if 0 <= delta <= snap_tolerance:
                 break
-            if abs(delta) < clearance_ms:
+            if 0 < delta < clearance_ms:
                 out.append(SpotSuggestion(
                     ev.index, "start_ms", ev.start_ms, shot,
-                    f"장면 전환 {shot}ms에 {abs(delta)}ms 차로 걸쳤습니다 —"
-                    f" 딱 붙이거나 {clearance_ms}ms 이상 벌립니다"))
+                    f"장면 전환 {shot}ms 뒤 {delta}ms 만에 시작합니다 —"
+                    f" 전환 첫 프레임으로 당깁니다"))
                 break
 
-        want_out = None
         for shot in shots:
-            delta = ev.end_ms - shot
+            # 아웃점: 전환 앞 0.5초 이내에 끝날 때만 전환 2프레임 전으로 당긴다.
+            delta = shot - ev.end_ms   # 양수만 본다 — 전환보다 일찍 끝난 경우
             target = int(round(shot - SHOT_OUT_LEAD_FRAMES * frame))
             if abs(ev.end_ms - target) <= snap_tolerance:
                 break
-            if abs(delta) < clearance_ms:
-                want_out = target
+            if 0 < delta < clearance_ms:
+                out.append(SpotSuggestion(
+                    ev.index, "end_ms", ev.end_ms, target,
+                    f"장면 전환 {shot}ms 앞 {delta}ms 만에 끝납니다 —"
+                    f" 전환 {SHOT_OUT_LEAD_FRAMES}프레임 전으로 당깁니다"))
                 break
-        if want_out is not None:
-            out.append(SpotSuggestion(
-                ev.index, "end_ms", ev.end_ms, want_out,
-                f"장면 전환에 걸친 아웃점 — 전환 {SHOT_OUT_LEAD_FRAMES}프레임 앞에 맞추거나"
-                f" {clearance_ms}ms 이상 벌립니다"))
 
     return out

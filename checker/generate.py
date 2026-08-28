@@ -285,8 +285,24 @@ def generate(video: Path, profile: dict, script: Path | None = None,
     # 추정값으로 덮어쓰면 싱크가 통째로 어긋나기 때문이다. 여기서는 타임코드 자체가
     # 방금 기계가 만든 것이라 훼손할 작업물이 없다.
     from .timing import apply_spotting, suggest_spotting
-    moved = apply_spotting(events, suggest_spotting(events, speech, fps,
-                                                   detector=how))
+    suggestions = suggest_spotting(events, speech, fps, detector=how)
+
+    # **장면 전환도 스포팅의 일부다.** 전에는 `--check --fix-spotting`
+    # 경로에서만 이 조정을 했고 `--generate` 자체는 몰랐다 — 만든 초안이
+    # 애초부터 장면 전환을 하나도 안 본 채로 나왔다는 뜻이다. 넷플릭스 공식
+    # "Timed Text Style Guide: Subtitle Timing Guidelines"(2026-08-28 확인,
+    # "These rules are applicable to all timed text files produced for
+    # Netflix" — SDH 전용이 아니라 번역 자막에도 적용된다): 인점이 장면
+    # 전환 뒤 0.5초 안이면 전환 첫 프레임으로, 아웃점이 전환 앞 0.5초
+    # 안이면 전환 2프레임 전으로 당긴다.
+    if (profile.get("shot_change") or {}).get("applied"):
+        from .media import detect_shot_changes
+        from .timing import suggest_shot_snap
+        shots = detect_shot_changes(video)
+        say(f"장면 전환 {len(shots)}곳")
+        suggestions += suggest_shot_snap(events, shots, fps)
+
+    moved = apply_spotting(events, suggestions)
     if moved:
         say(f"인점·아웃점 {moved}곳을 말소리에 맞춤")
     stats["spotting_applied"] = moved

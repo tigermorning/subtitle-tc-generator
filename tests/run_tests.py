@@ -851,20 +851,28 @@ from checker.timing import suggest_shot_snap  # noqa: E402
 
 shots = [10000, 20000]
 
-sug = suggest_shot_snap([Event(1, 9800, 12000, "걸침")], shots, fps)
-ok("전환에 어설프게 걸친 인점을 잡는다",
+# **방향이 있다**(넷플릭스 공식 문서, 2026-08-28 확인). 대칭이 아니다 —
+# 전환 뒤에 시작하는 인점, 전환 앞에서 끝나는 아웃점만 당긴다.
+sug = suggest_shot_snap([Event(1, 10200, 12000, "전환 뒤 시작")], shots, fps)
+ok("전환 뒤 0.5초 이내에 시작하면 전환 첫 프레임으로 당긴다",
    sug and sug[0].field_name == "start_ms" and sug[0].suggested == 10000, str(sug))
-ok("딱 붙이라고 말한다", "딱 붙이거나" in sug[0].reason)
+ok("전환 첫 프레임으로 당기라고 말한다", "첫 프레임" in sug[0].reason)
+
+ok("전환 앞에서 시작하면(자연스러운 배치) 건드리지 않는다 — 규정이 다루지 않는 경우",
+   not suggest_shot_snap([Event(1, 9800, 12000, "전환 앞 시작")], shots, fps))
 
 ok("이미 붙어 있으면 조용하다",
    not suggest_shot_snap([Event(1, 10000, 15000, "딱")], shots, fps))
 ok("멀리 떨어져 있으면 조용하다",
    not suggest_shot_snap([Event(1, 5000, 8000, "멀리")], shots, fps))
 
-sug = suggest_shot_snap([Event(1, 3000, 9700, "아웃점 걸침")], shots, fps)
+sug = suggest_shot_snap([Event(1, 3000, 9700, "전환 앞 끝")], shots, fps)
 ends = [s for s in sug if s.field_name == "end_ms"]
-ok("전환에 걸친 아웃점은 2프레임 앞으로 제안한다",
+ok("전환 앞 0.5초 이내에 끝나면 전환 2프레임 앞으로 당긴다",
    ends and ends[0].suggested < 10000, str(sug))
+
+ok("전환 뒤에서 끝나면(자연스러운 배치) 건드리지 않는다 — 규정이 다루지 않는 경우",
+   not suggest_shot_snap([Event(1, 3000, 10300, "전환 뒤 끝")], shots, fps))
 
 ok("전환이 없으면 아무 말도 하지 않는다",
    suggest_shot_snap([Event(1, 0, 3000, "대사")], [], fps) == [])
