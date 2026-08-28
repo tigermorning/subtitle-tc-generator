@@ -844,6 +844,20 @@ original = Event(1, 3000, 5000, "대사")
 suggest_spotting([original], speech, fps)
 ok("제안은 원본을 바꾸지 않는다", original.start_ms == 3000 and original.end_ms == 5000)
 
+# **인점이 이전 자막 끝보다 앞으로 끌려가지 않는다.** 대칭인 상한(다음 인점을
+# 안 넘는 것)은 있었는데 하한이 없었다 — 예능처럼 끊김 없이 오래 이어지는
+# 대화에서 VAD가 수십 초짜리 말소리 구간 하나로 묶으면, 그 구간에 걸친 모든
+# 자막이 구간 맨 처음(수만 ms 전)으로 끌려갔다(실측 2026-08-28, 예능A
+# 15회 — #81은 33,549ms, #358은 24,158ms 전으로 계산됐는데 둘 다 직전
+# 자막과 거의 붙어 있는 자리였다).
+long_blob = [(1000, 30000)]   # 29초짜리 하나로 묶인 말소리 구간
+two_cues = [Event(1, 1000, 5000, "첫 자막"), Event(2, 5050, 9000, "둘째 자막")]
+sug = suggest_spotting(two_cues, long_blob, fps)
+second_start = next((s for s in sug if s.event_index == 2 and s.field_name == "start_ms"), None)
+ok("긴 말소리 구간이라도 이전 자막 끝보다 훨씬 전으로는 안 당긴다"
+   "(2~3프레임 여유는 남는다)",
+   second_start is None or second_start.suggested >= 5000 - 200, str(sug))
+
 
 # --- 장면 전환 스냅 ----------------------------------------------------------
 

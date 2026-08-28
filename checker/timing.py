@@ -297,6 +297,17 @@ def suggest_spotting(events: list[Event], speech: list[tuple[int, int]], fps: fl
         # 다음 자막의 인점을 넘어서까지 늘리지 않는다.
         # 작업자 자료: "음성이 겹치는 경우에는 다음 화자의 인점 우선".
         next_start = ordered[i + 1].start_ms if i + 1 < len(ordered) else None
+        # **이전 자막의 아웃점보다 앞으로 당기지 않는다.** 대칭인 상한
+        # (다음 인점)은 있었는데 이 하한이 없었다 — 예능처럼 끊김 없이
+        # 오래 이어지는 대화에서 VAD가 수십 초짜리 말소리 구간 하나로
+        # 묶으면, 그 구간에 걸친 **모든** 자막이 구간 맨 처음(수만 ms
+        # 전)으로 끌려갔다(실측 2026-08-28, 예능A 15회 — #81은
+        # 33,549ms, #358은 24,158ms 전으로 계산됐다. 둘 다 직전 자막과
+        # 거의 붙어 있는 자리였는데 그 사실을 전혀 안 봤다). 결과적으로
+        # `max_shift_ms` 상한에 걸려 조용히 버려지긴 했지만, 그 상한이
+        # 진짜 필요한 작은 보정(2~3초짜리 whisper 타임스탬프 오차)까지
+        # 같은 무더기로 묻어 버렸다.
+        prev_end = ordered[i - 1].end_ms if i > 0 else None
 
         # 이 자막과 겹치는 말소리 구간
         overlapping = [(s, e) for s, e in speech if e > ev.start_ms and s < ev.end_ms]
@@ -307,6 +318,8 @@ def suggest_spotting(events: list[Event], speech: list[tuple[int, int]], fps: fl
             continue
 
         voice_start = min(s for s, _ in overlapping)
+        if prev_end is not None:
+            voice_start = max(voice_start, prev_end)
         voice_end = max(e for _, e in overlapping)
         if next_start is not None:
             voice_end = min(voice_end, next_start)
