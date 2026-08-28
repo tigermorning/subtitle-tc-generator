@@ -3,6 +3,32 @@
 이 파일은 **다시 설명하지 않기 위해** 있다. 아래 것들은 이미 한 번씩 틀렸다가
 사용자 지적으로 바로잡은 것들이다. 새 기능을 붙일 때 여기부터 읽는다.
 
+## 0. "우리 교정기"는 하나가 아니다 — 리포 경로부터 확인한다
+
+"교정기"라는 말이 가리키는 프로젝트가 **셋** 있다. 하나로 착각해 다른 리포 코드로
+답한 적이 있다(2026-08-28, 업로드 파일 크기 제한 질문 — 이 리포에는 없는 기능인데
+있다고 잘못 단정했다가, 실제로는 옆 리포에 있는 실재 기능이었다).
+
+    이 리포(지금 여기)   C:\Users\user\Documents\subtitle-tc-generator
+                        자막 및 TC 생성기. 로컬 데스크톱(PySide6) + CLI.
+                        전사·대조·번역·재분할·글자수 검사 전 과정. 업로드 API 없음
+                        (QFileDialog로 로컬 파일 직접 연다 — 크기 제한 개념 자체가 없다)
+
+    별개 리포 1          C:\Users\user\Documents\korean-subtitle-corrector
+                        한국어 맞춤법·띄어쓰기 교정기. FastAPI 웹 서버(subtitle_corrector/api.py)
+                        + 정적 프런트(static/index.html). 업로드 크기 제한 **실재**:
+                        일반 파일 1MB, PDF 30MB(api.py의 _MAX_UPLOAD_BYTES·_MAX_PDF_BYTES)
+
+    별개 리포 2          C:\Users\user\Documents\korean-corrector-guide-bot
+                        위 korean-subtitle-corrector의 사용법을 안내하는 RAG 챗봇.
+                        코드가 아니라 **문서 봇**이다 — data/chunks/*.json을 BM25+임베딩
+                        하이브리드 검색(lib/search.js)으로 인용해 답한다. 스크린샷으로
+                        보이는 "칩 + 점수" UI가 이 봇이다
+
+**"교정기"라고만 말하면 먼저 어느 리포인지 물어보거나, 질문 안의 단서(업로드 API,
+CLI `main.py`, PySide6 창, 재분할·스포팅 등)로 구분한다.** 확신 없이 이 리포 코드만
+보고 "그런 기능 없다"고 단정하지 않는다 — 없는 게 아니라 다른 리포에 있을 수 있다.
+
 ## 1. 단계 순서를 섞지 않는다
 
     ① 전사        글자 수를 무시하고 자연스럽게        (transcribe.py)
