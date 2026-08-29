@@ -14,7 +14,7 @@ from __future__ import annotations
 import re
 
 from .model import Event
-from .text import count_chars, chars_per_second, strip_tags
+from .text import count_chars, chars_per_second, strip_tags, has_hangul, is_foreign_language_text
 
 REGISTRY: dict[str, callable] = {}
 
@@ -632,6 +632,31 @@ def _gap(events: list[Event], ctx: dict):
             out.append((cur.index, None, f"앞 자막과 {-gap}ms 겹칩니다"))
         elif gap < min_gap:
             out.append((cur.index, None, f"간격 {gap}ms — 최소 {min_gap:.0f}ms"))
+    return out
+
+
+@doc_check("foreign_return_marker")
+def _foreign_return(events: list[Event], ctx: dict):
+    """외국어 대사 구간 뒤 한국어로 돌아오는 첫 자막에 `[한국어]` 표시가 있는지.
+
+    프로파일의 `speaker_id.foreign_return_marker`가 켜져 있을 때만 돈다(디즈니
+    SDH 실무 기준 — 2026-08-30, 드라마B E01~05에서 한국어·일본어 대사가
+    섞여 나오는 걸 실제로 보고 구현). 효과음·숫자만 있는 자막(글자가 없는 자막)은
+    언어 판정에서 빠진다 — 그 자막으로 전환 상태를 바꾸지 않는다.
+    """
+    speaker_id_cfg = (ctx.get("profile") or {}).get("speaker_id") or {}
+    if not speaker_id_cfg.get("foreign_return_marker"):
+        return []
+    out = []
+    prev_foreign = False
+    for ev in sorted(events, key=lambda e: e.start_ms):
+        text = ev.text
+        foreign = is_foreign_language_text(text)
+        korean = has_hangul(strip_tags(text))
+        if prev_foreign and korean and "[한국어]" not in text:
+            out.append((ev.index, None, "직전 자막이 외국어 대사였습니다"))
+        if foreign or korean:
+            prev_foreign = foreign
     return out
 
 

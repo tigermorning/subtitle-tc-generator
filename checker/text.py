@@ -32,6 +32,38 @@ def is_cjk(ch: str) -> bool:
     return any(lo <= code <= hi for lo, hi in _CJK_RANGES)
 
 
+# 한글만 골라내는 범위. `_CJK_RANGES`는 글자 수 계산용(한글도 CJK로 1자 취급)이라
+# 언어 판정에는 못 쓴다 — 일본어 가나·한자도 같이 걸린다.
+_HANGUL_RANGES = (
+    (0x1100, 0x11FF),  # 한글 자모
+    (0x3130, 0x318F),  # 한글 호환 자모
+    (0xA960, 0xA97F),  # 한글 자모 확장-A
+    (0xAC00, 0xD7A3),  # 한글 음절
+    (0xD7B0, 0xD7FF),  # 한글 자모 확장-B
+)
+
+
+def is_hangul(ch: str) -> bool:
+    code = ord(ch)
+    return any(lo <= code <= hi for lo, hi in _HANGUL_RANGES)
+
+
+def has_hangul(text: str) -> bool:
+    return any(is_hangul(ch) for ch in strip_tags(text))
+
+
+def is_foreign_language_text(text: str) -> bool:
+    """대사가 한글 없이 다른 문자 체계(가나·한자·라틴 등)로만 됐으면 참이다.
+
+    화면 효과음(`[한숨]`)이나 숫자만 있는 자막은 언어 판정 대상이 아니다 — 글자
+    (`str.isalpha()`)가 하나도 없으면 거짓을 돌려준다.
+    """
+    stripped = strip_tags(text)
+    if has_hangul(stripped):
+        return False
+    return any(ch.isalpha() for ch in stripped)
+
+
 def strip_tags(text: str) -> str:
     return TAG_RE.sub("", text)
 
