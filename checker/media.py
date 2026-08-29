@@ -167,6 +167,44 @@ def probe(video: Path) -> MediaInfo:
     )
 
 
+def list_subtitle_streams(video: Path) -> list[dict]:
+    """영상 컨테이너에 이미 박혀 있는 자막 스트림을 나열한다.
+
+    **`--generate` 전에 반드시 본다.** 2026-08-30, 드라마B E01~05에
+    디즈니 정식 한국어 SDH 자막 트랙이 이미 있었는데 이걸 안 보고 whisper부터
+    돌렸다 — 이미 있는 정답을 볼 생각을 안 하고 새로 지어낸 꼴이다(규칙 17).
+    여기서 찾은 것을 정답으로 자동 채택하지 않는다 — 있다는 사실만 알리고,
+    실제로 쓸지는 `정답지-학습` 스킬로 사람이 확인한다.
+    """
+    out = subprocess.run(
+        [_find("ffprobe"), "-v", "error", "-select_streams", "s",
+         "-show_entries",
+         "stream=index,codec_name:stream_tags=language,title:stream_disposition=forced",
+         "-of", "json", _as_tool_path(video)],
+        capture_output=True, text=True, check=False,
+        encoding="utf-8", errors="replace",
+    )
+    if out.returncode != 0 or not out.stdout:
+        return []
+    import json
+    try:
+        data = json.loads(out.stdout)
+    except json.JSONDecodeError:
+        return []
+    streams = []
+    for s in data.get("streams", []):
+        tags = s.get("tags") or {}
+        disp = s.get("disposition") or {}
+        streams.append({
+            "index": s.get("index"),
+            "codec": s.get("codec_name"),
+            "language": tags.get("language"),
+            "title": tags.get("title"),
+            "forced": bool(disp.get("forced")),
+        })
+    return streams
+
+
 SILENCE_START = re.compile(r"silence_start:\s*(-?[\d.]+)")
 SILENCE_END = re.compile(r"silence_end:\s*(-?[\d.]+)")
 

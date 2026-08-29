@@ -803,6 +803,19 @@ def _generate_mode(args, ap) -> int:
     if not args.video.is_file():
         ap.error(f"영상을 찾지 못했습니다: {args.video}")
 
+    from .media import list_subtitle_streams
+    existing_subs = list_subtitle_streams(args.video)
+    if existing_subs:
+        desc = ", ".join(
+            f"#{s['index']}({s['language'] or '?'}"
+            f"{'·forced' if s['forced'] else ''}{'·' + s['title'] if s['title'] else ''})"
+            for s in existing_subs
+        )
+        print(f"경고: 이 영상에 자막 스트림이 이미 {len(existing_subs)}개 있습니다: {desc}",
+              file=sys.stderr)
+        print("      이미 있는 자막이 정답일 수 있다 — whisper로 새로 만들기 전에"
+              " `정답지-학습` 스킬로 먼저 추출해 확인하는 것을 권합니다.", file=sys.stderr)
+
     profile = _genre.apply(
         (load_profile_file(args.profile) if args.profile
          else load_profile(args.platform, args.lang, args.kind)),
