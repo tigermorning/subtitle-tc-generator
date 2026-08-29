@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from statistics import median
@@ -182,6 +183,38 @@ def summarize(comparison: Comparison, fps: float = 23.976) -> dict:
         },
         "text_similarity_median": round(median(text_scores), 2) if text_scores else None,
     }
+
+
+def genuine_pairs(comparison: Comparison, min_similarity: float = 0.5,
+                   min_chars_for_partial: int = 20) -> list[Pair]:
+    """시간이 가깝다고 짝지어진 것 중 **내용도 진짜 같은** 짝만 남긴다.
+
+    `compare()`의 짝짓기는 시간이 가까운 것 중 제일 비슷한 걸 고르는 최근접
+    방식이라, 우리가 정답보다 자막을 훨씬 적게(또는 다르게 쪼개서) 만들면 전혀
+    다른 대사끼리 시간만 맞아서 짝지어진다(2026-08-29, 예능A 15·16회 진단에서
+    관측 — 짝지음 통계 전체가 이 가짜 짝에 끌려가 인점·아웃점 편향이 실제보다
+    수백~수천ms 부풀어 보였다). 세 조건으로 이 가짜 짝을 걸러낸다:
+
+        화면자막(대문자·숫자·부호로만 된 정답)   우리가 원래 못 만드는 것이므로 뺀다
+        유사도가 낮다(`min_similarity` 미만)      다른 대사가 시간만 가까웠던 것으로 본다
+        정답이 짧은데(20자 미만) 완전히 같지 않다   흔한 짧은 말("네", "예")은 유사도가
+                                                    높아도 다른 자리와 헷갈리기 쉬워서 더 엄격히 본다
+
+    걸러낸 뒤 남은 짝만 인점·아웃점 편향을 다시 재야 진짜 값이 나온다(같은 진단에서
+    실측: 필터 전 중앙값 수백~1500ms대였던 것이 필터 후 튀지 않는 값으로 좁혀짐).
+    """
+    out = []
+    for p in comparison.matched:
+        text = p.truth.text
+        if not re.search(r"[가-힣]", text or ""):
+            continue
+        sim = p.text_similarity
+        if sim is None or sim < min_similarity:
+            continue
+        if len(text.strip()) < min_chars_for_partial and sim < 1.0:
+            continue
+        out.append(p)
+    return out
 
 
 def report(comparison: Comparison, fps: float = 23.976, show: int = 12) -> str:

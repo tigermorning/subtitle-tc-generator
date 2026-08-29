@@ -172,16 +172,27 @@ def _ascii_model_path(model_path: Path, work: Path) -> str:
 
 def transcribe(video: Path, language: str = "auto", model: str | None = None,
                use_gpu: bool = True, progress=None,
-               keep: Path | None = None) -> list[Segment]:
+               keep: Path | None = None, cache: Path | None = None) -> list[Segment]:
     """영상에서 말소리를 받아 적는다. 세그먼트 목록을 돌려준다.
 
     `keep`을 주면 전사 SRT를 그 자리에 남긴다 — 뒤 단계가 틀렸을 때 전사까지
     다시 돌리지 않기 위해서다(긴 영상에서 이 차이가 크다).
+
+    `cache`를 주면 **있으면 읽고, 없으면 전사한 뒤 만든다.** 코퍼스 재검사·상한값
+    재조정(`tools/calibrate_regroup.py`)처럼 같은 영상을 여러 번 다시 훑을 때
+    whisper를 매번 새로 돌리지 않기 위해서다(2026-08-29, 예능A 15·16회
+    상한값 스윕에서 매번 수 분씩 걸려 실측함). `keep`과 달리 **이미 있으면 절대
+    덮어쓰지 않는다** — 디버그용 사본이 아니라 재사용 대상이기 때문이다.
     """
     say = progress or (lambda _m: None)
     video = Path(video)
     if not video.is_file():
         raise MediaToolUnavailable(f"영상을 찾지 못했습니다: {video}")
+
+    if cache and Path(cache).is_file():
+        say(f"전사 캐시를 재사용합니다 — {cache}")
+        return _parse_srt(Path(cache).read_text(encoding="utf-8", errors="replace"))
+
     model_path = find_model(model)
 
     # 작업 폴더는 영상 옆에 둔다 — 상대 경로가 짧아지고 드라이브가 같아진다.
@@ -209,6 +220,9 @@ def transcribe(video: Path, language: str = "auto", model: str | None = None,
         raw = srt_path.read_text(encoding="utf-8", errors="replace")
         if keep:
             Path(keep).write_text(raw, encoding="utf-8")
+        if cache:
+            Path(cache).parent.mkdir(parents=True, exist_ok=True)
+            Path(cache).write_text(raw, encoding="utf-8")
     finally:
         shutil.rmtree(work, ignore_errors=True)
 

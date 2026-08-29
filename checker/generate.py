@@ -103,6 +103,7 @@ def generate(video: Path, profile: dict, script: Path | None = None,
              speech_method: str = "auto", diarize: bool = False,
              passes: int = 1, max_passes: int = 0, settle_at: int = 0,
              cast: dict[str, str] | None = None,
+             transcript_cache: Path | None = None,
              progress=None) -> Draft:
     """영상에서 자막 초안을 만든다.
 
@@ -119,6 +120,10 @@ def generate(video: Path, profile: dict, script: Path | None = None,
     2차·3차를 건너뛴 적이 있다 — `--passes`가 `--generate`가 아닌 다른 모드
     (받은 TC에 번역만 얹는 경로)에만 연결돼 있었다. 이 함수 자체에 붙여서
     다시는 그 경로 분기에 좌우되지 않게 한다.
+
+    `transcript_cache`를 주면 whisper 전사를 캐시에서 재사용한다(있으면 읽고,
+    없으면 전사 후 만든다) — `checker.transcribe.transcribe()`의 `cache`와 같다.
+    같은 영상을 상한값 재조정 등으로 여러 번 다시 돌릴 때 쓴다.
     """
     from .transcribe import transcribe   # ffmpeg이 없어도 이 모듈은 import 되게
 
@@ -138,7 +143,8 @@ def generate(video: Path, profile: dict, script: Path | None = None,
     say(f"말소리 구간 {len(speech)}개 ({'모델' if how == 'vad' else '음량'})")
 
     segments = transcribe(video, language=language, model=model,
-                          use_gpu=use_gpu, progress=say, keep=keep_transcript)
+                          use_gpu=use_gpu, progress=say, keep=keep_transcript,
+                          cache=transcript_cache)
     if not segments:
         return Draft([], [], {"transcript": 0})
 
