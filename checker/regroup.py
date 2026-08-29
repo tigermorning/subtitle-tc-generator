@@ -158,7 +158,7 @@ def collapse_internal_duplicates(events: list[Event],
 
 
 REACTION_MAX_GAP_MS = 1500
-REACTION_MAX_CHARS = 15
+REACTION_MAX_CHARS = 20
 REACTION_MIN_SIMILARITY = 0.5
 
 
@@ -176,6 +176,15 @@ def compress_reaction_runs(events: list[Event], max_gap_ms: int = REACTION_MAX_G
     9~16묶음씩 나옴). `merge_cues()`의 `max_gap_ms`(보통 100~500ms)로는 이 간격을
     못 잡는다 — 반응 사이 간격이 그보다 넓을 때가 많아서 일부러 더 너그러운
     상한(`max_gap_ms` 여기서는 기본 1500ms)을 따로 둔다.
+
+    **`max_chars` 20자(2026-08-30 15/16회 2차 진단으로 조정, 원래 15자)**:
+    16회에서 "이 노래는 너무 좋지 않나요?"(16자)가 정확히 2000ms씩 4번, 간격
+    0ms로 완전히 똑같이 반복된 자리를 발견했다 — 사람 말이 아니라 whisper가
+    노래 구간을 반복 오인식한 환각으로 보인다(예능A 15·16회에서 하나뿐이라
+    아직 다른 작품 확인은 없음). 15자 상한에 걸려 안 잡혔던 사례라 20자로
+    넓혔다 — 글자 수가 길수록 우연히 비슷할 확률은 오히려 낮아지므로(짧은
+    "네"·"아"가 우연히 겹칠 확률이 긴 문장보다 높다) 상한을 넓히는 쪽이
+    안전하다.
 
     **텍스트는 지어내지 않는다(규칙 4).** 진짜 정답(예: "- [서연] 아, 맞다, 맞다 /
     - [우재] 그렇지 않아? 아")은 SDH 편집자가 내용을 다시 쓴 것으로 보이는데,
