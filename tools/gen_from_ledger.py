@@ -83,8 +83,8 @@ def main() -> int:
         print(f"[오류] {args.work}에 source_lang이 없습니다 — 영상 속 실제 발화 언어를 원장에 적어야 합니다.",
               file=sys.stderr)
         return 2
-    out = args.out or (ROOT / ".tmp" / "최종초안" /
-                        f"{args.work}_{args.episode}회_{lang}{args.kind}_초안.srt")
+    out = (args.out or (ROOT / ".tmp" / "최종초안" /
+                        f"{args.work}_{args.episode}회_{lang}{args.kind}_초안.srt")).resolve()
     out.parent.mkdir(parents=True, exist_ok=True)
 
     cmd = [

@@ -36,11 +36,32 @@ SENTENCE_END = re.compile(r"(?<=[.?!。？！])\s+")
 # lookbehind로 못 쓴다 — 어절을 잡아 그 끝을 끊는 자리로 삼는다.
 CLAUSE_END = re.compile(r"[,;、]\s+|(?:고|며|는데|지만|면서|다가|거나)\s+")
 
+# **영어 약어 뒤 마침표는 문장 끝이 아니다.** SENTENCE_END는 마침표만 보고 판단해서
+# "Mr. Cho" 사이를 문장 경계로 오판한다 — 2026-08-30, 예능A 15·16회 영어 번역
+# 실측으로 발견(호칭이 이름과 갈라져 "Mr."만 자막 하나로 남는 사고, 15회 5건·16회
+# 1건). `force_sentence_split`(예능 장르, 2026-08-27 추가)이 켜지면 글자 수가
+# 남아도 이 자리를 무조건 자르기 때문에 특히 잘 드러난다. 물음표·느낌표는 약어에
+# 안 쓰이므로 마침표만 검사한다.
+_ABBREVIATIONS = {
+    "mr", "mrs", "ms", "dr", "prof", "jr", "sr", "st", "rev", "capt", "lt",
+    "col", "gen", "sgt", "fr", "mt", "vs", "etc", "no", "vol", "approx",
+}
+
+
+def _is_real_sentence_end(text: str, punct_pos: int) -> bool:
+    """`text[punct_pos]`가 진짜 문장 끝인지 — 영어 약어 뒤 마침표는 아니다."""
+    if text[punct_pos] != ".":
+        return True
+    word = re.search(r"([A-Za-z]+)$", text[:punct_pos])
+    return not (word and word.group(1).lower() in _ABBREVIATIONS)
+
 
 def _split_points(text: str) -> list[int]:
     """끊을 수 있는 자리를 우선순위 순으로 돌려준다(문자 위치)."""
     points: list[tuple[int, int]] = []   # (우선순위, 위치)
     for m in SENTENCE_END.finditer(text):
+        if not _is_real_sentence_end(text, m.start() - 1):
+            continue
         points.append((0, m.start()))
     for m in CLAUSE_END.finditer(text):
         # 부호·어미 **뒤**에서 끊는다
@@ -70,7 +91,8 @@ def split_text(text: str, max_chars: float, weights: dict | None = None,
         return []
 
     if force_sentence_split:
-        internal = [m.start() for m in SENTENCE_END.finditer(text)]
+        internal = [m.start() for m in SENTENCE_END.finditer(text)
+                   if _is_real_sentence_end(text, m.start() - 1)]
         if internal:
             pos = internal[0]
             left, right = text[:pos].strip(), text[pos:].strip()
