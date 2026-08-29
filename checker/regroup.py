@@ -29,6 +29,8 @@ whisper는 **말이 잠깐 멎을 때마다** 끊는다. 사람이 잡는 자막
 
 from __future__ import annotations
 
+import re
+
 from .model import Event
 
 MAX_DURATION_MS = 4000
@@ -100,6 +102,59 @@ def limits_from_profile(profile: dict) -> tuple[int, int]:
     timecode = (profile or {}).get("timecode") or {}
     return (int(timecode.get("merge_max_ms") or MAX_DURATION_MS),
             int(timecode.get("merge_max_gap_ms") or MAX_GAP_MS))
+
+
+INTERNAL_DUPLICATE_MIN_SIMILARITY = 0.85
+
+
+def collapse_internal_duplicates(events: list[Event],
+                                 min_similarity: float = INTERNAL_DUPLICATE_MIN_SIMILARITY) -> list[Event]:
+    """자막 한 덩어리 **안**에 같은 말이 겹쳐 들어온 자리를 하나로 줄인다.
+
+    **`compress_reaction_runs`와 다른 문제다.** 그건 서로 다른 이벤트(자막
+    후보) 여러 개가 반복될 때를 다룬다. 이건 whisper가 애초에 **이벤트 하나의
+    텍스트 안**에 같은 말을 두 번(또는 그 이상) 담아서 내놓는 경우다 —
+    2026-08-30, 예능A 15·16회 원시 세그먼트에서 19곳 발견: "안녕하세요.
+    안녕하세요.", "감사합니다. 감사합니다.", "-미스터 조는 넌 아니야? -미스터
+    조는 넌 아니야?" 등. 화자 둘이 거의 동시에 같은 말을 했거나 한 화자가
+    강조로 반복한 것으로 보인다(다수가 "-"로 시작해 whisper 자신도 이걸 두
+    발화로 인식한 흔적이 있다). 시간대는 하나인데 텍스트만 두 번 들어와 있어,
+    그대로 두면 `resplit.py`가 문장부호 기준으로 잘라 정답에 없는 자막을
+    하나 더 만들어낸다(예: "이건 어때? 이건 어때?" -> 자막 2개).
+
+    **텍스트는 지어내지 않는다(규칙 4)** — 겹친 것 중 한 벌만 남기지, 새로
+    쓰지 않는다. 시간대(`start_ms`~`end_ms`)도 원래 그대로 둔다 — 어느 절반이
+    "진짜" 시간인지 알 근거가 없어서 손대지 않는다.
+
+    **재귀적으로 적용한다.** "올라! 올라! 올라! 올라! 올라! 올라!"처럼 세 번
+    이상 겹치면 한 번에 반으로만 줄고 끝난다(2026-08-30 실측) — 더 줄일 자리가
+    없을 때까지 반복한다.
+    """
+    from .align import similarity
+
+    def _collapse_once(text: str) -> tuple[str, bool]:
+        best = None
+        for m in re.finditer(r"\s+", text):
+            pos = m.start()
+            left, right = text[:pos].strip(), text[pos:].strip()
+            if not left or not right:
+                continue
+            sim = similarity(left, right)
+            if sim >= min_similarity:
+                balance = 1 - abs(len(left) - len(right)) / max(len(text), 1)
+                score = sim + balance
+                if best is None or score > best[0]:
+                    best = (score, left)
+        return (best[1], True) if best else (text, False)
+
+    out = []
+    for e in events:
+        text = e.text.strip()
+        changed = True
+        while changed:
+            text, changed = _collapse_once(text)
+        out.append(Event(len(out) + 1, e.start_ms, e.end_ms, text))
+    return out
 
 
 REACTION_MAX_GAP_MS = 1500

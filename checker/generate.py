@@ -219,9 +219,15 @@ def generate(video: Path, profile: dict, script: Path | None = None,
         # 적어 두었다 — 전문가 타임코드와 대조해 값을 골랐다).
         #
         # 대본이 있으면 하지 않는다. 그때는 대본의 줄이 곧 자막 단위다.
-        from .regroup import limits_from_profile, merge_cues, compress_reaction_runs
+        from .regroup import (limits_from_profile, merge_cues, compress_reaction_runs,
+                              collapse_internal_duplicates)
         raw = [Event(i, s.start_ms, s.end_ms, s.text) for i, s in enumerate(segments, 1)]
         max_ms, max_gap = limits_from_profile(profile)
+
+        # **자막 하나 안에 같은 말이 겹쳐 들어온 자리부터 정리한다.** 이건
+        # compress_reaction_runs(자막 여러 개가 반복될 때)보다 먼저다 — 원인이
+        # 다르다(regroup.py의 collapse_internal_duplicates 문서 참고).
+        raw = collapse_internal_duplicates(raw)
 
         # **짧은 반응이 연달아 겹치는 자리를 먼저 압축한다.** `merge_cues`보다
         # 먼저 돈다 — 순서가 반대면 `merge_cues`가 짧은 반응 몇 개를 이미 거칠게
