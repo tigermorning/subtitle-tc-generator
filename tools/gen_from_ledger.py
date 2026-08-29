@@ -72,6 +72,10 @@ def main() -> int:
               f"(있는 것: {', '.join(kinds.keys()) or '없음'})", file=sys.stderr)
         return 2
 
+    if not ep.get("video"):
+        print(f"[오류] {args.work} {args.episode}회 영상이 원장에 없습니다(삭제됨) — "
+              f"재진단 불가(규칙 13).", file=sys.stderr)
+        return 2
     video = ROOT / ep["video"]
     if not video.is_file():
         print(f"[오류] 영상을 찾지 못했습니다: {video}", file=sys.stderr)
