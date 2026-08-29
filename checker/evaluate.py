@@ -202,11 +202,18 @@ def genuine_pairs(comparison: Comparison, min_similarity: float = 0.5,
 
     걸러낸 뒤 남은 짝만 인점·아웃점 편향을 다시 재야 진짜 값이 나온다(같은 진단에서
     실측: 필터 전 중앙값 수백~1500ms대였던 것이 필터 후 튀지 않는 값으로 좁혀짐).
+
+    **한국어 전용이 아니다.** 처음 버전은 "한글이 없으면 화면자막"으로 판단해서
+    영어 번역(`kind: translation`) 정답을 전부 걸러버리는 버그가 있었다
+    (2026-08-30, `tools/calibrate_regroup.py`를 예능A 영어 번역 정답에 처음
+    돌려서 발견 — genuine 짝이 0개로 나옴). 화면자막은 보통 소문자 없이
+    대문자·숫자·부호로만 이루어지므로("DISTRIBUTED BY NETFLIX" 같은 예), 한글도
+    영어 소문자도 없는 경우로 판정을 바꿨다.
     """
     out = []
     for p in comparison.matched:
-        text = p.truth.text
-        if not re.search(r"[가-힣]", text or ""):
+        text = p.truth.text or ""
+        if not (re.search(r"[가-힣]", text) or re.search(r"[a-z]", text)):
             continue
         sim = p.text_similarity
         if sim is None or sim < min_similarity:

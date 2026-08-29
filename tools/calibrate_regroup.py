@@ -14,6 +14,11 @@
 정답지(`truth`)와 원본 영상(`video`)이 **둘 다** 있는 작품/회차만 대상이다 —
 `docs/corpus_status.yaml`에 이미 없는 회차는 이 도구가 스스로 찾지 않는다(정답지
 학습 절차·규칙 11에 따라 사람이 원장에 먼저 등록해야 한다).
+
+**정답 언어가 발화 언어와 같은 kind만 다룬다**(예: 한국어 SDH 정답 vs 한국어
+발화). 번역 kind(예: 영어 번역 정답)는 번역 전 원시 전사를 직접 비교하는 게
+무의미해서 건너뛴다 — 번역까지 거친 결과로 비교하려면 이 가벼운 스윕이 아니라
+`checker --generate --translate`+`--against`를 따로 돌려야 한다.
 """
 
 from __future__ import annotations
@@ -51,24 +56,47 @@ def load_ledger() -> dict:
 
 
 def collect_targets(data: dict, only_genre: str | None) -> list[dict]:
+    """(작품, 회차, kind) 조합마다 하나씩 — 한 회차에 kind(sdh/translation)가
+    여럿이면 같은 raw whisper 세그먼트(같은 영상, 같은 source_lang)를 서로
+    다른 정답과 각각 대조한다(schema_version 2, 2026-08-30)."""
     out = []
     for work_name, work in (data.get("works") or {}).items():
         genre = work.get("genre")
         if only_genre and genre != only_genre:
             continue
+        source_lang = work.get("source_lang")
         for ep_name, ep in (work.get("episodes") or {}).items():
             video = ROOT / ep["video"] if ep.get("video") else None
-            truth = ROOT / ep["truth"] if ep.get("truth") else None
-            if not (video and video.is_file() and truth and truth.is_file()):
+            if not (video and video.is_file() and source_lang):
                 continue
-            out.append({"work": work_name, "episode": ep_name, "genre": genre,
-                        "video": video, "truth": truth})
+            for kind_name, kind_entry in (ep.get("kinds") or {}).items():
+                truth = ROOT / kind_entry["truth"] if kind_entry.get("truth") else None
+                if not (truth and truth.is_file()):
+                    continue
+                if kind_entry.get("lang") != source_lang:
+                    # 이 스윕은 **번역 전** 원시 전사(항상 source_lang)를 정답과
+                    # 직접 비교한다. 정답이 다른 언어(예: translation kind의
+                    # 영어)면 글자가 애초에 안 맞아서 유사도 자체가 무의미하다
+                    # (2026-08-30 실측: 예능A 15회 translation에서 "genuine"
+                    # 3개가 나왔는데 전부 우연히 영어로 말한 코드스위칭 구간이었다
+                    # — 번역 품질과 무관한 잡음). 번역 kind를 실제로 검증하려면
+                    # 번역 단계까지 돌려야 하는데 그건 이 가벼운 스윕의 목적을
+                    # 벗어난다(비용이 크다) — 그래서 여기선 건너뛴다.
+                    print(f"[건너뜀] {work_name} {ep_name}회 [{kind_name}]: "
+                          f"정답 언어({kind_entry.get('lang')})가 발화 언어"
+                          f"({source_lang})와 달라 원시 전사와 직접 비교 못 함")
+                    continue
+                out.append({"work": work_name, "episode": ep_name, "kind": kind_name,
+                            "genre": genre, "video": video, "truth": truth,
+                            "source_lang": source_lang})
     return out
 
 
 def raw_segments(target: dict) -> list[Event]:
+    # 캐시는 (작품, 회차) 단위다 — kind가 달라도 같은 영상·같은 발화 언어라
+    # whisper 전사 결과는 같다(regroup은 kind별 truth와만 비교, 전사는 공유).
     cache = CACHE_ROOT / target["work"] / f"{target['episode']}.srt"
-    segments = transcribe(target["video"], language="ko", use_gpu=True,
+    segments = transcribe(target["video"], language=target["source_lang"], use_gpu=True,
                           progress=print, cache=cache)
     return [Event(i, s.start_ms, s.end_ms, s.text) for i, s in enumerate(segments, 1)]
 
@@ -105,7 +133,7 @@ def main() -> int:
 
     by_genre: dict[str, list] = {}
     for t in targets:
-        print(f"=== {t['work']} {t['episode']}회 (장르: {t['genre']}) ===")
+        print(f"=== {t['work']} {t['episode']}회 [{t['kind']}] (장르: {t['genre']}) ===")
         result = sweep_one(t)
         if result is None:
             print("  진짜 짝을 하나도 못 찾았습니다 — 건너뜁니다.")
