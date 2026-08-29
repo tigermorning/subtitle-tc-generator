@@ -107,14 +107,25 @@ def main() -> int:
     if result.returncode != 0:
         return result.returncode
 
-    pipeline = kind_entry.setdefault("pipeline", {})
-    pipeline["tc_generated"] = {
+    # **저장 직전에 원장을 다시 읽는다.** --generate는 몇 분씩 걸린다 — 그동안
+    # 사람이 원장의 다른 자리(다른 회차·다른 kind의 tc_verified 등)를 손으로
+    # 고쳤을 수 있다. 시작할 때 읽어둔 `data`를 그대로 저장하면 그 사이의 손
+    # 수정을 통째로 덮어써 지운다(2026-08-30 실측 — 예능A 15회 sdh 생성
+    # 도중에 고친 16회 tc_verified·양쪽 translation known_issues가 저장 시점에
+    # 사라졌었다). 그래서 이 함수가 건드리는 자리(이 kind의 tc_generated)만
+    # 최신 원장 위에 다시 얹는다.
+    fresh = load_ledger()
+    fresh_pipeline = (fresh.setdefault("works", {}).setdefault(args.work, {})
+                      .setdefault("episodes", {}).setdefault(str(args.episode), {})
+                      .setdefault("kinds", {}).setdefault(args.kind, {})
+                      .setdefault("pipeline", {}))
+    fresh_pipeline["tc_generated"] = {
         "done": True,
         "date": date.today().isoformat(),
         "flags": " ".join(cmd[3:]),
         "output": str(out.relative_to(ROOT)),
     }
-    save_ledger(data)
+    save_ledger(fresh)
     print(f"\n원장 갱신 완료: {LEDGER.relative_to(ROOT)}")
     return 0
 

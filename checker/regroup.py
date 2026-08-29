@@ -100,3 +100,73 @@ def limits_from_profile(profile: dict) -> tuple[int, int]:
     timecode = (profile or {}).get("timecode") or {}
     return (int(timecode.get("merge_max_ms") or MAX_DURATION_MS),
             int(timecode.get("merge_max_gap_ms") or MAX_GAP_MS))
+
+
+REACTION_MAX_GAP_MS = 1500
+REACTION_MAX_CHARS = 15
+REACTION_MIN_SIMILARITY = 0.5
+
+
+def compress_reaction_runs(events: list[Event], max_gap_ms: int = REACTION_MAX_GAP_MS,
+                           max_chars: float = REACTION_MAX_CHARS,
+                           min_similarity: float = REACTION_MIN_SIMILARITY,
+                           weights: dict | None = None) -> list[Event]:
+    """짧은 반응이 연달아 겹치면 하나로 압축한다.
+
+    **왜 있나.** `merge_cues()`는 "한 호흡"을 합친다 — 말이 끊기지 않고 이어지는
+    자리다. 이건 다른 문제다: 서로 짧게 떨어진(간격이 있는) **여러 개의 별도
+    반응**(감탄사·짧은 대꾸)이 정답 SDH에서는 화면 하나에 압축돼 나온다
+    (2026-08-30, 예능A 16회 실측 — 우리는 "아…"를 네 자막으로 나눠 냈는데
+    정답은 한 자막으로 압축했다. 15·16회·SDH·번역 네 파일 전부에서 이 패턴이
+    9~16묶음씩 나옴). `merge_cues()`의 `max_gap_ms`(보통 100~500ms)로는 이 간격을
+    못 잡는다 — 반응 사이 간격이 그보다 넓을 때가 많아서 일부러 더 너그러운
+    상한(`max_gap_ms` 여기서는 기본 1500ms)을 따로 둔다.
+
+    **텍스트는 지어내지 않는다(규칙 4).** 진짜 정답(예: "- [서연] 아, 맞다, 맞다 /
+    - [우재] 그렇지 않아? 아")은 SDH 편집자가 내용을 다시 쓴 것으로 보이는데,
+    우리는 그 창작적 선택을 흉내 낼 근거가 없다. 그래서 **시간만 정답 방식대로
+    압축하고, 텍스트는 실제로 들은 것 중에서만 고른다** — 서로 다른(비슷하지 않은)
+    문구를 순서대로 최대 2개까지 남기고, 나머지 중복은 버린다. 화자가 진짜
+    다른지는 모르므로(diarize 없이는 알 수 없다) 이름은 안 붙이고 `-`만 쓴다.
+    2개 이상 서로 다른 문구가 있으면 두 줄(`-A\n-B`)로, 사실상 전부 같은 말이면
+    한 줄로 남긴다.
+    """
+    from .align import similarity
+    from .text import count_chars
+
+    out: list[Event] = []
+    i = 0
+    n = len(events)
+    while i < n:
+        if count_chars(events[i].text, weights) > max_chars:
+            out.append(events[i])
+            i += 1
+            continue
+
+        run = [events[i]]
+        j = i + 1
+        while j < n:
+            candidate = events[j]
+            gap = candidate.start_ms - run[-1].end_ms
+            if (0 <= gap <= max_gap_ms
+                    and count_chars(candidate.text, weights) <= max_chars
+                    and similarity(run[0].text, candidate.text) >= min_similarity):
+                run.append(candidate)
+                j += 1
+                continue
+            break
+
+        if len(run) >= 2:
+            distinct: list[str] = []
+            for e in run:
+                if not distinct or similarity(distinct[-1], e.text) < min_similarity:
+                    distinct.append(e.text)
+                if len(distinct) >= 2:
+                    break
+            text = distinct[0] if len(distinct) == 1 else f"-{distinct[0]}\n-{distinct[1]}"
+            out.append(Event(len(out) + 1, run[0].start_ms, run[-1].end_ms, text))
+        else:
+            out.append(Event(len(out) + 1, run[0].start_ms, run[0].end_ms, run[0].text))
+        i = j if j > i else i + 1
+
+    return out

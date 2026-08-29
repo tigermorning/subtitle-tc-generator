@@ -219,9 +219,24 @@ def generate(video: Path, profile: dict, script: Path | None = None,
         # 적어 두었다 — 전문가 타임코드와 대조해 값을 골랐다).
         #
         # 대본이 있으면 하지 않는다. 그때는 대본의 줄이 곧 자막 단위다.
-        from .regroup import limits_from_profile, merge_cues
+        from .regroup import limits_from_profile, merge_cues, compress_reaction_runs
         raw = [Event(i, s.start_ms, s.end_ms, s.text) for i, s in enumerate(segments, 1)]
         max_ms, max_gap = limits_from_profile(profile)
+
+        # **짧은 반응이 연달아 겹치는 자리를 먼저 압축한다.** `merge_cues`보다
+        # 먼저 돈다 — 순서가 반대면 `merge_cues`가 짧은 반응 몇 개를 이미 거칠게
+        # 이어붙여(공백으로 텍스트만 연결) 놓은 뒤라, 압축 단계가 그 지저분한
+        # 텍스트를 넘겨받아 제대로 못 거른다(2026-08-30, 예능A 16회 실측 —
+        # "아…" 5개가 4개→2개까지만 줄고 "아... -아..." 같은 지저분한 텍스트로
+        # 남았다. 순서를 바꾸니 원시 조각 단계에서 깔끔하게 하나로 걸러졌다).
+        # merge_cues는 "한 호흡"을 합치고, 이 단계는 서로 떨어진 짧은 반응
+        # 여러 개(감탄사 반복 등)를 압축한다 — 정답 SDH는 이런 자리를 화면
+        # 하나로 압축한다. 텍스트는 지어내지 않고 실제로 들은 것 중 최대 2개
+        # 까지만 남긴다(규칙 4).
+        before = len(raw)
+        raw = compress_reaction_runs(raw)
+        if len(raw) != before:
+            say(f"짧은 반응 반복 자리를 압축해 전사 조각 {before}개를 {len(raw)}개로 줄였습니다")
 
         speaker_turns = None
         if diarize:
