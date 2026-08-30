@@ -1,0 +1,39 @@
+# `rules/amazon/`가 없다 — 새 발주처, 공식 문건 없음. 추측해서 만들지 않는다
+# (규칙 9). 순수 관측이다.
+#
+# 2026-08-30: 영화A(영화), 영어 원어 → 네덜란드어 번역. 컨테이너에
+# 있던 다른 언어 트랙과 같이 뽑았다(사용자 지시).
+
+schema_version: 1
+platform: amazon
+language: nl
+kind: translation
+source:
+  official: false
+  origin: learned
+  from:
+    작품:
+      - {제목: "영화A (2026)", 형태: 영화, 원어: 영어, 줄_합계: 1235}
+  measured: "2026-08-30"
+
+observed:
+  duration_ms:
+    중앙값: 2375
+    p5: 1041
+    p95: 4459
+    범위: [833, 6416]
+  gap_ms:
+    중앙값: 167
+    p5: 83
+  chars_per_line_unweighted:
+    중앙값: 21.0
+    p95: 35.0
+    최대: 42.0
+  cps_unweighted:
+    중앙값: 11.2
+    p95: 16.5
+  lines:
+    한_줄: 661
+    두_줄: 574
+    세_줄_이상: 0
+    전체_대사자막: 1235
