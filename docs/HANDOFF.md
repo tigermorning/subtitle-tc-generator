@@ -292,7 +292,7 @@ torch DLL이 걸린다. 어젯밤(2026-08-27)엔 됐다가 다음날 안 됐다 
 ## 9. 테스트·커밋
 
 ```bash
-python3 tests/run_tests.py    # 792건(2026-08-28 기준), GUI 제외
+python3 tests/run_tests.py    # 801건(2026-08-30 기준), GUI 제외
 ```
 
 **테스트 통과가 커밋의 전제조건이다** — `tools/hooks/pre-commit`이 커밋 직전에
@@ -302,7 +302,7 @@ python3 tests/run_tests.py    # 792건(2026-08-28 기준), GUI 제외
 
 ## 10. 새로 합류하면 먼저 볼 것
 
-1. `CLAUDE.md` — 작업 규칙 15개, 전부 실제로 한 번씩 틀렸다가 정정된 것들이다.
+1. `CLAUDE.md` — 작업 규칙 0~17번(18개), 전부 실제로 한 번씩 틀렸다가 정정된 것들이다.
 2. 이 문서.
 3. `checker/pipeline.py`의 독스트링 — 단계 순서의 코드상 근거.
 4. `docs/BACKLOG.md` — 지금 막힌 것과 진행 중인 것의 상세.
