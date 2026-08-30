@@ -106,6 +106,7 @@ def generate(video: Path, profile: dict, script: Path | None = None,
              cast: dict[str, str] | None = None,
              transcript_cache: Path | None = None,
              context_checker=None,
+             foreign_dialogue_translator=None,
              progress=None) -> Draft:
     """영상에서 자막 초안을 만든다.
 
@@ -130,6 +131,12 @@ def generate(video: Path, profile: dict, script: Path | None = None,
     `context_checker`를 주면(번역기와 같은 `ask(system, prompt)` 인터페이스)
     번역 전에 전사 원문이 앞뒤 맥락과 맞는지 확인해 알린다(`context_check.py`).
     `translator`와 별개다 — 번역을 안 하는 SDH 작업에도 켤 수 있다.
+
+    `foreign_dialogue_translator`를 주면(같은 `ask` 인터페이스) 원어(대개 한국어)
+    사이에 섞인 외국어 대사를 한국어로 옮기고 언어 표시를 붙인다
+    (`foreign_dialogue.py` — 2026-08-30, 드라마B E01을 정답과 대조해
+    발견: 정답은 일본어 대사를 한국어로 옮기는데 우리는 그대로 전사만 했다).
+    이것도 초안이다 — 옮긴 자리마다 notes에 남는다.
     """
     from .transcribe import transcribe   # ffmpeg이 없어도 이 모듈은 import 되게
 
@@ -264,6 +271,16 @@ def generate(video: Path, profile: dict, script: Path | None = None,
             # 누구인지(이름)는 안 준다. 이름을 지어내지 않는다(규칙 3).
             say("화자명은 넣지 못했습니다 — 대본이 없으면 누가 말했는지 알 수 없습니다."
                 " 영상을 보며 사람이 넣어야 합니다(--script로 대본을 주면 붙입니다).")
+
+    # **섞인 외국어 대사를 한국어로 옮긴다.** 문맥 확인·메인 번역보다 먼저다 —
+    # 뒤 단계는 이 자리가 이미 원어(대개 한국어)라고 가정한다. 옮기지 않으면
+    # 외국어 그대로 다음 단계로 넘어가 문맥 확인이 헷갈리고, 재분할(resplit)의
+    # 글자 수 계산도 엉뚱한 언어 기준으로 된다.
+    if foreign_dialogue_translator is not None:
+        from .foreign_dialogue import translate_foreign_dialogue
+        events, foreign_notes = translate_foreign_dialogue(
+            events, foreign_dialogue_translator, progress=say)
+        notes.extend(foreign_notes)
 
     # **원어 전사가 앞뒤 맥락과 맞는지 번역 전에 확인한다.** whisper는 비슷하게
     # 들리는 다른 말로 잘못 듣고도 문법이 멀쩡한 문장을 만든다(`context_check.py`

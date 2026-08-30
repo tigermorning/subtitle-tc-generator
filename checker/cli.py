@@ -859,6 +859,17 @@ def _generate_mode(args, ap) -> int:
             print(f"[오류] {exc}")
             return 2
 
+    # 번역기·문맥 검사기 중 이미 만든 것이 있으면 그대로 쓴다 — Ollama 접속을
+    # 세 번 따로 열 이유가 없다.
+    foreign_translator = translator or context_checker
+    if args.translate_foreign and foreign_translator is None:
+        from .translate import TranslatorUnavailable, make_translator
+        try:
+            foreign_translator = make_translator(args.translate_model)
+        except TranslatorUnavailable as exc:
+            print(f"[오류] {exc}")
+            return 2
+
     out = args.out or args.video.with_suffix(".draft.srt")
     try:
         draft = generate(args.video, profile, script=args.script,
@@ -870,6 +881,8 @@ def _generate_mode(args, ap) -> int:
                          passes=args.passes, max_passes=args.max_passes,
                          settle_at=args.settle_at, cast=getattr(args, "_cast", None),
                          context_checker=context_checker if args.check_context else None,
+                         foreign_dialogue_translator=(
+                             foreign_translator if args.translate_foreign else None),
                          progress=print)
     except DiarizationUnavailable as exc:
         print(f"[오류] {exc}")
@@ -1114,6 +1127,13 @@ def main(argv: list[str] | None = None) -> int:
                           "소리를 다른 말로 잘못 들었을 때 걸러낸다. --translate "
                           "없이 SDH만 만들 때도 켤 수 있다 — 그때는 --translate-model로 "
                           "쓸 모델을 고른다")
+    gen.add_argument("--translate-foreign", action="store_true",
+                     help="원어(대개 한국어) 사이에 섞인 외국어 대사를 로컬 모델로 "
+                          "한국어로 옮기고 언어 표시([일본어] 등)를 붙인다(초안 — "
+                          "옮긴 자리는 notes에 남는다, 고쳐서 확정하지 않는다). "
+                          "화자 이름은 모르므로 지어내지 않는다(--script로 대본을 "
+                          "주면 사람이 나중에 채운다). --translate-model로 쓸 모델을 "
+                          "고른다")
     gen.add_argument("--passes", type=int, default=1,
                      help="번역을 몇 차까지 할지. 1차=빠른 초벌, 2차=용어·맥락 감수, "
                           "3차=말맛 윤문(작업자 자료의 단계 그대로)")
