@@ -22,6 +22,7 @@ from pathlib import Path
 from .align import AlignedCue, Segment, align, summary
 from .media import find_speech, probe
 from .model import Event
+from .text import chars_per_second
 from .resplit import resplit_all
 from .timing import TimingLimits, converge
 
@@ -338,6 +339,31 @@ def generate(video: Path, profile: dict, script: Path | None = None,
     say(f"스포팅 {len(result.changes)}곳 조정, 남은 문제 {len(result.unresolved)}건")
     stats.update(cues_out=len(result.events), timing_changes=len(result.changes),
                  timing_unresolved=len(result.unresolved))
+
+    # **환각 의심 자막을 알린다(자동으로 고치지 않는다, 규칙 4).** 2026-08-30,
+    # 드라마B E01 잡음 섞인 뉴스 몽타주 구간(1970년대 항공기 납치 사건
+    # 자료화면)에서 whisper가 "- - - - -"·"일본어의 351 한ada 덮바러" 같은 뜻
+    # 없는 글자를 뱉었다 — 전부 최대 표시 시간(`limits.duration_ms.max`)까지
+    # 늘어난 채 글자는 몇 자 안 됐다. ffmpeg의 whisper 필터는 srt·json 어느
+    # 출력도 신뢰도(avg_logprob 등)를 안 준다(2026-08-30 직접 확인) — 그래서
+    # 신뢰도 대신 "시간 꽉 채웠는데 글자는 적다"는 결과만으로 어림한다. 놓치는
+    # 것(느린 대사인데 우연히 이 조건에 안 걸림)과 잘못 잡는 것(진짜로 느리게
+    # 말한 자리) 둘 다 있을 수 있다 — 그래서 지우거나 고치지 않고 **알리기만**
+    # 한다.
+    dur_max = (profile.get("limits") or {}).get("duration_ms", {}).get("max")
+    if dur_max:
+        weights = (profile.get("limits") or {}).get("char_weights")
+        suspects = [ev for ev in result.events
+                   if ev.duration_ms >= dur_max
+                   and chars_per_second(ev.text, ev.duration_ms, weights) < 3.0]
+        if suspects:
+            say(f"환각 의심 자막 {len(suspects)}곳 — 시간을 꽉 채웠는데 글자가 적습니다."
+                " 영상에서 직접 들어보고 확인하세요:")
+            for ev in suspects[:20]:
+                ts = ev.start_ms // 1000
+                say(f"    #{ev.index} {ts // 60}:{ts % 60:02d}  {ev.text[:40]!r}")
+            if len(suspects) > 20:
+                say(f"    ...외 {len(suspects) - 20}곳 더")
 
     # 재분할로 번호가 바뀌었으면 원어도 새 번호로 옮긴다.
     moved_sources: dict[int, str] = {}
