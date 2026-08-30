@@ -23,3 +23,14 @@ inbox를 정리할 때 이 파일 아래에 날짜와 함께 핵심만 append하
   로컬 커밋만 함(push 안 함 — 무인 push는 안전 분류기가 막았다고 주석에 있음).
   SessionStart는 inbox와 이 파일을 컨텍스트로 불러오고, 정리는 다음 세션의
   Claude 판단에 맡김. 지금 이 항목이 그 "정리해서 append" 작업의 첫 사례.
+- SessionEnd 훅이 로컬에만 커밋해 둔 것(`bd42929`)과 원격에 새로 올라온
+  커밋들(`docs/AGENT_INCIDENTS.md` 10번 사고 기록, README.md·MVP.md·
+  CORPUS_TITLES.md의 `genre_maturity` 언급 추가)을 두 차례에 걸쳐 병합·
+  push함(`032c03b`, `e0ce389`) — 전부 겹치는 파일이 없어 충돌 없었고, 매번
+  `tests/run_tests.py` 801건 통과를 확인한 뒤 올림.
+- 정리 끝난 inbox 캡처 파일(`241feb5d-...md`)은 위 항목들에 이미 반영된
+  뒤 삭제하고 커밋·push함(`b509e8b`) — 훅이 지시한 "반영 후 inbox 삭제"
+  절차를 실제로 밟은 첫 사례.
+- `docs/AGENT_INCIDENTS.md` 10번 사고와 "공통점" 절을 사용자에게 요약해
+  전달함(내용은 그 문서 자체에 이미 있으니 여기 중복 기록하지 않음 —
+  필요하면 원문 참고).
