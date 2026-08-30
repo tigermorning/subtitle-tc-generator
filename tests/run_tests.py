@@ -1796,6 +1796,36 @@ except ValueError as exc:
     ok("지원 안 하는 언어는 실패한다", "fr" in str(exc))
 
 
+# --- 전사 원문 문맥 검사 ----------------------------------------------------
+# whisper가 비슷하게 들리는 다른 말로 잘못 듣고도 문법이 멀쩡한 문장을 만드는
+# 것을, 앞뒤 자막과 이어 붙여 보고 걸러낸다. 고치지 않고 알리기만 한다(규칙 4).
+
+from checker.context_check import flag_context_mismatches  # noqa: E402
+
+_ctx_evs = [Event(1, 0, 1000, "우리는 동기와 설명이 필요합니다"),
+           Event(2, 1000, 2000, "그 뒤에 진행하겠습니다")]
+_ctx_fake = _FakeTranslator(["1: '동기와 설명'은 문맥상 '동기화 설명'의 오청으로 보입니다\n"])
+_ctx_flags = flag_context_mismatches(_ctx_evs, _ctx_fake)
+ok("문맥 불일치를 (번호, 이유)로 돌려준다",
+   _ctx_flags == [(1, "'동기와 설명'은 문맥상 '동기화 설명'의 오청으로 보입니다")])
+
+ok("자막 텍스트는 그대로다 — 고치지 않는다", _ctx_evs[0].text == "우리는 동기와 설명이 필요합니다")
+
+ok("NONE이면 아무것도 안 남는다",
+   flag_context_mismatches(_ctx_evs, _FakeTranslator(["NONE\n"])) == [])
+
+ok("빈 답도 아무것도 안 남는다",
+   flag_context_mismatches(_ctx_evs, _FakeTranslator([""])) == [])
+
+ok("번역기가 없으면 검사를 건너뛴다", flag_context_mismatches(_ctx_evs, None) == [])
+
+ok("자막이 없으면 빈 목록", flag_context_mismatches([], _ctx_fake) == [])
+
+# 배치 범위 밖 번호를 모델이 잘못 대답해도 끼워 넣지 않는다.
+_ctx_bad = _FakeTranslator(["99: 없는 번호\n1: 진짜 불일치\n"])
+ok("범위 밖 번호는 버린다", flag_context_mismatches(_ctx_evs, _ctx_bad) == [(1, "진짜 불일치")])
+
+
 # --- 독립 프로그램 화면 ----------------------------------------------------
 # 화면은 PySide6가 있어야 시험할 수 있다. 없는 환경(개발용 WSL)에서는 건너뛴다 —
 # 엔진 시험이 화면 때문에 멈추면 안 된다.

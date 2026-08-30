@@ -28,7 +28,7 @@ class Check:
 def run(video, profile: dict | None = None, translate: bool = False,
        diarize: bool = False, speech_method: str = "auto",
        translate_model: str | None = None, whisper_model: str | None = None,
-       min_free_gb: float = 2.0) -> list[Check]:
+       check_context: bool = False, min_free_gb: float = 2.0) -> list[Check]:
     """환경 점검 목록을 돌려준다. 예외를 올리지 않는다 — 실패도 결과다."""
     checks: list[Check] = []
     video = Path(video)
@@ -69,7 +69,7 @@ def run(video, profile: dict | None = None, translate: bool = False,
             else:
                 checks.append(Check("VAD 모델", False, str(exc)))
 
-    if translate:
+    if translate or check_context:
         from .translate import TranslatorUnavailable, make_translator
         try:
             translator = make_translator(translate_model)

@@ -828,7 +828,8 @@ def _generate_mode(args, ap) -> int:
         checks = preflight.run(args.video, profile, translate=args.translate,
                                diarize=args.diarize, speech_method=args.speech,
                                translate_model=args.translate_model,
-                               whisper_model=args.whisper_model)
+                               whisper_model=args.whisper_model,
+                               check_context=args.check_context)
         print(preflight.report(checks))
         return 1 if any(not c.ok for c in checks) else 0
 
@@ -847,6 +848,17 @@ def _generate_mode(args, ap) -> int:
         if glossary.terms:
             print(f"표기 통일표 {len(glossary.terms)}개를 적용합니다")
 
+    # **문맥 검사는 번역과 별개다.** --translate 없이 SDH만 만들 때도 켤 수
+    # 있으므로, 번역기가 이미 있으면 그것을 그대로 쓰고 없으면 따로 만든다.
+    context_checker = translator
+    if args.check_context and context_checker is None:
+        from .translate import TranslatorUnavailable, make_translator
+        try:
+            context_checker = make_translator(args.translate_model)
+        except TranslatorUnavailable as exc:
+            print(f"[오류] {exc}")
+            return 2
+
     out = args.out or args.video.with_suffix(".draft.srt")
     try:
         draft = generate(args.video, profile, script=args.script,
@@ -857,6 +869,7 @@ def _generate_mode(args, ap) -> int:
                          keep_source=out.with_suffix(".source.srt") if translator else None,
                          passes=args.passes, max_passes=args.max_passes,
                          settle_at=args.settle_at, cast=getattr(args, "_cast", None),
+                         context_checker=context_checker if args.check_context else None,
                          progress=print)
     except DiarizationUnavailable as exc:
         print(f"[오류] {exc}")
@@ -1095,6 +1108,12 @@ def main(argv: list[str] | None = None) -> int:
     gen.add_argument("--translate-model",
                      help="번역에 쓸 로컬 모델(기본: exaone3.5:7.8b). "
                           "`ollama list`에 있는 이름")
+    gen.add_argument("--check-context", action="store_true",
+                     help="번역 전에 전사 원문이 앞뒤 맥락과 맞는지 로컬 모델로 "
+                          "확인해 알린다(고치지 않는다, 규칙 4). whisper가 비슷한 "
+                          "소리를 다른 말로 잘못 들었을 때 걸러낸다. --translate "
+                          "없이 SDH만 만들 때도 켤 수 있다 — 그때는 --translate-model로 "
+                          "쓸 모델을 고른다")
     gen.add_argument("--passes", type=int, default=1,
                      help="번역을 몇 차까지 할지. 1차=빠른 초벌, 2차=용어·맥락 감수, "
                           "3차=말맛 윤문(작업자 자료의 단계 그대로)")
