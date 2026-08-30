@@ -203,7 +203,9 @@ python -m checker file.srt --against 정답.srt            # 정답 자막과 �
 정답 없는 실전에서도 통하는 `checker/` 코드 자체를 검증·수정하는 것이다(CLAUDE.md
 규칙 13). 절차는
 [`.claude/skills/정답지-대조-진단/`](.claude/skills/정답지-대조-진단/SKILL.md)에
-코드화돼 있다.
+코드화돼 있다. 이 진단이 매 영상 필요한 건 아니다 — 같은 발주처+장르에서 연속
+3편 새 구조 버그가 없으면 "성숙"으로 보고 그다음부턴 아래 정답지-학습만으로도
+충분할 수 있다(`docs/corpus_status.yaml`의 `genre_maturity`가 이 판단을 기록한다).
 
 캐릭터 문서는 KNP 시트와 **다른 문서다** — KNP는 고유명사 표기를, 이것은 말투와 인물
 관계를 통일한다. 하나의 작품을 여러 작업자가 나누어 하기 때문에 필요하다. 밖으로
@@ -262,7 +264,8 @@ rules/
 (`tools/corpus_build.py`). **공식 규정을 절대 덮어쓰지 않는다** — `source.origin:
 learned`로 출처를 구분하고, 규정으로 승격하려면 사람 확인을 거친다(CLAUDE.md
 규칙 11). 절차는 [`.claude/skills/정답지-학습/`](.claude/skills/정답지-학습/SKILL.md)에
-코드화돼 있다.
+코드화돼 있다. 정답지 있는 영상은 이 학습부터 예외 없이 먼저 하고, 위 `--against`
+진단(비용 큰 whisper 필요)은 그 뒤 필요할 때만 한다(CLAUDE.md 규칙 13).
 
 `rules/`에 코드를 넣지 않는다. 규정은 자주 개정되고, 개정 이력이 코드 커밋과 섞이면
 안 된다(나중에 `git subtree split`으로 떼낼 수 있게 둔다).
