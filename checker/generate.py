@@ -15,8 +15,10 @@
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 
 from .align import AlignedCue, Segment, align, summary
@@ -158,6 +160,48 @@ def generate(video: Path, profile: dict, script: Path | None = None,
     segments = transcribe(video, language=language, model=model,
                           use_gpu=use_gpu, progress=say, keep=keep_transcript,
                           cache=transcript_cache)
+
+    # **whisper 전사가 같은 영상에서도 매번 다르게 나온다** — faster-whisper로
+    # 실측(2026-08-30, 드라마B E01, 같은 명령 5번): 세그먼트
+    # 290·705·709·747·756개. 4번은 700대로 몰렸는데 1번(290)만 확 튀었다 —
+    # 우리 VAD가 찾은 말소리 구간(660개, 이건 결정적이다) **보다도 적은** 세그먼트가
+    # 나온 게 그 한 번뿐이다. 정상 실행은 항상 말소리 구간보다 세그먼트가
+    # 많았다(구간 하나가 세그먼트 여러 개로 쪼개지는 게 보통이라). 그래서
+    # "세그먼트가 말소리 구간보다 뚜렷이 적다"를 실패 신호로 보고 **한 번만**
+    # 다시 돌린다 — 표본이 5번뿐이라 이 판단 자체가 아직 가설이다. 계속
+    # 쌓이는 실측은 `docs/whisper_retry_log.jsonl`에 남는다(사람이 나중에
+    # 유의미한지 판단할 근거).
+    SUSPECT_RATIO = 0.9
+    retried = False
+    if transcript_cache is None and speech and len(segments) < len(speech) * SUSPECT_RATIO:
+        say(f"전사 세그먼트({len(segments)}개)가 말소리 구간({len(speech)}개)보다 "
+            "뚜렷이 적습니다 — 실패로 의심해 한 번 더 전사합니다")
+        retry_segments = transcribe(video, language=language, model=model,
+                                    use_gpu=use_gpu, progress=say, keep=keep_transcript,
+                                    cache=None)
+        retried = True
+        if len(retry_segments) > len(segments):
+            segments = retry_segments
+        else:
+            say("다시 돌려도 나아지지 않았습니다 — 이번 결과를 그대로 씁니다."
+                " 사람이 직접 확인하는 것을 권합니다.")
+
+    from .paths import user_data
+    try:
+        log_path = user_data() / "whisper_retry_log.jsonl"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps({
+                "date": datetime.now().isoformat(timespec="seconds"),
+                "video": video.name,
+                "duration_ms": media.duration_ms,
+                "speech_spans": len(speech),
+                "segments_used": len(segments),
+                "suspected_failure": retried,
+            }, ensure_ascii=False) + "\n")
+    except OSError:
+        pass  # 로그는 참고용이다 — 못 남겨도 생성 자체를 막지 않는다
+
     if not segments:
         return Draft([], [], {"transcript": 0})
 
