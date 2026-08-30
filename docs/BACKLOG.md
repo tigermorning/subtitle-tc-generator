@@ -1242,3 +1242,36 @@ diarize `merge_cues()` 비교 버그, `REACTION_MAX_CHARS` 확장,
 (aa9f83c, cd244d1, c50cfb4), `.claude/skills/정답지-학습/SKILL.md`(f1e4ce0),
 `.claude/skills/정답지-대조-진단/SKILL.md`(b8cdc1d),
 `.claude/skills/번역-품질-지표/SKILL.md`(4dce392), `docs/HANDOFF.md`(7ad3c5a).
+
+## 2026-08-30(같은 날, 별도 세션) — 언어 혼용 감사·문서 정합성 점검·session-memory 훅 가동 확인
+
+**언어 혼용 감사(읽기 전용).** 저장소 전체(커밋 메시지 50개 전량, Python
+71개 파일의 주석, 문서 25개, 파일명·식별자)를 한국어/영어가 실수로 섞인
+곳이 있는지 훑었다. 결론: **혼용 없음** — "한국어 서술문 + 영어 기술
+용어(recall·CPS·JSON 등)" 스타일로 전체가 일관됐다. 코드 식별자(함수·클래스·
+변수·YAML 키)에 한글이 섞인 사례도 0건. 파일 변경 없이 조사만 하고 끝냄.
+
+**`AGENTS.md`의 규칙 개수 오기를 그 감사 중 발견.** "`CLAUDE.md` — 작업
+규칙 10개"로 적혀 있었는데 실제로는 규칙 0~17번(18개)이었다 — CLAUDE.md에
+새 규칙이 추가될 때마다 이 문서가 따라가지 못한 것. 수정함(`f53e7b0`).
+같은 이유로 `docs/HANDOFF.md` §10도 "규칙 15개"로 낡아 있어 같이 고침
+(`fd0cd7b`, §9 테스트 건수 792→801건도 같이 최신화).
+
+**`project-session-memory` 스킬이 이 세션 도중 원격에서 병합되어 들어옴**
+(다른 세션이 설치, `9858e58`). SessionStart/SessionEnd 두 훅으로 구성:
+SessionEnd가 transcript 꼬리를 `.claude/memory/inbox/<session_id>.md`로
+저장하고 **로컬 커밋만**(push 안 함 — 매 세션 종료마다 무인으로 원격
+push하는 것은 Claude Code auto-mode 안전 분류기가 막았다고 훅 자체
+주석에 적혀 있음), SessionStart가 그 inbox와 `.claude/memory/session-log.md`를
+다음 세션 컨텍스트로 불러오고 정리는 그 세션의 Claude 판단에 맡기는
+구조. 이번 세션이 그 "정리해서 append, 반영 후 inbox 삭제" 절차를 실제로
+한 번 완주함(`7143148`→`b509e8b`) — session-log.md는 BACKLOG.md(이 문서,
+전체 팀 히스토리)·HANDOFF.md(현재 상태 지도)와 달리 **다음 세션이 자동으로
+읽어 들이는** 세 번째 기억 경로다.
+
+**푸시 충돌 병합 2건, 전부 파일 안 겹쳐 문제 없었음**(`032c03b`←`ab68338`
+AGENT_INCIDENTS.md 10번 사고 기록; `e0ce389`←`f67c7af`+`d91023e` README·
+MVP·CORPUS_TITLES.md의 genre_maturity 언급). 매번 `tests/run_tests.py`
+801건 통과 확인 후 push.
+
+관련 커밋: `f53e7b0`, `032c03b`, `e0ce389`, `b509e8b`, `f7fd417`, `fd0cd7b`.
