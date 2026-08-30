@@ -44,6 +44,11 @@ class Segment:
     start_ms: int
     end_ms: int
     text: str
+    # whisper가 이 조각을 얼마나 자신 있어 했는지(평균 로그확률, 0에 가까울수록
+    # 자신 있음, 음수가 클수록 불확실). faster-whisper 백엔드만 채운다 — ffmpeg
+    # whisper 필터는 이 값을 안 준다(2026-08-30 직접 확인, srt·json 둘 다 없음).
+    # 없으면 None이다.
+    confidence: float | None = None
 
 
 @dataclass

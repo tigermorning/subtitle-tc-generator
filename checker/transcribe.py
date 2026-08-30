@@ -170,19 +170,84 @@ def _ascii_model_path(model_path: Path, work: Path) -> str:
     return link.name
 
 
+def _ms_to_srt(ms: int) -> str:
+    h, rem = divmod(ms, 3600_000)
+    m, rem = divmod(rem, 60_000)
+    s, ms = divmod(rem, 1000)
+    return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
+
+
+_FASTER_WHISPER_MODEL_CACHE: dict = {}
+
+
+def _faster_whisper_transcribe(video: Path, language: str, use_gpu: bool,
+                               say) -> list[Segment] | None:
+    """faster-whisper(ctranslate2)로 전사한다. **신뢰도(`avg_logprob`)를 준다** —
+
+    ffmpeg의 whisper 필터는 srt·json 어느 출력도 신뢰도를 안 준다(2026-08-30
+    직접 확인). 신뢰도가 있어야 환각(잡음 구간에서 whisper가 뜻 없는 글자를
+    지어내는 것)을 문자 밀도 어림 대신 정확히 잡을 수 있다(`generate.py`의
+    환각 의심 자막 경고 참고).
+
+    패키지가 없거나 모델을 못 불러오면 `None`을 돌려준다 — 호출부가 기존
+    ffmpeg 방식으로 조용히 넘어간다(**말없이 실패하지 않는다** — `say`로
+    알린다).
+    """
+    try:
+        from faster_whisper import WhisperModel
+    except ImportError:
+        return None
+
+    key = (use_gpu,)
+    fw_model = _FASTER_WHISPER_MODEL_CACHE.get(key)
+    if fw_model is None:
+        try:
+            device = "cuda" if use_gpu else "cpu"
+            compute_type = "float16" if use_gpu else "int8"
+            say(f"faster-whisper 모델을 불러옵니다({device}, 처음엔 몇십 초 걸릴 수 있습니다)...")
+            fw_model = WhisperModel(
+                os.environ.get("FASTER_WHISPER_MODEL", "large-v3-turbo"),
+                device=device, compute_type=compute_type)
+            _FASTER_WHISPER_MODEL_CACHE[key] = fw_model
+        except Exception as exc:  # noqa: BLE001 - 모델 로드 실패 경로가 다양하다
+            say(f"faster-whisper 모델을 못 불러왔습니다({exc}) — 기존 방식으로 돌립니다")
+            return None
+
+    try:
+        raw_segments, _info = fw_model.transcribe(
+            str(video), language=None if language == "auto" else language,
+            vad_filter=False)
+        out = []
+        for seg in raw_segments:
+            text = seg.text.strip()
+            if text:
+                out.append(Segment(int(seg.start * 1000), int(seg.end * 1000),
+                                   text, confidence=seg.avg_logprob))
+        return out
+    except Exception as exc:  # noqa: BLE001
+        say(f"faster-whisper 전사가 실패했습니다({exc}) — 기존 방식으로 돌립니다")
+        return None
+
+
 def transcribe(video: Path, language: str = "auto", model: str | None = None,
                use_gpu: bool = True, progress=None,
                keep: Path | None = None, cache: Path | None = None) -> list[Segment]:
     """영상에서 말소리를 받아 적는다. 세그먼트 목록을 돌려준다.
 
+    **faster-whisper가 있으면 그것을 먼저 쓴다**(2026-08-30) — 신뢰도를 주는
+    유일한 경로다. 없거나 실패하면 ffmpeg 내장 whisper 필터로 돌아간다(신뢰도
+    없이, `Segment.confidence`가 `None`).
+
     `keep`을 주면 전사 SRT를 그 자리에 남긴다 — 뒤 단계가 틀렸을 때 전사까지
-    다시 돌리지 않기 위해서다(긴 영상에서 이 차이가 크다).
+    다시 돌리지 않기 위해서다(긴 영상에서 이 차이가 크다). **신뢰도는 SRT에
+    못 담아 이 사본엔 안 남는다.**
 
     `cache`를 주면 **있으면 읽고, 없으면 전사한 뒤 만든다.** 코퍼스 재검사·상한값
     재조정(`tools/calibrate_regroup.py`)처럼 같은 영상을 여러 번 다시 훑을 때
     whisper를 매번 새로 돌리지 않기 위해서다(2026-08-29, 예능A 15·16회
     상한값 스윕에서 매번 수 분씩 걸려 실측함). `keep`과 달리 **이미 있으면 절대
     덮어쓰지 않는다** — 디버그용 사본이 아니라 재사용 대상이기 때문이다.
+    **캐시에서 읽으면 신뢰도가 없다** — SRT를 거치기 때문이다.
     """
     say = progress or (lambda _m: None)
     video = Path(video)
@@ -192,6 +257,20 @@ def transcribe(video: Path, language: str = "auto", model: str | None = None,
     if cache and Path(cache).is_file():
         say(f"전사 캐시를 재사용합니다 — {cache}")
         return _parse_srt(Path(cache).read_text(encoding="utf-8", errors="replace"))
+
+    fw_segments = _faster_whisper_transcribe(video, language, use_gpu, say)
+    if fw_segments is not None:
+        say(f"전사 완료 — 세그먼트 {len(fw_segments)}개(faster-whisper)")
+        if keep or cache:
+            srt_text = "\n\n".join(
+                f"{i}\n{_ms_to_srt(s.start_ms)} --> {_ms_to_srt(s.end_ms)}\n{s.text}"
+                for i, s in enumerate(fw_segments, 1))
+            if keep:
+                Path(keep).write_text(srt_text, encoding="utf-8")
+            if cache:
+                Path(cache).parent.mkdir(parents=True, exist_ok=True)
+                Path(cache).write_text(srt_text, encoding="utf-8")
+        return fw_segments
 
     model_path = find_model(model)
 

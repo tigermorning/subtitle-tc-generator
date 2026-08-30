@@ -105,6 +105,7 @@ def generate(video: Path, profile: dict, script: Path | None = None,
              passes: int = 1, max_passes: int = 0, settle_at: int = 0,
              cast: dict[str, str] | None = None,
              transcript_cache: Path | None = None,
+             context_checker=None,
              progress=None) -> Draft:
     """영상에서 자막 초안을 만든다.
 
@@ -125,6 +126,10 @@ def generate(video: Path, profile: dict, script: Path | None = None,
     `transcript_cache`를 주면 whisper 전사를 캐시에서 재사용한다(있으면 읽고,
     없으면 전사 후 만든다) — `checker.transcribe.transcribe()`의 `cache`와 같다.
     같은 영상을 상한값 재조정 등으로 여러 번 다시 돌릴 때 쓴다.
+
+    `context_checker`를 주면(번역기와 같은 `ask(system, prompt)` 인터페이스)
+    번역 전에 전사 원문이 앞뒤 맥락과 맞는지 확인해 알린다(`context_check.py`).
+    `translator`와 별개다 — 번역을 안 하는 SDH 작업에도 켤 수 있다.
     """
     from .transcribe import transcribe   # ffmpeg이 없어도 이 모듈은 import 되게
 
@@ -260,6 +265,18 @@ def generate(video: Path, profile: dict, script: Path | None = None,
             say("화자명은 넣지 못했습니다 — 대본이 없으면 누가 말했는지 알 수 없습니다."
                 " 영상을 보며 사람이 넣어야 합니다(--script로 대본을 주면 붙입니다).")
 
+    # **원어 전사가 앞뒤 맥락과 맞는지 번역 전에 확인한다.** whisper는 비슷하게
+    # 들리는 다른 말로 잘못 듣고도 문법이 멀쩡한 문장을 만든다(`context_check.py`
+    # 첫머리 참고) — 번역해 버리면 원문의 이상함이 자연스러운 한국어 뒤에 숨는다.
+    # 이것도 추정이라 고치지 않고 알리기만 한다(규칙 4).
+    if context_checker is not None:
+        from .context_check import flag_context_mismatches
+        mismatches = flag_context_mismatches(events, context_checker, progress=say)
+        if mismatches:
+            say(f"문맥과 안 맞는 전사 {len(mismatches)}곳 — 잘못 들었을 수 있습니다."
+                " 영상에서 직접 들어보고 확인하세요:")
+            notes.extend((i, f"문맥 불일치 의심: {reason}") for i, reason in mismatches)
+
     revisions_out: list = []
     if translator is not None:
         from .translate import to_events, translate_events
@@ -343,27 +360,44 @@ def generate(video: Path, profile: dict, script: Path | None = None,
     # **환각 의심 자막을 알린다(자동으로 고치지 않는다, 규칙 4).** 2026-08-30,
     # 드라마B E01 잡음 섞인 뉴스 몽타주 구간(1970년대 항공기 납치 사건
     # 자료화면)에서 whisper가 "- - - - -"·"일본어의 351 한ada 덮바러" 같은 뜻
-    # 없는 글자를 뱉었다 — 전부 최대 표시 시간(`limits.duration_ms.max`)까지
-    # 늘어난 채 글자는 몇 자 안 됐다. ffmpeg의 whisper 필터는 srt·json 어느
-    # 출력도 신뢰도(avg_logprob 등)를 안 준다(2026-08-30 직접 확인) — 그래서
-    # 신뢰도 대신 "시간 꽉 채웠는데 글자는 적다"는 결과만으로 어림한다. 놓치는
-    # 것(느린 대사인데 우연히 이 조건에 안 걸림)과 잘못 잡는 것(진짜로 느리게
-    # 말한 자리) 둘 다 있을 수 있다 — 그래서 지우거나 고치지 않고 **알리기만**
-    # 한다.
+    # 없는 글자를 뱉었다.
+    #
+    # **faster-whisper가 있으면 신뢰도(`avg_logprob`)로 정확히 잡는다** — 같은
+    # 날 직접 재 보니 깨끗한 대사는 -0.17, 이 잡음 구간은 -0.61로 뚜렷이 갈렸다.
+    # 겹치는 원시 조각 중 가장 낮은(가장 불확실한) 값을 그 자막의 신뢰도로 본다.
+    #
+    # 신뢰도가 없으면(ffmpeg 내장 whisper 필터 — srt·json 둘 다 이 값을 안 준다,
+    # 2026-08-30 직접 확인) "최대 표시 시간을 꽉 채웠는데 글자는 적다"는 대체
+    # 신호로 어림한다. 어느 쪽이든 놓치는 것과 잘못 잡는 것이 있을 수 있다 —
+    # 그래서 지우거나 고치지 않고 **알리기만** 한다.
+    CONFIDENCE_THRESHOLD = -0.4
+
+    def _worst_confidence(ev) -> float | None:
+        values = [s.confidence for s in segments
+                 if s.confidence is not None
+                 and s.start_ms < ev.end_ms and ev.start_ms < s.end_ms]
+        return min(values) if values else None
+
     dur_max = (profile.get("limits") or {}).get("duration_ms", {}).get("max")
-    if dur_max:
-        weights = (profile.get("limits") or {}).get("char_weights")
-        suspects = [ev for ev in result.events
-                   if ev.duration_ms >= dur_max
-                   and chars_per_second(ev.text, ev.duration_ms, weights) < 3.0]
-        if suspects:
-            say(f"환각 의심 자막 {len(suspects)}곳 — 시간을 꽉 채웠는데 글자가 적습니다."
-                " 영상에서 직접 들어보고 확인하세요:")
-            for ev in suspects[:20]:
-                ts = ev.start_ms // 1000
-                say(f"    #{ev.index} {ts // 60}:{ts % 60:02d}  {ev.text[:40]!r}")
-            if len(suspects) > 20:
-                say(f"    ...외 {len(suspects) - 20}곳 더")
+    has_confidence = any(s.confidence is not None for s in segments)
+    suspects = []
+    for ev in result.events:
+        if has_confidence:
+            conf = _worst_confidence(ev)
+            if conf is not None and conf < CONFIDENCE_THRESHOLD:
+                suspects.append(ev)
+        elif dur_max and ev.duration_ms >= dur_max:
+            weights = (profile.get("limits") or {}).get("char_weights")
+            if chars_per_second(ev.text, ev.duration_ms, weights) < 3.0:
+                suspects.append(ev)
+    if suspects:
+        basis = "신뢰도 낮음" if has_confidence else "시간을 꽉 채웠는데 글자가 적음"
+        say(f"환각 의심 자막 {len(suspects)}곳({basis}) — 영상에서 직접 들어보고 확인하세요:")
+        for ev in suspects[:20]:
+            ts = ev.start_ms // 1000
+            say(f"    #{ev.index} {ts // 60}:{ts % 60:02d}  {ev.text[:40]!r}")
+        if len(suspects) > 20:
+            say(f"    ...외 {len(suspects) - 20}곳 더")
 
     # 재분할로 번호가 바뀌었으면 원어도 새 번호로 옮긴다.
     moved_sources: dict[int, str] = {}
