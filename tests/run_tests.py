@@ -3389,6 +3389,36 @@ ok("합쳐진 캡션의 대표 텍스트는 신뢰도가 가장 높았던 프레
 ok("정말 다른 텍스트는 유사도 기준 미달로 여전히 갈린다",
    len(merge_frames([(0, "HELLO", 0.9), (500, "GOODBYE", 0.9)], _step)) == 2)
 
+# 실측(2026-08-31, 같은 영상 전체 회차 재검증): 유사도 비교를 직전 캡션의
+# "대표 텍스트"(계속 갱신됨)와 하면 A~B~C~...~Z처럼 인접한 것끼리만 비슷해도
+# 전체가 하나로 이어 붙는다 — 실제로 캡션 하나가 167초까지 늘어난 사례가
+# 나왔다. 한 글자씩 a->b로 바뀌는 11프레임을 만들어 첫 프레임(anchor)과 끝
+# 프레임이 완전히 다른 텍스트가 되는 상황을 재현한다.
+_drift_frames = [
+    (i * 500, ("b" * i) + ("a" * (10 - i)), 0.9) for i in range(11)
+]
+_drifted = merge_frames(_drift_frames, _step)
+ok("전이적 드리프트(A~B~C~...~Z)는 anchor 비교로 막혀 여러 캡션으로 갈린다",
+   len(_drifted) > 1)
+ok("드리프트가 갈린 첫 캡션은 마지막 프레임(전혀 다른 텍스트)을 포함하지 않는다",
+   _drifted[0].end_ms < _drift_frames[-1][0] + _step)
+
+# max_duration_ms를 명시하면(opt-in) 같은 텍스트가 반복돼도 그만큼에서 갈린다.
+_long_same = [(i * 500, "HELLO", 0.9) for i in range(21)]  # 0~10500ms
+_capped = merge_frames(_long_same, _step, max_duration_ms=8000)
+ok("max_duration_ms를 주면 같은 텍스트라도 그 길이에서 캡션이 갈린다",
+   len(_capped) >= 2)
+ok("갈린 첫 캡션의 길이가 지정한 최대 지속시간을 넘지 않는다",
+   _capped[0].end_ms - _capped[0].start_ms <= 8000)
+
+# 실측(2026-08-31, 예능A 19회): 315초·340초 프레임을 직접 열어 보니
+# 이름 캡션("Sebastiam"/"Tomy"/"Scarlet")이 25초 넘게 픽셀 단위로 그대로였다
+# — 정적 이름표·워터마크류는 실제로 오래 떠 있는다. 기본(max_duration_ms 안
+# 줌)은 상한이 없어야 이런 정상 캡션을 안 쪼갠다.
+_no_cap = merge_frames(_long_same, _step)
+ok("기본은 지속시간 상한이 없다 — 정적 캡션(이름표 등)을 쪼개지 않는다",
+   len(_no_cap) == 1)
+
 
 # --- 결과 ---------------------------------------------------------------
 

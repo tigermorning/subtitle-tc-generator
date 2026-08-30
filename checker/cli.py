@@ -811,7 +811,8 @@ def _ocr_scan_mode(args, ap) -> int:
         captions = detect_onscreen_captions(
             args.video, lang=args.ocr_lang, sample_fps=args.ocr_sample_fps,
             min_confidence=args.ocr_min_confidence,
-            min_similarity=args.ocr_min_similarity, full_scan=not args.ocr_fast)
+            min_similarity=args.ocr_min_similarity,
+            max_duration_ms=args.ocr_max_duration, full_scan=not args.ocr_fast)
     except (MediaToolUnavailable, OcrUnavailable) as exc:
         print(f"[오류] {exc}")
         return 2
@@ -1057,6 +1058,13 @@ def main(argv: list[str] | None = None) -> int:
                     help="인접 프레임 텍스트를 같은 캡션으로 볼 편집 유사도 "
                          "기준(0~1, 기본 0.6). 완전 일치를 요구하면 압축·모션 "
                          "블러로 흔들린 프레임이 매번 새 캡션으로 갈린다(실측)")
+    ap.add_argument("--ocr-max-duration", type=int, default=None,
+                    help="캡션 하나가 최대 이만큼(ms)까지만 이어 붙는다. 기본은 "
+                         "상한 없음 — 이름표 캡션·워터마크류는 실제로 수십~수백초 "
+                         "떠 있는다(실측, 2026-08-31: \"Sebastiam/Tomy/Scarlet\" "
+                         "이름 캡션이 25초 넘게 그대로였다). 증거 없이 상한을 "
+                         "두면 그런 정상 캡션을 인위적으로 쪼갠다 — 정말 필요할 "
+                         "때만 켠다")
     ap.add_argument("--ocr-json", type=Path,
                     help="--ocr-scan 결과를 JSON으로도 남긴다")
     ap.add_argument("--lock-timecodes", action="store_true",

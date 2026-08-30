@@ -27,6 +27,30 @@
 2. `merge_frames`가 **편집 유사도**로 같은 캡션을 판정하게 바꿨다. 완전 일치만
    보면 압축·모션 블러로 프레임마다 한두 글자 흔들리는 실제 OCR 결과("마님"이
    "마남"·"마넘"으로 흔들림, 실측)가 매번 새 캡션으로 갈렸다.
+
+**실측 반영 2회차(2026-08-31, 같은 영상 전체 회차 37분 재검증) — 가정 하나를
+세웠다가 검증해서 절반만 맞고 절반은 틀렸다:**
+
+1차 재검증에서 캡션 하나가 167초까지 늘어난 사례를 보고 "전이적 드리프트
+(A~B~C~D로 비교 기준이 계속 옮겨가며 서로 다른 캡션이 이어 붙음)"로
+가정하고, 비교 기준을 직전 캡션의 대표 텍스트 대신 **첫 프레임(anchor)**으로
+바꾸고 `max_duration_ms`(당시 기본 8000ms)로 지속시간 상한도 걸었다.
+
+**상한은 검증 없이 넣었다가 되돌렸다.** 문제의 167초 구간을 짧은 클립으로
+잘라 재확인하고, 315초·340초 지점 프레임을 직접 열어 봤다 — "Sebastiam /
+Tomy / Scarlet" **이름 캡션이 25초 넘게 픽셀 단위로 그대로**였다. 방송에서
+이름표 캡션·정지 화면 코멘터리 캡션은 실제로 이 정도 오래 떠 있는다 — 167초
+짜리는 버그가 아니라 **사실**이었다. `max_duration_ms` 기본값을 없앴다
+(`None` = 상한 없음, 필요하면 `--ocr-max-duration`으로 사람이 켠다) — 증거
+없이 상한을 두면 실제로 오래 떠 있는 정적 캡션(이름표·워터마크류)을
+인위적으로 쪼갠다.
+
+**anchor 비교는 남겼다.** 이건 합성 테스트(`tests/run_tests.py`)로 직접
+확인한 실제 결함(A~B~C~D 드리프트로 완전히 다른 두 문장이 섞이는 경우)을
+막는다 — 이 실제 영상에서 그런 사례가 확인된 것은 아니지만, 안 다치는
+선에서 드는 안전장치라 남겨 뒀다. 상한처럼 "증거 없이 실측 결과를 인위적으로
+바꾸는" 부작용이 없다(같은 텍스트가 반복되면 anchor와도 계속 비슷해 정상
+병합된다 — 확인함).
 """
 
 from __future__ import annotations
@@ -146,17 +170,31 @@ def _similar(a: str, b: str, min_similarity: float) -> bool:
 
 def merge_frames(results: list[tuple[int, str, float]], sample_step_ms: int,
                  min_confidence: float = 0.4, min_similarity: float = 0.6,
-                 ) -> list[OcrCaption]:
+                 max_duration_ms: int | None = None) -> list[OcrCaption]:
     """프레임별 인식 결과를 캡션으로 묶는다. **순수 함수** — ffmpeg·easyocr 없이 테스트한다.
 
-    인접 프레임(간격이 샘플 간격 이내)이 충분히 비슷한 텍스트(`_similar`, 완전
-    일치가 아니라 편집 유사도)면 이어 붙인다. 유사도가 기준 미달이거나 간격이
-    벌어지면 새 캡션으로 끊는다. 신뢰도 미달·빈 텍스트 프레임은 버린다.
-    `media.detect_bottom_text()`의 연속-구간 병합과 같은 결이다.
+    인접 프레임(간격이 샘플 간격 이내)이 **그 캡션의 첫 프레임(anchor)과** 충분히
+    비슷한 텍스트(`_similar`, 완전 일치가 아니라 편집 유사도)면 이어 붙인다.
+    유사도가 기준 미달이거나 간격이 벌어지면 새 캡션으로 끊는다. 신뢰도 미달·
+    빈 텍스트 프레임은 버린다. `media.detect_bottom_text()`의 연속-구간 병합과
+    같은 결이다.
+
+    **anchor와 비교하는 이유**: 직전 캡션의 "대표 텍스트"(신뢰도 최고 프레임 것,
+    계속 갱신됨)와 비교하면 A~B~C~D처럼 인접한 것끼리만 비슷해도 A와 D는 전혀
+    다른 문장이 될 때까지 계속 이어 붙는 전이적 드리프트가 생길 수 있다. 그룹의
+    **첫 프레임**과 비교하면 이게 막힌다.
+
+    **`max_duration_ms`는 기본으로 상한을 두지 않는다(`None`).** 처음엔 8000ms로
+    막았다가 실측(2026-08-31, 예능A 19회)에서 되돌렸다 — 167초짜리로
+    나온 캡션을 "버그"로 짐작했는데, 315초·340초 프레임을 직접 열어 보니 이름
+    캡션("Sebastiam"/"Tomy"/"Scarlet")이 실제로 그만큼 안 바뀌고 떠 있었다.
+    증거 없이 상한을 두면 실제로 오래 떠 있는 정적 캡션(이름표·워터마크류)을
+    인위적으로 쪼갠다 — 필요하면 사람이 `--ocr-max-duration`으로 켠다.
 
     합쳐진 캡션의 대표 텍스트는 **그 안에서 신뢰도가 가장 높았던 프레임의
     텍스트**로 남긴다(다수결이 아니라 최고 신뢰도 — 프레임 몇 개짜리 짧은
-    캡션에서도 다수결보다 값이 안정적이다).
+    캡션에서도 다수결보다 값이 안정적이다). anchor 자체는 텍스트에 안 드러나고
+    비교 기준으로만 쓴다.
     """
     kept = sorted(
         ((ms, text, conf) for ms, text, conf in results
@@ -164,10 +202,13 @@ def merge_frames(results: list[tuple[int, str, float]], sample_step_ms: int,
         key=lambda r: r[0],
     )
     captions: list[OcrCaption] = []
+    anchors: list[str] = []
     for ms, text, conf in kept:
         text = text.strip()
         if (captions and ms - captions[-1].end_ms <= sample_step_ms
-                and _similar(text, captions[-1].text, min_similarity)):
+                and (max_duration_ms is None
+                     or captions[-1].end_ms - captions[-1].start_ms < max_duration_ms)
+                and _similar(text, anchors[-1], min_similarity)):
             last = captions[-1]
             last.end_ms = ms + sample_step_ms
             if conf > last.confidence:
@@ -178,12 +219,14 @@ def merge_frames(results: list[tuple[int, str, float]], sample_step_ms: int,
         else:
             captions.append(OcrCaption(start_ms=ms, end_ms=ms + sample_step_ms,
                                        text=text, confidence=conf))
+            anchors.append(text)
     return captions
 
 
 def detect_onscreen_captions(video: Path, lang: str = "en", sample_fps: float = 2.0,
                              min_confidence: float = 0.4, min_similarity: float = 0.6,
-                             full_scan: bool = True, engine=None) -> list[OcrCaption]:
+                             max_duration_ms: int | None = None, full_scan: bool = True,
+                             engine=None) -> list[OcrCaption]:
     """화면 캡션을 읽는다. **보고용이다** — 규칙 4: 화면 글자 검출은 추정이다.
 
     `full_scan=True`(기본)면 영상 전체를 `sample_fps`로 고르게 훑는다 — 느리지만
@@ -210,4 +253,5 @@ def detect_onscreen_captions(video: Path, lang: str = "en", sample_fps: float = 
         frames = _extract_frames(video, spans, sample_fps, Path(tmp))
         results = run(frames, lang)
 
-    return merge_frames(results, int(1000 / sample_fps), min_confidence, min_similarity)
+    return merge_frames(results, int(1000 / sample_fps), min_confidence, min_similarity,
+                       max_duration_ms)
