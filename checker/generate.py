@@ -362,15 +362,24 @@ def generate(video: Path, profile: dict, script: Path | None = None,
     # 자료화면)에서 whisper가 "- - - - -"·"일본어의 351 한ada 덮바러" 같은 뜻
     # 없는 글자를 뱉었다.
     #
-    # **faster-whisper가 있으면 신뢰도(`avg_logprob`)로 정확히 잡는다** — 같은
-    # 날 직접 재 보니 깨끗한 대사는 -0.17, 이 잡음 구간은 -0.61로 뚜렷이 갈렸다.
+    # **faster-whisper가 있으면 신뢰도(`avg_logprob`)를 같이 본다** — 같은 날
+    # 직접 재 보니 깨끗한 대사는 -0.17, 이 잡음 구간은 -0.61로 뚜렷이 갈렸다.
     # 겹치는 원시 조각 중 가장 낮은(가장 불확실한) 값을 그 자막의 신뢰도로 본다.
     #
-    # 신뢰도가 없으면(ffmpeg 내장 whisper 필터 — srt·json 둘 다 이 값을 안 준다,
-    # 2026-08-30 직접 확인) "최대 표시 시간을 꽉 채웠는데 글자는 적다"는 대체
-    # 신호로 어림한다. 어느 쪽이든 놓치는 것과 잘못 잡는 것이 있을 수 있다 —
-    # 그래서 지우거나 고치지 않고 **알리기만** 한다.
+    # **신뢰도만으로는 안 된다.** `--whisper-lang ko`로 언어를 강제하면, 정확히
+    # 옮긴 외국어 대사(예: "Japan Airways 351 clear for take-off" — 관제탑
+    # 교신, 실제로 맞게 받아 적었다)도 모델이 "기대와 다른 언어"라 신뢰도가
+    # 낮게 나온다(2026-08-30 실측, E01 재생성에서 145곳 중 다수가 이런 정상
+    # 외국어 문장이었다). 그래서 **신뢰도 낮음 + 글자 밀도 낮음(3 CPS 미만)이
+    # 같이 있을 때만** 잡는다 — 진짜 환각(예: "일본어의 351 한ada 덮바러")은
+    # 시간 대비 글자가 적어서 CPS도 같이 낮지만, 정확히 옮긴 외국어 문장은
+    # 글자가 정상적으로 촘촘해서 CPS가 낮지 않다(위 관제탑 예문은 275ms에
+    # 134.5 CPS — 오히려 아주 높다). 신뢰도가 없으면(ffmpeg 내장 whisper
+    # 필터 — srt·json 둘 다 이 값을 안 준다) "최대 표시 시간을 꽉 채웠는지"로
+    # 대신한다. 어느 쪽이든 놓치는 것과 잘못 잡는 것이 있을 수 있다 — 그래서
+    # 지우거나 고치지 않고 **알리기만** 한다.
     CONFIDENCE_THRESHOLD = -0.4
+    SPARSE_CPS = 3.0
 
     def _worst_confidence(ev) -> float | None:
         values = [s.confidence for s in segments
@@ -379,19 +388,19 @@ def generate(video: Path, profile: dict, script: Path | None = None,
         return min(values) if values else None
 
     dur_max = (profile.get("limits") or {}).get("duration_ms", {}).get("max")
+    weights = (profile.get("limits") or {}).get("char_weights")
     has_confidence = any(s.confidence is not None for s in segments)
     suspects = []
     for ev in result.events:
+        sparse = chars_per_second(ev.text, ev.duration_ms, weights) < SPARSE_CPS
         if has_confidence:
             conf = _worst_confidence(ev)
-            if conf is not None and conf < CONFIDENCE_THRESHOLD:
+            if conf is not None and conf < CONFIDENCE_THRESHOLD and sparse:
                 suspects.append(ev)
-        elif dur_max and ev.duration_ms >= dur_max:
-            weights = (profile.get("limits") or {}).get("char_weights")
-            if chars_per_second(ev.text, ev.duration_ms, weights) < 3.0:
-                suspects.append(ev)
+        elif dur_max and ev.duration_ms >= dur_max and sparse:
+            suspects.append(ev)
     if suspects:
-        basis = "신뢰도 낮음" if has_confidence else "시간을 꽉 채웠는데 글자가 적음"
+        basis = "신뢰도·글자 밀도 둘 다 낮음" if has_confidence else "시간을 꽉 채웠는데 글자가 적음"
         say(f"환각 의심 자막 {len(suspects)}곳({basis}) — 영상에서 직접 들어보고 확인하세요:")
         for ev in suspects[:20]:
             ts = ev.start_ms // 1000
