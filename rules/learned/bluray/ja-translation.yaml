@@ -1,0 +1,40 @@
+# `rules/bluray/`가 없다 — 새 발주처, 공식 문건 없음. 추측해서 만들지 않는다
+# (규칙 9). 순수 관측이다.
+#
+# 2026-08-30: 영화B(2026, 영화), 영어 원어 → 일본어 번역.
+# 블루레이 릴리스 릴리스에 자막 트랙 37개가 실려 있어(주요 언어 10개만
+# 우선 학습, 사용자 확인) 그중 하나.
+
+schema_version: 1
+platform: bluray
+language: ja
+kind: translation
+source:
+  official: false
+  origin: learned
+  from:
+    작품:
+      - {제목: "영화B (2026)", 형태: 영화, 원어: 영어, 줄_합계: 1608}
+  measured: "2026-08-30"
+
+observed:
+  duration_ms:
+    중앙값: 1668
+    p5: 834
+    p95: 4194
+    범위: [583, 6423]
+  gap_ms:
+    중앙값: 750
+    p5: 125
+  chars_per_line_unweighted:
+    중앙값: 7.0
+    p95: 12.0
+    최대: 20.0
+  cps_unweighted:
+    중앙값: 4.1
+    p95: 6.2
+  lines:
+    한_줄: 1354
+    두_줄: 254
+    세_줄_이상: 0
+    전체_대사자막: 1608

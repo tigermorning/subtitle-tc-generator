@@ -1,0 +1,39 @@
+# `rules/bluray/`가 없다 — 새 발주처, 공식 문건 없음. 추측해서 만들지 않는다
+# (규칙 9). 순수 관측이다.
+#
+# 2026-08-30: 영화B(2026, 영화), 영어 원어 → 이탈리아어 번역.
+# 블루레이 릴리스 릴리스 37개 트랙 중 주요 언어 10개만 우선 학습.
+
+schema_version: 1
+platform: bluray
+language: it
+kind: translation
+source:
+  official: false
+  origin: learned
+  from:
+    작품:
+      - {제목: "영화B (2026)", 형태: 영화, 원어: 영어, 줄_합계: 1646}
+  measured: "2026-08-30"
+
+observed:
+  duration_ms:
+    중앙값: 1667
+    p5: 876
+    p95: 3822
+    범위: [833, 7382]
+  gap_ms:
+    중앙값: 751
+    p5: 1
+  chars_per_line_unweighted:
+    중앙값: 21.0
+    p95: 39.0
+    최대: 42.0
+  cps_unweighted:
+    중앙값: 13.7
+    p95: 17.8
+  lines:
+    한_줄: 1283
+    두_줄: 363
+    세_줄_이상: 0
+    전체_대사자막: 1646
