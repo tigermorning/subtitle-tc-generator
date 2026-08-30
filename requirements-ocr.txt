@@ -1,0 +1,8 @@
+# 화면 캡션 인식(--ocr-scan)용 격리 의존성. 루트 requirements.txt에는 안 넣는다 —
+# easyocr이 끌고 오는 torch가 시스템 파이썬의 torch(다른 프로젝트가 물려 쓴다)와
+# 충돌할 수 있다. .venv-diarize와 같은 이유(docs/HANDOFF.md 참고).
+#
+#   python -m venv .venv-ocr
+#   .venv-ocr/Scripts/python.exe -m pip install -r requirements-ocr.txt
+
+easyocr

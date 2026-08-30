@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from checker import check_events, load_profile, ProfileError  # noqa: E402
 from checker.profile import _merge, _validate  # noqa: E402
 from checker.text import count_chars  # noqa: E402
+from checker.ocr import merge_frames  # noqa: E402
 
 PASSED = 0
 FAILED: list[str] = []
@@ -3341,6 +3342,52 @@ ok("실패 개수를 요약한다", "1건 실패" in _pf_report_fail)
 _pf_report_ok = _pf.report([_pf.Check("가짜 항목", True)])
 ok("전부 통과하면 그렇게 말하되 로직은 보장 안 한다고 밝힌다",
    "실행해 봐야" in _pf_report_ok)
+
+
+# --- 화면 캡션 OCR 병합(merge_frames) --------------------------------------
+# ffmpeg·easyocr 없이 순수 함수만 검사한다 — .venv-ocr가 없어도 이 스위트는
+# 그대로 통과해야 한다(규칙9, 무거운 의존성을 pre-commit 필수 경로에 안 넣는다).
+
+_step = 500  # sample_fps=2.0일 때의 프레임 간격(ms)
+
+_merged = merge_frames(
+    [(0, "HELLO", 0.9), (500, "HELLO", 0.85), (1000, "HELLO", 0.9)], _step)
+ok("같은 텍스트 연속 프레임이 캡션 하나로 병합된다", len(_merged) == 1)
+ok("병합된 캡션의 끝 시각이 마지막 프레임 뒤로 늘어난다",
+   _merged and _merged[0].end_ms == 1000 + _step)
+ok("병합된 캡션의 프레임 수를 센다", _merged and _merged[0].frame_count == 3)
+
+_split = merge_frames(
+    [(0, "HELLO", 0.9), (500, "WORLD", 0.9)], _step)
+ok("텍스트가 바뀌면 캡션이 갈린다", len(_split) == 2)
+
+_dropped = merge_frames(
+    [(0, "HELLO", 0.9), (500, "HELLO", 0.1), (1000, "HELLO", 0.1),
+     (1500, "HELLO", 0.9)], _step, min_confidence=0.4)
+ok("신뢰도 미달 프레임은 버려진다(연속으로 빠지면 간격이 벌어져 캡션이 갈린다)",
+   len(_dropped) == 2)
+
+_gapped = merge_frames(
+    [(0, "HELLO", 0.9), (5000, "HELLO", 0.9)], _step)
+ok("샘플 간격보다 큰 공백은 텍스트가 같아도 캡션을 가른다", len(_gapped) == 2)
+
+_empty = merge_frames([(0, "   ", 0.9)], _step)
+ok("빈 텍스트 프레임은 캡션이 되지 않는다", _empty == [])
+
+# 실측(2026-08-30, 예능A 19회): 같은 캡션이 프레임마다 한두 글자씩
+# 다르게 읽힌다("마님"이 "마남"·"마넘"으로 흔들림) — 완전 일치가 아니라
+# 편집 유사도로 같은 캡션인지 본다.
+_fuzzy = merge_frames(
+    [(0, "우리 마남이 이런데 뭐 ?", 0.78), (500, "우리 마넘이 이런데 뭐 ?", 0.40),
+     (1000, "우리 마남이 이런데 뭐 ?", 0.53)], _step)
+ok("프레임마다 한두 글자 흔들려도 같은 캡션으로 합쳐진다(편집 유사도)",
+   len(_fuzzy) == 1)
+ok("합쳐진 캡션의 대표 텍스트는 신뢰도가 가장 높았던 프레임 것이다",
+   _fuzzy and _fuzzy[0].text == "우리 마남이 이런데 뭐 ?"
+   and abs(_fuzzy[0].confidence - (0.78 + 0.40 + 0.53) / 3) < 1e-9)
+
+ok("정말 다른 텍스트는 유사도 기준 미달로 여전히 갈린다",
+   len(merge_frames([(0, "HELLO", 0.9), (500, "GOODBYE", 0.9)], _step)) == 2)
 
 
 # --- 결과 ---------------------------------------------------------------

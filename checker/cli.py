@@ -792,6 +792,50 @@ def _evaluate_mode(args, ap) -> int:
     return 0
 
 
+def _ocr_scan_mode(args, ap) -> int:
+    """영상에서 화면 캡션(그래픽 자막)을 읽어 본다. **보고용이다.**
+
+    `detect_bottom_text()`는 글자가 있는지만 짐작하고, 이 모드가 실제로 읽는다.
+    화면 글자 검출은 규칙4의 "추정"이라 여기서 만든 목록을 자막 Event로 바꾸거나
+    자동 반영하지 않는다 — 1단계(추출+인식)까지만 한다(`docs/BACKLOG.md` 참고).
+    """
+    from .media import MediaToolUnavailable
+    from .ocr import OcrUnavailable, detect_onscreen_captions
+
+    if not args.video:
+        ap.error("--ocr-scan에는 --video가 필요합니다")
+    if not args.video.is_file():
+        ap.error(f"영상을 찾지 못했습니다: {args.video}")
+
+    try:
+        captions = detect_onscreen_captions(
+            args.video, lang=args.ocr_lang, sample_fps=args.ocr_sample_fps,
+            min_confidence=args.ocr_min_confidence,
+            min_similarity=args.ocr_min_similarity, full_scan=not args.ocr_fast)
+    except (MediaToolUnavailable, OcrUnavailable) as exc:
+        print(f"[오류] {exc}")
+        return 2
+
+    if not captions:
+        print("화면 캡션을 찾지 못했습니다.")
+        return 0
+
+    print(f"화면 캡션 후보 {len(captions)}개 (보고용 — 자동 반영되지 않습니다)")
+    for c in captions:
+        text = c.text.replace("\n", " / ")
+        print(f"  {c.start_ms:>8}–{c.end_ms:<8}ms  ({c.confidence:.2f})  {text}")
+
+    if args.ocr_json:
+        import json as _json
+        args.ocr_json.write_text(
+            _json.dumps([{"start_ms": c.start_ms, "end_ms": c.end_ms, "text": c.text,
+                          "confidence": c.confidence, "frame_count": c.frame_count}
+                         for c in captions], ensure_ascii=False, indent=2),
+            encoding="utf-8")
+        print(f"\nJSON으로 저장했습니다: {args.ocr_json}")
+    return 0
+
+
 def _generate_mode(args, ap) -> int:
     """영상 -> 자막 초안. 검사 경로와 섞지 않는다 — 입력도 출력도 다르다."""
     from .generate import generate, notes_srt
@@ -990,6 +1034,31 @@ def main(argv: list[str] | None = None) -> int:
                     help="영상 파일. 프레임레이트를 자동으로 읽고 --spot에 쓴다(ffmpeg 필요)")
     ap.add_argument("--spot", action="store_true",
                     help="말소리 구간과 견줘 인점·아웃점을 제안한다(자동 교정 아님)")
+    ap.add_argument("--ocr-scan", action="store_true",
+                    help="화면에 타 있는 캡션(그래픽 자막)을 EasyOCR로 읽어 목록만 "
+                         "낸다(--video 필요). **보고용이다** — 화면 글자 검출은 "
+                         "추정이라(규칙4) 자막 Event로 만들거나 자동 반영하지 않는다. "
+                         "인식은 격리 venv(.venv-ocr)에서 돈다(없으면 오류, 조용히 "
+                         "건너뛰지 않음)")
+    ap.add_argument("--ocr-lang", default="en",
+                    help="캡션 언어(easyocr 언어 코드, 기본 en)")
+    ap.add_argument("--ocr-sample-fps", type=float, default=2.0,
+                    help="초당 몇 프레임을 뽑아 인식할지(기본 2.0)")
+    ap.add_argument("--ocr-fast", action="store_true",
+                    help="detect_bottom_text()로 화면 아래 25%%만 먼저 추려 그 "
+                         "구간만 인식한다(빠르다). **기본은 이게 아니라 전체 "
+                         "프레임을 다 훑는 쪽이다** — 실측(2026-08-30, 예능A "
+                         "시즌2 19회)에서 이 선필터가 캡션을 0개 찾았다(캡션이 "
+                         "화면 아래가 아니라 인물 옆에 떴다). 위치가 항상 화면 "
+                         "아래인 걸 아는 자료에서만 쓴다")
+    ap.add_argument("--ocr-min-confidence", type=float, default=0.4,
+                    help="이 미만 신뢰도의 인식 결과는 버린다(기본 0.4)")
+    ap.add_argument("--ocr-min-similarity", type=float, default=0.6,
+                    help="인접 프레임 텍스트를 같은 캡션으로 볼 편집 유사도 "
+                         "기준(0~1, 기본 0.6). 완전 일치를 요구하면 압축·모션 "
+                         "블러로 흔들린 프레임이 매번 새 캡션으로 갈린다(실측)")
+    ap.add_argument("--ocr-json", type=Path,
+                    help="--ocr-scan 결과를 JSON으로도 남긴다")
     ap.add_argument("--lock-timecodes", action="store_true",
                     help="**타임코드를 절대 건드리지 않는다.** TC 작업이 끝난 파일을 "
                          "받아 번역·교정만 할 때 쓴다. 자막을 나누는 것도 막는다"
@@ -1164,6 +1233,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.against:
         return _evaluate_mode(args, ap)
+
+    if args.ocr_scan:
+        return _ocr_scan_mode(args, ap)
 
     if args.list:
         for prof in available_profiles():

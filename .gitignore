@@ -8,6 +8,10 @@
 # (2026-08-27 실제로 부딪혀서 시스템 torch를 깼다가 되돌린 적 있다) —
 # 그래서 아예 딴 살림을 차린다.
 .venv-diarize/
+
+# 화면 캡션 OCR(EasyOCR) 전용 격리 환경. 같은 이유(torch 충돌 방지) —
+# requirements-ocr.txt·checker/ocr.py 참고.
+.venv-ocr/
 __pycache__/
 .omc/
 bin/
