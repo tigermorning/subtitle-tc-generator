@@ -73,7 +73,9 @@ def _split_points(text: str) -> list[int]:
 
 
 def split_text(text: str, max_chars: float, weights: dict | None = None,
-              force_sentence_split: bool = False) -> list[str]:
+              force_sentence_split: bool = False,
+              force_clause_split: bool = False,
+              min_piece_chars: float = 0) -> list[str]:
     """`max_chars`를 넘지 않게 의미 단위로 자른다.
 
     가운데에 가까운 자리를 고른다 — 한쪽만 길게 남으면 다음 조각이 또 잘려야 한다.
@@ -85,21 +87,42 @@ def split_text(text: str, max_chars: float, weights: dict | None = None,
     한국어 쪽 병합 개수는 정답 SDH와 거의 같았는데 번역된 영어 최종 자막
     개수는 정답의 79%에 그쳤다. 원인은 병합이 아니라 여기였다). 한 자막에
     서로 다른 발화가 남아 있으면 겉보기엔 안 잘렸어도 정답과는 다른 단위다.
+
+    `force_clause_split`이 참이면 **문장 안 절 경계**(쉼표·접속 어미)에서도
+    글자 수와 무관하게 자른다. 2026-08-30, 드라마B E01 정답과의
+    단어 단위 대조로 발견: 정답이 자막을 나누는 자리의 44.5%가 whisper
+    조각 **안**이었다 — 그런데 그 자리의 말소리 간격은 조각 사이와 다르지
+    않았다(간격 0~50ms인 자리조차 7.3%는 정답이 갈랐다). 사람은 절이 끝나도
+    쉬지 않고 이어 말하지만 자막은 거기서 가른다는 뜻 — **소리가 아니라
+    뜻으로 가르는 자리**라 간격 기반 병합으로는 못 잡는다. `min_piece_chars`
+    로 너무 짧은 조각(예: 한 어절짜리 절)까지 쪼개는 것은 막는다 — 그러면
+    반대로 정답보다 더 잘게 잘라 새 문제를 만든다.
     """
     text = text.strip()
     if not text:
         return []
 
-    if force_sentence_split:
-        internal = [m.start() for m in SENTENCE_END.finditer(text)
-                   if _is_real_sentence_end(text, m.start() - 1)]
-        if internal:
-            pos = internal[0]
+    if force_sentence_split or force_clause_split:
+        candidates: list[int] = []
+        if force_sentence_split:
+            candidates += [m.start() for m in SENTENCE_END.finditer(text)
+                          if _is_real_sentence_end(text, m.start() - 1)]
+        if force_clause_split:
+            candidates += [m.end() - len(m.group(0)) + len(m.group(0).rstrip())
+                           for m in CLAUSE_END.finditer(text)]
+        candidates = sorted(set(candidates))
+        for pos in candidates:
             left, right = text[:pos].strip(), text[pos:].strip()
-            if left and right:
-                return ([left] if count_chars(left, weights) <= max_chars
-                        else split_text(left, max_chars, weights, force_sentence_split)) + \
-                       split_text(right, max_chars, weights, force_sentence_split)
+            if not left or not right:
+                continue
+            if (count_chars(left, weights) < min_piece_chars
+                    or count_chars(right, weights) < min_piece_chars):
+                continue
+            return ([left] if count_chars(left, weights) <= max_chars
+                    else split_text(left, max_chars, weights, force_sentence_split,
+                                    force_clause_split, min_piece_chars)) + \
+                   split_text(right, max_chars, weights, force_sentence_split,
+                              force_clause_split, min_piece_chars)
 
     if count_chars(text, weights) <= max_chars:
         return [text]
@@ -157,9 +180,12 @@ def _snap_to_silence(spans: list[tuple[int, int]],
 def resplit(event: Event, max_chars_per_cue: float,
             weights: dict | None = None,
             speech: list[tuple[int, int]] | None = None,
-            force_sentence_split: bool = False) -> list[Event]:
+            force_sentence_split: bool = False,
+            force_clause_split: bool = False,
+            min_piece_chars: float = 0) -> list[Event]:
     """자막 하나를 여러 개로 나눈다. 나눌 필요가 없으면 그대로 돌려준다."""
-    pieces = split_text(event.text, max_chars_per_cue, weights, force_sentence_split)
+    pieces = split_text(event.text, max_chars_per_cue, weights, force_sentence_split,
+                        force_clause_split, min_piece_chars)
     if len(pieces) <= 1:
         return [event]
 
@@ -183,11 +209,15 @@ def resplit_all(events: list[Event], profile: dict,
     per_line = limits.get("chars_per_line") or 42
     max_lines = limits.get("max_lines") or 2
     weights = limits.get("char_weights")
-    force_sentence_split = bool((profile.get("timecode") or {}).get("force_sentence_split"))
+    timecode = profile.get("timecode") or {}
+    force_sentence_split = bool(timecode.get("force_sentence_split"))
+    force_clause_split = bool(timecode.get("force_clause_split"))
+    min_piece_chars = float(timecode.get("min_piece_chars") or 0)
 
     out: list[Event] = []
     for ev in events:
-        pieces = resplit(ev, per_line * max_lines, weights, speech, force_sentence_split)
+        pieces = resplit(ev, per_line * max_lines, weights, speech, force_sentence_split,
+                         force_clause_split, min_piece_chars)
         out.extend(pieces)
         if origins is not None:
             origins.extend([ev.index] * len(pieces))
