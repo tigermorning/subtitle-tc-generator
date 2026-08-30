@@ -81,7 +81,11 @@ def translate_foreign_dialogue(events: list[Event], translator,
         label = detect_language_label(ev.text)
         original = ev.text
         translated = translator.ask(SYSTEM, original).strip()
-        if not translated or translated.upper() == "UNCLEAR":
+        # **한글이 하나도 없으면 번역이 아니다.** 모델이 지시를 안 듣고 원문을
+        # 그대로 돌려주거나 다른 외국어로 다시 낸 적이 있다(2026-08-30 실측,
+        # E01 "福岡着きばかり待ってるよ" — 번역 대신 일본어를 또 냈다). 그걸
+        # 그대로 받으면 "번역했다"고 우기는 꼴이라 지어낸 것과 같다(규칙 4).
+        if not translated or translated.upper() == "UNCLEAR" or not has_hangul(translated):
             out.append(ev)  # 원문 그대로 둔다 — 지어내지 않는다
             notes.append((ev.index, f"{label} 대사로 보이나 번역하지 못했습니다."
                                     " 영상에서 직접 확인하세요."))
