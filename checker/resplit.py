@@ -182,10 +182,19 @@ def resplit(event: Event, max_chars_per_cue: float,
             speech: list[tuple[int, int]] | None = None,
             force_sentence_split: bool = False,
             force_clause_split: bool = False,
-            min_piece_chars: float = 0) -> list[Event]:
-    """자막 하나를 여러 개로 나눈다. 나눌 필요가 없으면 그대로 돌려준다."""
+            min_piece_chars: float = 0,
+            clause_split_min_duration_ms: int = 0) -> list[Event]:
+    """자막 하나를 여러 개로 나눈다. 나눌 필요가 없으면 그대로 돌려준다.
+
+    `force_clause_split`은 `clause_split_min_duration_ms`보다 **긴** 자막에만
+    켠다(2026-08-30, 드라마B E01 재검증 — 짧은 자막까지 무조건 절
+    경계에서 가르니 매칭 수는 늘었지만(460->504) 군더더기가 3배(35->102)로
+    늘고 유사도가 더 떨어졌다. 이미 짧은 자막은 절이 있어도 정답이 안 가른다는
+    뜻 — 병합 단계에서 여러 조각이 뭉쳐 원래 길어진 자막에만 절 분할을 쓴다).
+    """
+    use_clause_split = force_clause_split and event.duration_ms > clause_split_min_duration_ms
     pieces = split_text(event.text, max_chars_per_cue, weights, force_sentence_split,
-                        force_clause_split, min_piece_chars)
+                        use_clause_split, min_piece_chars)
     if len(pieces) <= 1:
         return [event]
 
@@ -213,11 +222,12 @@ def resplit_all(events: list[Event], profile: dict,
     force_sentence_split = bool(timecode.get("force_sentence_split"))
     force_clause_split = bool(timecode.get("force_clause_split"))
     min_piece_chars = float(timecode.get("min_piece_chars") or 0)
+    clause_split_min_duration_ms = int(timecode.get("clause_split_min_duration_ms") or 0)
 
     out: list[Event] = []
     for ev in events:
         pieces = resplit(ev, per_line * max_lines, weights, speech, force_sentence_split,
-                         force_clause_split, min_piece_chars)
+                         force_clause_split, min_piece_chars, clause_split_min_duration_ms)
         out.extend(pieces)
         if origins is not None:
             origins.extend([ev.index] * len(pieces))
