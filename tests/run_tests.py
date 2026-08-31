@@ -21,8 +21,8 @@ from checker.ocr import (  # noqa: E402
 from checker.position import JobRules, apply_marker, is_forced_narrative  # noqa: E402
 from checker.generate import _is_known_hallucination, has_vad_support  # noqa: E402
 from checker.sfx import (  # noqa: E402
-    AUDIOSET_TO_CANDIDATE, SoundEvent, merge_sound_events, sound_events_to_draft_events,
-    speech_gaps,
+    AUDIOSET_TO_CANDIDATE, SoundEvent, _apply_music_marker, merge_sound_events,
+    sound_events_to_draft_events, speech_gaps,
 )
 
 PASSED = 0
@@ -3606,6 +3606,21 @@ ok("말소리가 전혀 없으면 전체가 하나의 빈 구간이다",
 
 ok("AUDIOSET_TO_CANDIDATE의 후보는 전부 대괄호로 감싼 문구다",
    all(v.startswith("[") and v.endswith("]") for v in AUDIOSET_TO_CANDIDATE.values()))
+
+# --- _apply_music_marker: 플랫폼별 DP12류(음악 효과음 ♪ 표기) 반영 --------
+# 2026-08-31, 드라마B E01 --generate --sfx 통합 테스트에서 실측: 고정 문구를
+# 그대로 얹으면 디즈니 DP12(음악 효과음엔 ♪ 필요) 위반이 126건 났다.
+
+ok("note_inside_bracket=True면 음악 관련 문구에 ♪를 넣는다",
+   _apply_music_marker("[음악이 흐른다]", True) == "[♪ 음악이 흐른다]")
+ok("note_inside_bracket=False면 음악 관련 문구에서 ♪를 뺀다",
+   _apply_music_marker("[♪ 음악이 흐른다]", False) == "[음악이 흐른다]")
+ok("note_inside_bracket=None이면 손대지 않는다",
+   _apply_music_marker("[음악이 흐른다]", None) == "[음악이 흐른다]")
+ok("음악과 무관한 문구는 손대지 않는다",
+   _apply_music_marker("[개 짖는 소리]", True) == "[개 짖는 소리]")
+ok("이미 규칙에 맞으면 그대로 둔다",
+   _apply_music_marker("[♪ 음악이 흐른다]", True) == "[♪ 음악이 흐른다]")
 
 
 # --- SFX 2단계: sound_events_to_draft_events·merge_sound_events -----------

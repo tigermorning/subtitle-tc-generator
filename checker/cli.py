@@ -1104,7 +1104,10 @@ def _generate_mode(args, ap) -> int:
             print(f"[오류] {exc}")
             return 2
 
-        sfx_events = sound_events_to_draft_events(sound_events, start_index=len(draft.events) + 1)
+        music_note = (profile.get("music") or {}).get("note_inside_bracket")
+        sfx_events = sound_events_to_draft_events(
+            sound_events, start_index=len(draft.events) + 1,
+            music_note_in_bracket=music_note)
         if not sfx_events:
             print("소리 후보를 찾지 못했습니다(매핑되는 것이 없었을 수 있습니다).")
         else:

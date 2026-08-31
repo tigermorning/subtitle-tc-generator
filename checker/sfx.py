@@ -107,6 +107,34 @@ AUDIOSET_TO_CANDIDATE = {
 }
 
 
+# checker/checks.py의 music_marker_style(DP12류)과 같은 낱말 집합 — 대괄호
+# 안 텍스트가 음악 관련인지 이 낱말로 가린다.
+_MUSIC_KEYWORDS = ("음악", "곡", "연주", "노래")
+
+
+def _apply_music_marker(text: str, note_inside_bracket: bool | None) -> str:
+    """음악 관련 대괄호 문구에 플랫폼 규칙(DP12류)대로 ♪를 넣거나 뺀다.
+
+    2026-08-31, 드라마B E01로 `--generate --sfx` 실제 통합 테스트 중 발견:
+    디즈니 프로파일은 `[♪ 음악이 흐른다]`를 원하는데 고정 문구
+    `[음악이 흐른다]`를 그대로 얹어 DP12 위반 126건을 만들었다. 검사가
+    이 규칙을 자동 교정하지 않아(`checker/fixes.py`에 없음) 사람이 매번
+    손으로 고쳐야 했다 — 생성 시점에 플랫폼을 이미 아니까 여기서 맞춘다.
+    `note_inside_bracket`이 `None`이면(프로파일에 규정 없음) 손대지 않는다.
+    """
+    if note_inside_bracket is None or not (text.startswith("[") and text.endswith("]")):
+        return text
+    inner = text[1:-1]
+    if not any(k in inner for k in _MUSIC_KEYWORDS):
+        return text
+    has_note = "♪" in inner
+    if note_inside_bracket and not has_note:
+        return f"[♪ {inner}]"
+    if not note_inside_bracket and has_note:
+        return f"[{inner.replace('♪', '').strip()}]"
+    return text
+
+
 @dataclass
 class SoundEvent:
     start_ms: int
@@ -189,16 +217,22 @@ def detect_sound_events(video: Path, speech: list[tuple[int, int]], duration_ms:
     return events
 
 
-def sound_events_to_draft_events(events: list[SoundEvent], start_index: int = 1) -> list[Event]:
+def sound_events_to_draft_events(events: list[SoundEvent], start_index: int = 1,
+                                 music_note_in_bracket: bool | None = None) -> list[Event]:
     """`candidate`가 있는 `SoundEvent`만 `kind="sfx"` `Event`로 바꾼다.
 
     매핑 없는 라벨(`candidate is None`)은 뺀다 — 원 라벨만으로 한국어 자막을
     지어내지 않는다(규칙3). 번호는 임시값이다(`merge_sound_events()`가 최종
     번호를 다시 매긴다) — `start_index`는 대사 이벤트 번호와 안 겹치게
     호출하는 쪽이 정한다.
+
+    `music_note_in_bracket`은 `profile.get("music", {}).get("note_inside_bracket")`을
+    그대로 넘긴다 — 음악 관련 후보에 플랫폼 규칙대로 ♪를 넣거나 뺀다
+    (`_apply_music_marker()` 참고, 안 주면 손대지 않는다).
     """
     mapped = [e for e in events if e.candidate]
-    return [Event(start_index + i, e.start_ms, e.end_ms, e.candidate, kind="sfx")
+    return [Event(start_index + i, e.start_ms, e.end_ms,
+                  _apply_music_marker(e.candidate, music_note_in_bracket), kind="sfx")
            for i, e in enumerate(mapped)]
 
 
