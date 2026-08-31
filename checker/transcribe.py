@@ -216,7 +216,26 @@ def _faster_whisper_transcribe(video: Path, language: str, use_gpu: bool,
     try:
         raw_segments, _info = fw_model.transcribe(
             str(video), language=None if language == "auto" else language,
-            vad_filter=False)
+            vad_filter=False,
+            # **직전 텍스트에 조건을 걸지 않는다(2026-08-31).** 기본값(True)일 때
+            # whisper가 한 번 헛것을 뱉으면 다음 조각도 그 헛것을 "문맥"으로 물고
+            # 이어가 20~30초씩 같은 환각을 반복하는 사례를 확인했다(영화A
+            # "Transcribed by —"가 27초 동안 이어짐, 영화B도 비슷한
+            # 자리에서 실제 대사 여러 줄이 옆 문장 하나에 통째로 삼켜짐). 조각마다
+            # 독립적으로 판단하게 하면 이런 전이(하나의 나쁜 판단이 다음 조각까지
+            # 오염시키는 것)를 막는다 — 대신 긴 대화의 문맥 일관성은 다소 떨어질
+            # 수 있다(실측 전이라 가설이나, 환각으로 대사를 통째로 잃는 손해가
+            # 문맥 일관성 손해보다 크다고 판단했다).
+            condition_on_previous_text=False,
+            # **침묵에서 환각이 계속되면 그 구간을 건너뛴다.** faster-whisper
+            # 자체 기능 — 2초 이상 조용한데 같은 말이 반복되면 환각으로 보고
+            # 넘어간다. 위 조건과 겹치는 방어선이지만 근거가 다르다(이건 무음
+            # 자체를 본다, 위는 문맥 전이를 끊는다). **`word_timestamps=True`가
+            # 있어야 작동한다** — 없으면 조용히 무시된다(라이브러리 문서 확인,
+            # 2026-08-31). 단어 단위 시간까지는 우리가 안 쓰지만 이 옵션을 켜는
+            # 유일한 방법이다.
+            word_timestamps=True,
+            hallucination_silence_threshold=2.0)
         out = []
         for seg in raw_segments:
             text = seg.text.strip()
