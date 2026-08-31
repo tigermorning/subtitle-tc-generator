@@ -635,11 +635,15 @@ whisper 대사 1개 + OCR 캡션 2개가 정상 병합, `“…”`로 감싸짐
 범위)이 500ms짜리 캡션 조각을 실제로 잡아냄 — 자동으로 안 고치고 사람에게
 넘기는 것까지 의도대로 동작.
 
+**T10·T11도 구현 완료(2026-08-31, 같은 날 바로 이어서)** —
+`checker/checks.py`에 `quote_role_swapped`(마커가 double_quote일 때만, 이벤트
+전체가 온전한 화면자막이면 건너뛰고 대사 줄 안 인용만 잡는다)·
+`forced_narrative_merged_with_dialogue`(한 이벤트 안에 마커로 감싼 줄과 안
+감싼 줄이 섞이면 잡는다) 둘 다 `position.is_forced_narrative()` 재사용으로
+구현. 실측: `--generate --ocr` 초안에서 미구현 검사 10건→8건. 양성/음성
+테스트 8건 추가, 839건 전부 통과.
+
 **여전히 안 한 것(다음 라운드, 규칙12 — 갈래를 동시에 안 벌인다):**
-- T10(`quote_role_swapped`)·T11(`forced_narrative_merged_with_dialogue`)
-  구현 — 지금은 마커 적용 캡션이 실제로 생겼으니 재료는 갖춰졌지만 검사
-  로직 자체는 아직 없다("미구현 검사"로 계속 보고됨, 스모크 테스트에서
-  10건 중 포함 확인).
 - `checker/pipeline.py`의 `stage_ocr_captions`/`STAGES` 등록 — GUI 쪽을
   실제로 쓰게 되면 그때 같이 본다.
 - `rules/SCHEMA.md:50`의 낡은 "forced_narrative가 sdh에서 금지" 표기 —
