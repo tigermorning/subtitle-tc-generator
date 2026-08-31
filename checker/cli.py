@@ -815,7 +815,7 @@ def _ocr_scan_mode(args, ap) -> int:
 
     try:
         captions = detect_onscreen_captions(
-            args.video, lang=args.ocr_lang, sample_fps=args.ocr_sample_fps,
+            args.video, lang=args.ocr_lang, sample_fps=args.ocr_sample_fps or 2.0,
             min_confidence=args.ocr_min_confidence,
             min_similarity=args.ocr_min_similarity,
             max_duration_ms=args.ocr_max_duration, full_scan=not args.ocr_fast)
@@ -890,6 +890,15 @@ def _ocr_hardsub_mode(args, ap) -> int:
     때만 쓴다. 사람이 영상과 대조해 고친 뒤에야 `학습한 TC 및 자막 모음/`에
     들어간다(`.claude/skills/정답지-학습/SKILL.md` 참고) — 여기서 만든 파일을
     그대로 옮기지 않는다.
+
+    **TC는 경계를 따로 재확인하지 않는다.** 처음엔 굵게(2fps) 훑고 경계 근처만
+    촘촘히 다시 seek해서 정밀화하려 했는데, ffmpeg이 짧은 구간을 독립적으로
+    seek하면 틀린 프레임을 준다는 게 실측으로 드러났다(2026-08-31 — 같은
+    시각인데 연속 디코딩 프레임엔 자막이 보이고 독립 seek 프레임엔 안 보임).
+    그래서 **처음부터 끝까지 안 끊고(seek 없이) 촘촘한 fps로 바로 읽는다** —
+    이미 정확하다고 확인된 방식(연속 디코딩)을 그대로 촘촘하게만 쓴다. 기본
+    12fps(83ms 간격) — 2fps(500ms 간격)보다 6배 느리지만, 시간보다 TC 정확도가
+    중요하다는 사용자 결정에 따른 것이다.
     """
     from .media import MediaToolUnavailable
     from .ocr import OcrUnavailable, captions_to_draft_srt_events, detect_onscreen_captions
@@ -903,13 +912,14 @@ def _ocr_hardsub_mode(args, ap) -> int:
     # 대사 자막은 항상 화면 아래 중앙에 뜬다 — 전체를 읽으면 좌상단 작품명
     # 워터마크·배경 간판 글자까지 섞인다(실측, 2026-08-31). 기본 0.25.
     band = args.ocr_band if args.ocr_band is not None else 0.25
+    sample_fps = args.ocr_sample_fps if args.ocr_sample_fps is not None else 12.0
     try:
         captions = detect_onscreen_captions(
-            args.video, lang=args.ocr_lang, sample_fps=args.ocr_sample_fps,
+            args.video, lang=args.ocr_lang, sample_fps=sample_fps,
             min_confidence=args.ocr_min_confidence,
             min_similarity=args.ocr_min_similarity,
             max_duration_ms=args.ocr_max_duration, full_scan=not args.ocr_fast,
-            band=band, refine=not args.ocr_no_refine, refine_fps=args.ocr_refine_fps)
+            band=band)
     except (MediaToolUnavailable, OcrUnavailable) as exc:
         print(f"[오류] {exc}")
         return 2
@@ -953,12 +963,15 @@ def _generate_mode(args, ap) -> int:
         # 낭비다 — 여기서 미리 막는다(--lock-timecodes 클래시 검사와 같은 자리).
         ap.error("--ocr에는 --fn-marker가 필요합니다(화면자막 표식이 정해지지 "
                  "않으면 만든 캡션을 검사기가 못 알아봅니다)")
-    if args.sfx and args.lang != "ko":
-        # AUDIOSET_TO_CANDIDATE(checker/sfx.py)는 한국어 문구만 담고 있다 —
-        # 다른 언어는 자료가 없다(규칙9, 지어내지 않는다). 이것도 whisper를
-        # 다 돌리고 나서 막으면 낭비라 여기서 미리 확인한다.
-        ap.error("--sfx는 -l ko(한국어 SDH)에서만 됩니다 — 소리 후보 문구가 "
-                 "한국어뿐입니다")
+    if args.sfx and (args.lang != "ko" or args.kind != "sdh"):
+        # AUDIOSET_TO_CANDIDATE(checker/sfx.py)는 한국어 SDH 문구만 담고
+        # 있다 — 다른 언어는 자료가 없다(규칙9). **-k도 확인해야 한다**
+        # (2026-08-31, 코드 리뷰로 발견) — --kind 기본값이 translation이라
+        # -l ko만 확인하면 `--sfx -p disney`처럼 -k를 안 준 흔한 호출이
+        # ko-translation 프로파일로 새어 들어간다. 번역 자막에 효과음을
+        # 얹는 건 규칙5(SDH·번역 가이드를 섞지 않는다) 위반이다.
+        ap.error("--sfx는 -l ko -k sdh에서만 됩니다 — 소리 후보 문구가 "
+                 "한국어 SDH 전용입니다(번역 자막엔 효과음을 안 넣습니다)")
 
     from .media import list_subtitle_streams
     existing_subs = list_subtitle_streams(args.video)
@@ -1066,7 +1079,7 @@ def _generate_mode(args, ap) -> int:
         from .ocr import OcrUnavailable, captions_to_events, detect_onscreen_captions, merge_captions
         try:
             captions = detect_onscreen_captions(
-                args.video, lang=args.ocr_lang, sample_fps=args.ocr_sample_fps,
+                args.video, lang=args.ocr_lang, sample_fps=args.ocr_sample_fps or 2.0,
                 min_confidence=args.ocr_min_confidence,
                 min_similarity=args.ocr_min_similarity,
                 max_duration_ms=args.ocr_max_duration, full_scan=not args.ocr_fast)
@@ -1117,8 +1130,8 @@ def _generate_mode(args, ap) -> int:
         if not sfx_events:
             print("소리 후보를 찾지 못했습니다(매핑되는 것이 없었을 수 있습니다).")
         else:
-            draft.events, draft.notes = merge_sound_events(
-                draft.events, draft.notes, sfx_events)
+            draft.events, draft.notes, draft.sources = merge_sound_events(
+                draft.events, draft.notes, sfx_events, draft.sources)
             print(f"소리 후보 {len(sfx_events)}개를 자막에 얹었습니다"
                   " — 전부 확인 필요로 표시됩니다")
 
@@ -1220,8 +1233,15 @@ def main(argv: list[str] | None = None) -> int:
                          "건너뛰지 않음)")
     ap.add_argument("--ocr-lang", default="en",
                     help="캡션 언어(easyocr 언어 코드, 기본 en)")
-    ap.add_argument("--ocr-sample-fps", type=float, default=2.0,
-                    help="초당 몇 프레임을 뽑아 인식할지(기본 2.0)")
+    ap.add_argument("--ocr-sample-fps", type=float, default=None,
+                    help="초당 몇 프레임을 뽑아 인식할지. --ocr-scan/--ocr은 기본 "
+                         "2.0. --ocr-hardsub는 기본 12.0 — TC 정밀도가 중요한데, "
+                         "경계만 따로 촘촘히 다시 보는 방식은 ffmpeg이 짧은 구간을 "
+                         "독립적으로 seek할 때 틀린 프레임을 주는 문제가 실측에서"
+                         "나왔다(2026-08-31 — 같은 시각인데 연속 디코딩 프레임엔 "
+                         "자막이 보이고 독립 seek 프레임엔 안 보임). seek 없이 "
+                         "처음부터 끝까지 안 끊고 촘촘한 fps로 바로 읽는 것만 "
+                         "믿을 수 있다")
     ap.add_argument("--ocr-fast", action="store_true",
                     help="detect_bottom_text()로 화면 아래 25%%만 먼저 추려 그 "
                          "구간만 인식한다(빠르다). **기본은 이게 아니라 전체 "
@@ -1256,16 +1276,6 @@ def main(argv: list[str] | None = None) -> int:
                          "읽으면 좌상단 작품명 워터마크·배경 간판 글자까지 섞인다"
                          "(실측). --ocr-scan/--ocr은 기본 None(전체 프레임) — "
                          "예능 화면 캡션은 위치가 안 정해져 있다")
-    ap.add_argument("--ocr-refine-fps", type=float, default=12.0,
-                    help="--ocr-hardsub가 캡션 경계를 정밀화할 때 앞뒤 한 스텝만 "
-                         "이 fps로 다시 잰다(기본 12). 소리는 안 쓴다 — 하드섭은 "
-                         "화면 픽셀에 이미 정확한 타이밍이 있어서 그 프레임을 "
-                         "직접 찾는 쪽이 음성 추정보다 정확하다(사용자와 논의해 "
-                         "확정, 2026-08-31)")
-    ap.add_argument("--ocr-no-refine", action="store_true",
-                    help="--ocr-hardsub의 경계 정밀화를 끈다(빠른 미리보기용). "
-                         "기본은 켜짐 — 굵은 샘플(500ms 간격) 그대로면 TC가 "
-                         "부정확하다(실측)")
     ap.add_argument("--sfx-scan", action="store_true",
                     help="대사 없는 구간마다 오디오 분류 모델(AudioSet)로 무슨 "
                          "소리인지 짐작해 목록만 낸다(--video 필요). **보고용이다** "

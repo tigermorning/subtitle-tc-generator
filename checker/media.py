@@ -382,40 +382,6 @@ def detect_bottom_text(video: Path, sample_fps: float = 2.0,
     return spans
 
 
-def edge_signal(video: Path, start_ms: int, end_ms: int, band: float | None,
-                fps: float) -> list[tuple[float, float]]:
-    """`detect_bottom_text()`와 같은 계산(윤곽선 밝기)을 **좁은 구간만 촘촘히** 잰다.
-
-    [(초, 값)] 표본을 그대로 돌려준다 — 통계 임계값을 여기서 안 매긴다(구간이
-    좁아 중앙값·MAD가 의미 없다). 이 값으로 "글자가 나타나는/사라지는 정확한
-    프레임"을 찾는 건 부르는 쪽의 몫이다(`checker/ocr.py`의 `_find_transition`).
-    `band=None`이면 자르지 않고 전체 프레임을 본다.
-
-    **시각은 ffmpeg의 `pts_time`을 안 믿는다.** `-ss`로 구간을 앞서 잘라 넣으면
-    (input seeking) `pts_time`이 자른 지점 기준 0부터 다시 시작한다 — 절대
-    시각으로 착각해 그대로 썼다가 실측에서 걸렸다(2026-08-31, 하드섭 TC
-    정밀화 스모크 테스트: 자막 시각이 전부 0~0.4초로 나옴). 대신 `fps`로
-    몇 번째 프레임인지 세서 `start_ms + i/fps`로 직접 계산한다(`_extract_frames`
-    가 이미 쓰던 방식과 같다 — 그쪽도 같은 이유로 pts_time을 안 믿는다).
-    """
-    crop = f",crop=iw:ih*{band}:0:ih*{1 - band}" if band else ""
-    out = subprocess.run(
-        [_find("ffmpeg"), "-hide_banner", "-nostats",
-         "-ss", f"{max(0, start_ms) / 1000:.3f}", "-to", f"{max(0, end_ms) / 1000:.3f}",
-         "-i", _as_tool_path(video),
-         "-vf", (f"fps={fps},scale=320:-2{crop},"
-                 "edgedetect=low=0.1:high=0.3,signalstats,"
-                 "metadata=print:key=lavfi.signalstats.YAVG"),
-         "-an", "-f", "null", "-"],
-        capture_output=True, text=True, check=False,
-        encoding="utf-8", errors="replace",
-    )
-    base = max(0, start_ms) / 1000
-    step = 1.0 / fps
-    values = [float(m.group(1)) for m in META_VALUE.finditer(out.stderr or "")]
-    return [(base + i * step, v) for i, v in enumerate(values)]
-
-
 VIDEO_SUFFIXES = (".mkv", ".mp4", ".mov", ".avi", ".m4v", ".ts", ".wmv", ".webm")
 
 

@@ -15,13 +15,13 @@ from checker.model import Event  # noqa: E402
 from checker.profile import _merge, _validate  # noqa: E402
 from checker.text import count_chars  # noqa: E402
 from checker.ocr import (  # noqa: E402
-    OcrCaption, _find_transition, captions_to_draft_srt_events, captions_to_events,
-    merge_captions, merge_frames, refine_caption_boundaries,
+    OcrCaption, _enforce_no_overlap, captions_to_draft_srt_events, captions_to_events,
+    merge_captions, merge_frames,
 )
 from checker.position import JobRules, apply_marker, is_forced_narrative  # noqa: E402
 from checker.generate import _is_known_hallucination, has_vad_support  # noqa: E402
 from checker.sfx import (  # noqa: E402
-    AUDIOSET_TO_CANDIDATE, SoundEvent, _apply_music_marker, merge_sound_events,
+    AUDIOSET_TO_CANDIDATE, SoundEvent, _apply_music_marker, _windows, merge_sound_events,
     sound_events_to_draft_events, speech_gaps,
 )
 
@@ -3532,9 +3532,9 @@ ok("undetected_after여도 speech_end 이전 구간은 그대로 안 겹치면 �
 ok("'Transcribed by' 계열은 대소문자 안 가리고 걸린다",
    _is_known_hallucination("Transcribed by ESO,"))
 ok("'translated by' 계열도 걸린다", _is_known_hallucination("translated by —"))
-ok("'thanks for watching' 계열도 걸린다",
-   _is_known_hallucination("Thanks for watching!"))
 ok("대시만 있는 조각은 글자가 없어서 걸린다", _is_known_hallucination("—"))
+ok("음표(♪)만 있으면 예외 — 지어낸 자리표시자가 아니다(2026-08-31, 코드 리뷰로 발견)",
+   not _is_known_hallucination("♪"))
 ok("빈 문자열도 걸린다", _is_known_hallucination("   "))
 ok("진짜 대사는 안 걸린다", not _is_known_hallucination("Hello!"))
 ok("한글 대사는 안 걸린다(isalnum이 한글도 인정)",
@@ -3543,6 +3543,19 @@ ok("우연히 비슷한 단어가 섞여도 대사면 안 걸린다",
    not _is_known_hallucination("I'm watching you."))
 ok("한국어 팬섭 크레딧('한글자막 by ...')도 걸린다(2026-08-31, 드라마B E02~05 4회차 전부에서 확인)",
    _is_known_hallucination("한글자막 by 한효정"))
+
+# **PLAUSIBLE_ONMIC_PHRASES는 VAD 정보 없이는 지우지 않는다**(2026-08-31,
+# 코드 리뷰로 발견 — 예능·다큐 진행자가 실제로 "시청해 주셔서 감사합니다"류
+# 인사를 할 수 있어(규칙16), 텍스트만으로 확신할 수 없다. 크레딧 문구와
+# 달리 VAD가 이 구간에 말소리가 없다고 볼 때만 지운다).
+ok("'thanks for watching'는 VAD 정보 없이는 안 지운다(옛날엔 무조건 지웠음)",
+   not _is_known_hallucination("Thanks for watching!"))
+ok("'다음 영상에서 만나요'도 VAD 정보 없이는 안 지운다",
+   not _is_known_hallucination("다음 영상에서 만나요."))
+ok("VAD와 안 겹치면(침묵) 'thanks for watching'을 지운다",
+   _is_known_hallucination("Thanks for watching!", 5000, 6000, [(0, 1000)]))
+ok("VAD와 겹치면(실제 말소리 있음) 'thanks for watching'을 안 지운다",
+   not _is_known_hallucination("Thanks for watching!", 5000, 6000, [(4000, 7000)]))
 
 
 # --- T10(quote_role_swapped)·T11(forced_narrative_merged_with_dialogue) ---
@@ -3629,6 +3642,17 @@ ok("말소리가 전혀 없으면 전체가 하나의 빈 구간이다",
 ok("AUDIOSET_TO_CANDIDATE의 후보는 전부 대괄호로 감싼 문구다",
    all(v.startswith("[") and v.endswith("]") for v in AUDIOSET_TO_CANDIDATE.values()))
 
+# --- _windows: 긴 구간을 모델 입력 한계 이하로 나눈다(2026-08-31, 코드 리뷰로 발견) ---
+# AST 모델이 10.24초 넘는 오디오를 통째로 받으면 앞부분만 대표하는 라벨을
+# 낸다 — 그래서 분류 전에 창 단위로 나눈다.
+
+ok("구간이 창보다 짧으면 그대로 창 하나",
+   _windows(0, 5000, 9000) == [(0, 5000)])
+ok("구간을 창 크기로 정확히 나눈다", _windows(0, 18000, 9000) == [(0, 9000), (9000, 18000)])
+ok("나머지는 짧은 마지막 창으로 남는다",
+   _windows(0, 20000, 9000) == [(0, 9000), (9000, 18000), (18000, 20000)])
+ok("빈 구간은 창이 없다", _windows(1000, 1000, 9000) == [])
+
 # --- _apply_music_marker: 플랫폼별 DP12류(음악 효과음 ♪ 표기) 반영 --------
 # 2026-08-31, 드라마B E01 --generate --sfx 통합 테스트에서 실측: 고정 문구를
 # 그대로 얹으면 디즈니 DP12(음악 효과음엔 ♪ 필요) 위반이 126건 났다.
@@ -3658,8 +3682,8 @@ ok("매핑 없는 라벨은 빠진다", len(_sfx_draft) == 1 and _sfx_draft[0].t
 ok("sfx 초안 이벤트는 kind=sfx다", _sfx_draft[0].kind == "sfx")
 
 _sfx_dialogue = [Event(1, 0, 1000, "안녕"), Event(2, 5000, 6000, "잘가")]
-_sfx_merged_events, _sfx_merged_notes = merge_sound_events(
-    _sfx_dialogue, [(1, "환각 의심")], _sfx_draft)
+_sfx_merged_events, _sfx_merged_notes, _sfx_merged_sources = merge_sound_events(
+    _sfx_dialogue, [(1, "환각 의심")], _sfx_draft, {1: "Hi", 2: "Bye"})
 
 ok("합쳐진 이벤트가 시간순이다",
    [e.start_ms for e in _sfx_merged_events] == sorted(e.start_ms for e in _sfx_merged_events))
@@ -3674,46 +3698,46 @@ _sfx_expected_dialogue_new_index = next(
     e.index for e in _sfx_merged_events if e.kind == "dialogue" and e.start_ms == 0)
 ok("기존 대사 노트가 밀린 번호로 옮겨진다",
    _sfx_dialogue_note_idx == _sfx_expected_dialogue_new_index)
+ok("dialogue_sources도 밀린 번호로 옮겨진다(2026-08-31, 코드 리뷰로 발견 — "
+   "안 옮기면 원어 표시가 엉뚱한 자막을 가리킨다)",
+   _sfx_merged_sources[_sfx_expected_dialogue_new_index] == "Hi")
+
+# --- SFX 겹침 처리: 스포팅이 밀어낸 대사와 겹치면 물러서거나 버린다 -------
+# 2026-08-31, 코드 리뷰로 발견 — timing.py의 LEADS가 대사 아웃점을 VAD
+# 구간 끝보다 늦게 늘릴 수 있어, 그 자리에 얹은 소리 후보와 겹칠 수 있다.
+
+_overlap_dialogue = [Event(1, 0, 2500, "안녕")]  # 아웃점이 2500까지 밀려남
+_overlap_sfx = [Event(2, 2000, 4000, "[음악이 흐른다]", kind="sfx")]  # 원래 2000부터
+_ov_events, _ov_notes, _ov_sources = merge_sound_events(_overlap_dialogue, [], _overlap_sfx)
+_ov_sfx = next(e for e in _ov_events if e.kind == "sfx")
+ok("대사와 겹치면 소리 후보 인점을 대사 아웃점 뒤로 민다",
+   _ov_sfx.start_ms == 2500)
+
+_short_overlap_dialogue = [Event(1, 0, 3900, "안녕")]
+_short_overlap_sfx = [Event(2, 3800, 4000, "[음악이 흐른다]", kind="sfx")]  # 밀면 100ms
+_ov2_events, _ov2_notes, _ov2_sources = merge_sound_events(
+    _short_overlap_dialogue, [], _short_overlap_sfx)
+ok("밀어내서 너무 짧아지면(500ms 미만) 통째로 버린다",
+   not any(e.kind == "sfx" for e in _ov2_events))
 
 
-# --- 하드섭 TC 정밀화(refine_caption_boundaries, _find_transition) --------
-# 굵은 샘플(500ms 간격)만으로는 TC가 부정확하다는 지적(2026-08-31, 실사용) —
-# 소리 없이 경계 앞뒤만 촘촘히 다시 재서 정확한 프레임을 찾는다.
+# --- 겹침 방지(_enforce_no_overlap) ----------------------------------------
+# "경계만 따로 정밀화"는 시도했다가 걷어냈다(ffmpeg이 짧은 구간을 독립적으로
+# seek하면 실제 내용과 다른 프레임을 준다는 게 실측으로 드러남 — `checker/
+# ocr.py` 모듈 독스트링 "4단계" 참고). 그 과정에서 찾은 실제 문제 중
+# `_enforce_no_overlap`(앞 캡션 끝이 뒤 캡션 시작보다 늦게 잡히면 당긴다)은
+# 정밀화 여부와 무관하게 유효해서 남겼다.
+_r_overlapping = [OcrCaption(0, 1000, "A", 0.9), OcrCaption(800, 2000, "B", 0.9)]
+_r_fixed = _enforce_no_overlap(_r_overlapping)
+ok("겹치는 캡션은 앞 캡션 끝을 뒤 캡션 시작으로 당긴다",
+   _r_fixed[0].end_ms == 800 and _r_fixed[1].start_ms == 800)
 
-ok("_find_transition: 상승 경계를 찾는다",
-   _find_transition([(0.0, 5.0), (0.1, 6.0), (0.2, 40.0), (0.3, 42.0)], rising=True) == 0.2)
-ok("_find_transition: 하강 경계를 찾는다",
-   _find_transition([(0.0, 42.0), (0.1, 40.0), (0.2, 6.0), (0.3, 5.0)], rising=False) == 0.2)
-ok("_find_transition: 변화가 없으면 못 찾는다(None)",
-   _find_transition([(0.0, 10.0), (0.1, 10.0), (0.2, 10.0)], rising=True) is None)
-ok("_find_transition: 표본이 하나뿐이면 못 찾는다",
-   _find_transition([(0.0, 5.0)], rising=True) is None)
+_r_clean = [OcrCaption(0, 500, "A", 0.9), OcrCaption(600, 1000, "B", 0.9)]
+ok("이미 안 겹치면 그대로 둔다", _enforce_no_overlap(_r_clean) == _r_clean)
 
-_fake_caption = OcrCaption(start_ms=1000, end_ms=2000, text="대사", confidence=0.8)
-
-
-def _fake_signal(video, start_ms, end_ms, band, fps):
-    if end_ms == 1000:          # 시작 경계 창 [0, 1000]
-        return [(0.0, 5.0), (0.5, 6.0), (0.7, 40.0), (1.0, 41.0)]
-    if start_ms == 1000:        # 끝 경계 창 [1000, 2000]
-        return [(1.0, 40.0), (1.3, 39.0), (1.8, 6.0), (2.0, 5.0)]
-    return []
-
-
-_refined = refine_caption_boundaries(
-    Path("dummy.mp4"), [_fake_caption], band=0.25, step_ms=1000, fps=12.0,
-    signal=_fake_signal)
-ok("정밀화된 시작이 굵은 값 대신 정확한 지점으로 바뀐다", _refined[0].start_ms == 700)
-ok("정밀화된 끝이 굵은 값 대신 정확한 지점으로 바뀐다", _refined[0].end_ms == 1800)
-ok("텍스트·신뢰도는 그대로 유지된다",
-   _refined[0].text == "대사" and _refined[0].confidence == 0.8)
-
-_flat_signal = lambda video, s, e, band, fps: [(s / 1000, 10.0), (e / 1000, 10.0)]
-_unrefined = refine_caption_boundaries(
-    Path("dummy.mp4"), [_fake_caption], band=0.25, step_ms=1000, fps=12.0,
-    signal=_flat_signal)
-ok("정밀화 실패(신호 변화 없음)면 굵은 값을 그대로 둔다",
-   _unrefined[0].start_ms == 1000 and _unrefined[0].end_ms == 2000)
+_r_unsorted = [OcrCaption(600, 1000, "B", 0.9), OcrCaption(0, 500, "A", 0.9)]
+ok("시간순으로 정렬해서 돌려준다",
+   [c.start_ms for c in _enforce_no_overlap(_r_unsorted)] == [0, 600])
 
 
 # --- 결과 ---------------------------------------------------------------

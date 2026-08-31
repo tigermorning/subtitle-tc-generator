@@ -7,7 +7,13 @@ easyocr만 쓴다 — 격리 venv에는 PyYAML 같은 `checker`의 다른 의존
 
 사용법: `python _ocr_worker.py <프레임목록.json> <출력.json> <언어>`
 입력 프레임 목록: `[[시각ms, "프레임경로.png"], ...]`
-출력: `[[시각ms, "텍스트", 신뢰도], ...]` (글자를 못 찾은 프레임은 뺀다)
+출력: `[[시각ms, "텍스트", 신뢰도], ...]` — **글자를 못 찾은 프레임도 낸다**
+(텍스트 `""`, 신뢰도 0.0). 처음엔 빼고 냈는데, `checker/ocr.py`의 TC 경계
+정밀화가 "이 프레임엔 이 캡션이 없다"를 알아야 하는데 프레임 자체가 통째로
+빠지면 그 정보가 사라진다(실사용 지적, 2026-08-31 — 정밀화가 경계를 거의
+못 찾고 굵은 값 그대로 나옴). `merge_frames()`는 어차피 빈 텍스트를 걸러내니
+(`checker/ocr.py`의 `kept = [... if conf >= min_confidence and text.strip()]`)
+1단계 코드는 그대로 안전하다.
 성공하면 0, 실패하면 표준에러에 이유를 적고 0이 아닌 값으로 끝난다.
 """
 
@@ -56,6 +62,7 @@ def main() -> int:
     for ms, frame_path in frames:
         detections = reader.readtext(frame_path)
         if not detections:
+            results.append([int(ms), "", 0.0])
             continue
         texts = [d[1] for d in detections]
         confs = [float(d[2]) for d in detections]

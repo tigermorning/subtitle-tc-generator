@@ -69,17 +69,40 @@ Tomy / Scarlet" **이름 캡션이 25초 넘게 픽셀 단위로 그대로**였�
 영상과 대조해 고친 뒤에만 `학습한 TC 및 자막 모음/`에 들어간다
 (`.claude/skills/정답지-학습/SKILL.md` 참고).
 
-**4단계(2026-08-31, 같은 날): `refine_caption_boundaries()`를 추가했다.**
-스모크 테스트(71분 하드섭 실측)에서 TC가 부정확하다는 지적을 받았다 — 굵은
-샘플(`sample_fps=2.0`, 500ms 간격)로만 경계를 잡아서다. 처음엔 "음성(VAD)으로
-다시 잡고 `align.py`로 텍스트를 얹자"고 제안했는데 **틀렸다** — 하드섭은 화면
-픽셀에 이미 정확한 타이밍이 구워져 있어서, 음성 기준으로 바꾸면 화면 자막
-고유의 편집 판단(최소 노출시간, 반응 시간)과 어긋나는 **덜 정확한 값으로
-바꿔치기**하는 꼴이다(사용자와 논의해 확정). 맞는 방향은 **소리를 안 쓰고**
-경계 앞뒤 한 스텝만 촘촘히(`refine_fps`) 다시 봐서 정확한 프레임을 찾는
-것 — `media.edge_signal()`(`detect_bottom_text()`와 같은 계산)로 좁은 구간만
-재고, `_find_transition()`으로 그 구간의 최저·최고 중간값을 넘는 지점을
-찾는다. `--ocr-hardsub`에서만 기본으로 켠다.
+**4단계(2026-08-31) — "경계만 따로 정밀화"를 세 번 고치다가 결국 통째로
+걷어냈다. 순서대로 남긴다(다음에 같은 길을 또 걷지 않도록):**
+
+1. **1차**: 굵은 샘플(2fps, 500ms 간격)로만 경계를 잡으니 TC가 부정확하다는
+   실사용 지적을 받았다. "음성(VAD)으로 다시 잡고 `align.py`로 텍스트를
+   얹자"고 제안했는데 **틀렸다** — 하드섭은 화면 픽셀에 이미 정확한 타이밍이
+   구워져 있어서, 음성 기준으로 바꾸면 화면 자막 고유의 편집 판단(최소
+   노출시간, 반응 시간)과 어긋나는 덜 정확한 값으로 바꿔치기하는 꼴이다.
+   대신 경계 앞뒤 한 스텝만 윤곽선 밀도(`media.edge_signal`, `detect_
+   bottom_text`와 같은 계산)로 촘촘히 다시 쟀다.
+2. **2차**: 71분 전체로 재실측해 SE에서 파형과 대조하니 여전히 하나도 안
+   맞고, 인접 캡션끼리 겹치기까지 했다. 윤곽선 밀도가 클로즈업 영상에서
+   배우 얼굴·옷깃·손에 반응한 것이 원인이었다 — 자막이 아닌 것에도 반응하는
+   방법이었다. "자막이 뜬 시간을 읽으면 TC가 잡히는 것 아니냐"는 지적이
+   맞았고, 경계 재확인을 실제 OCR 재확인으로 바꿨다(모든 캡션의 경계 창을
+   모아 한 번의 OCR 호출로). 겹침 방지(`_enforce_no_overlap`, 지금도 씀)도
+   이때 추가했다.
+3. **3차, 최종**: 그런데도 실측(같은 25초 클립)에서 정밀화가 거의 매번
+   "못 찾음"으로 굵은 값을 그대로 돌려줬다. 프레임을 직접 저장해 열어보고
+   원인을 찾았다 — **같은 시각(8.5초)인데 연속 디코딩한 프레임엔 자막이
+   보이고, 경계만 따로 좁게 seek해서 뽑은 프레임엔 안 보였다**(3초 웜업을
+   줘도 똑같았다). ffmpeg이 `-ss`로 짧은 구간을 독립적으로 seek하면 실제
+   내용과 다른 프레임을 준다 — 이 프로젝트가 이미 알고 있던 문제
+   (`_extract_frames`의 pts_time 관련 주석 참고)의 또 다른 얼굴이었다.
+   **"경계만 따로 정밀화"라는 설계 자체가 ffmpeg 특성상 성립하지 않는다**
+   — `refine_caption_boundaries`/`_apply_boundary_refinements`/
+   `_find_transition`/`media.edge_signal`을 전부 걷어냈다.
+
+**최종 해법**: 애초에 seek를 안 하는 연속 디코딩(`full_scan`의 굵은 패스가
+이미 하던 방식, 이미 정확하다고 실측으로 확인됨)을 **그대로 촘촘한 fps로**
+돌린다. 새 방법을 시도하는 게 아니라 이미 검증된 방법의 해상도만 올린 것 —
+`--ocr-hardsub`의 `sample_fps` 기본값을 12(83ms 간격)로 올렸다. 6배 느리지만
+(71분 영상 기준 75분 -> 대략 7~8시간), 시간보다 TC 정확도가 중요하다는
+사용자 결정에 따른 것이다. `_enforce_no_overlap()`만 남겨서 항상 적용한다.
 """
 
 from __future__ import annotations
@@ -92,7 +115,7 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from .media import MediaToolUnavailable, _as_tool_path, _find, detect_bottom_text, edge_signal
+from .media import MediaToolUnavailable, _as_tool_path, _find, detect_bottom_text
 from .model import Event
 from .position import apply_marker
 
@@ -264,77 +287,33 @@ def merge_frames(results: list[tuple[int, str, float]], sample_step_ms: int,
     return captions
 
 
-def _find_transition(samples: list[tuple[float, float]], rising: bool) -> float | None:
-    """표본 `[(초, 신호값)]` 안에서 min/max 중간값을 넘는 지점을 찾는다.
-
-    통계 임계값(중앙값+편차)을 안 쓴다 — 구간이 좁아 표본이 몇 개뿐이라 의미가
-    없다. 대신 **이 좁은 구간 안의 최저·최고 사이 중간**을 기준으로 삼는다.
-    `rising=True`면 낮음→높음(시작 경계, 글자가 나타남), `False`면 높음→낮음
-    (끝 경계, 글자가 사라짐)으로 본다. 변화가 없으면(장면이 그대로) `None`.
+def _enforce_no_overlap(captions: list[OcrCaption]) -> list[OcrCaption]:
+    """인접한 캡션끼리 시간이 겹치지 않게 한다(실사용 지적, 2026-08-31 —
+    경계를 캡션마다 독립적으로 정밀화하다 보니 앞 캡션 끝이 뒤 캡션 시작보다
+    늦게 잡히는 경우를 안 막고 있었다). 뒤 캡션 시작이 앞 캡션 끝보다 빠르면
+    앞 캡션 끝을 뒤 캡션 시작으로 당긴다.
     """
-    if len(samples) < 2:
-        return None
-    ordered = sorted(samples)
-    values = [v for _, v in ordered]
-    if max(values) - min(values) < 1e-9:
-        return None
-    threshold = (min(values) + max(values)) / 2
-    for t, v in ordered:
-        if rising and v >= threshold:
-            return t
-        if not rising and v < threshold:
-            return t
-    return None
-
-
-def refine_caption_boundaries(video: Path, captions: list[OcrCaption], band: float | None,
-                              step_ms: int, fps: float = 12.0,
-                              signal=None) -> list[OcrCaption]:
-    """캡션 시작·끝을 굵은 샘플 간격(`step_ms`) 안에서 촘촘히 다시 재서 정밀화한다.
-
-    **소리를 안 쓴다.** 하드섭 자막은 화면 픽셀에 이미 정확한 타이밍이 구워져
-    있다 — VAD(음성)로 다시 잡으면 화면 자막 고유의 편집 판단(최소 노출시간,
-    반응 시간)과 안 맞아 오히려 부정확해진다(2026-08-31, 사용자와 논의해 확정).
-    그래서 화면 신호(`media.edge_signal`, `detect_bottom_text`와 같은 계산)를
-    경계 앞뒤 한 스텝만 `fps`로 다시 재서 정확한 프레임을 찾는다.
-
-    시작은 `[start_ms - step_ms, start_ms]`(마지막으로 "없음"이 확실했던 지점
-    부터 굵은 샘플이 "있음"을 잡은 지점까지)에서 상승 경계를, 끝은
-    `[end_ms - step_ms, end_ms]`(마지막으로 "있음"이 확실했던 지점부터 굵은
-    샘플이 "없어졌다"고 본 지점까지)에서 하강 경계를 찾는다. 못 찾으면(신호에
-    변화가 없으면) 굵은 값을 그대로 둔다 — 정밀화 실패가 원래 값을 지우지
-    않는다.
-
-    `signal`은 테스트에서 `media.edge_signal` 대신 넣는 콜러블
-    (`video, start_ms, end_ms, band, fps -> list[(초, 값)]`).
-    """
-    fetch = signal or edge_signal
-    refined: list[OcrCaption] = []
-    for c in captions:
-        start_t = _find_transition(
-            fetch(video, max(0, c.start_ms - step_ms), c.start_ms, band, fps), rising=True)
-        end_t = _find_transition(
-            fetch(video, max(0, c.end_ms - step_ms), c.end_ms, band, fps), rising=False)
-        refined.append(OcrCaption(
-            start_ms=int(start_t * 1000) if start_t is not None else c.start_ms,
-            end_ms=int(end_t * 1000) if end_t is not None else c.end_ms,
-            text=c.text, confidence=c.confidence, frame_count=c.frame_count))
-    return refined
+    ordered = sorted(captions, key=lambda c: c.start_ms)
+    for prev, cur in zip(ordered, ordered[1:]):
+        if prev.end_ms > cur.start_ms:
+            prev.end_ms = max(prev.start_ms, cur.start_ms)
+    return ordered
 
 
 def detect_onscreen_captions(video: Path, lang: str = "en", sample_fps: float = 2.0,
                              min_confidence: float = 0.4, min_similarity: float = 0.6,
                              max_duration_ms: int | None = None, full_scan: bool = True,
-                             band: float | None = None, refine: bool = False,
-                             refine_fps: float = 12.0, engine=None) -> list[OcrCaption]:
+                             band: float | None = None, engine=None) -> list[OcrCaption]:
     """화면 캡션을 읽는다. **보고용이다** — 규칙 4: 화면 글자 검출은 추정이다.
 
-    `full_scan=True`(기본)면 영상 전체를 `sample_fps`로 고르게 훑는다 — 느리지만
-    위치를 안 가린다. `full_scan=False`(`--ocr-fast`)면 `media.detect_bottom_text()`
-    로 후보 구간부터 추려 비용을 줄이는 대신, 화면 아래 25% 바깥 캡션은 놓친다
-    (실측, 2026-08-30: 이 선필터가 예능A 19회에서 캡션을 0개 찾았다 —
-    캡션이 인물 옆 중앙~오른쪽에 뜨는 예능이었다). 위치가 항상 화면 아래인 걸
-    아는 자료에서만 빠른 쪽을 쓴다.
+    `full_scan=True`(기본)면 영상 전체를 **처음부터 끝까지 안 끊고**
+    `sample_fps`로 고르게 훑는다 — 느리지만 위치를 안 가리고, ffmpeg이 seek
+    없이 연속으로 디코딩하므로 프레임 내용이 정확하다(실측으로 확인됨, 아래
+    "정밀화를 걷어낸 이유" 참고). `full_scan=False`(`--ocr-fast`)면
+    `media.detect_bottom_text()`로 후보 구간부터 추려 비용을 줄이는 대신,
+    화면 아래 25% 바깥 캡션은 놓친다(실측, 2026-08-30: 이 선필터가 예능A
+    시즌2 19회에서 캡션을 0개 찾았다 — 캡션이 인물 옆 중앙~오른쪽에 뜨는
+    예능이었다). 위치가 항상 화면 아래인 걸 아는 자료에서만 빠른 쪽을 쓴다.
 
     `band`(0~1)를 주면 화면 아래 그 비율만 잘라서 읽는다(`_extract_frames`
     참고) — `full_scan`과는 다른 축이다: `full_scan`은 **언제**(시간대) 볼지,
@@ -342,11 +321,16 @@ def detect_onscreen_captions(video: Path, lang: str = "en", sample_fps: float = 
     전용 — 좌상단 워터마크·배경 간판 글자가 안 섞인다. 위치가 안 정해진 예능
     화면 캡션(`--ocr-scan`/`--ocr`)에는 기본으로 안 쓴다(`band=None`, 전체 프레임).
 
-    `refine=True`면 병합된 캡션의 시작·끝을 `refine_fps`로 촘촘히 다시 재서
-    정밀화한다(`refine_caption_boundaries()` 참고) — **소리 안 씀**, 화면
-    픽셀의 정확한 프레임을 찾는다. `--ocr-hardsub`(TC 정밀도가 중요한 하드섭
-    정답지 초안)에서만 기본으로 켠다. `--ocr-scan`/`--ocr`(예능 화면 캡션,
-    카드 경계가 하드섭만큼 깔끔하지 않음)은 기본 꺼짐.
+    **TC 정밀도가 필요하면 `sample_fps`를 올린다 — "경계만 따로 정밀화"는
+    없다.** 한때 굵게 훑고 경계 근처만 따로 촘촘히 다시 seek해서 재확인하는
+    방법을 만들었다가 걷어냈다(`checker/ocr.py`의 모듈 독스트링 "4단계" 참고)
+    — ffmpeg이 짧은 구간을 독립적으로 seek하면 실제 내용과 다른 프레임을
+    준다는 게 실측으로 드러났다(같은 시각인데 연속 디코딩 프레임엔 자막이
+    보이고 독립 seek 프레임엔 안 보임, 3초 웜업을 줘도 마찬가지). seek 없이
+    연속으로 디코딩하는 것만 믿을 수 있어서, `--ocr-hardsub`는 `sample_fps`
+    기본값을 12로 올려 이 함수를 그대로(더 촘촘하게) 쓴다.
+
+    결과는 항상 인접 캡션끼리 겹치지 않게 정리한다(`_enforce_no_overlap`).
 
     `engine`은 테스트에서 실제 EasyOCR 워커 대신 넣는 콜러블
     (`list[(ms, path)], lang -> list[(ms, text, conf)]`). 안 주면 `.venv-ocr`을 부른다.
@@ -367,9 +351,8 @@ def detect_onscreen_captions(video: Path, lang: str = "en", sample_fps: float = 
 
     captions = merge_frames(results, int(1000 / sample_fps), min_confidence, min_similarity,
                             max_duration_ms)
-    if refine and captions:
-        captions = refine_caption_boundaries(
-            video, captions, band, int(1000 / sample_fps), refine_fps)
+    if captions:
+        captions = _enforce_no_overlap(captions)
     return captions
 
 
