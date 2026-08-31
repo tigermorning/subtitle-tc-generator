@@ -98,6 +98,37 @@ def speaker_prefix(name: str, profile: dict) -> str:
     return f"{left}{name}{right} "
 
 
+# whisper가 침묵·저음량 구간에서 재현하는 것으로 널리 보고된 문구들
+# (whisper.cpp·openai-whisper 커뮤니티, 유튜브 자동자막 학습 데이터의 흔적으로
+# 추정). 대사가 우연히 이 문구와 겹칠 확률은 무시할 만하다 — 텍스트 자체로
+# 판정 가능하니 규칙4의 "파일 안에서 알 수 있는 것"에 해당해 자동으로 지운다
+# (VAD 안 겹침처럼 오디오에서 추정하는 판단과는 다르다). 대소문자·문장부호는
+# 안 가린다.
+KNOWN_HALLUCINATION_PHRASES = (
+    "transcribed by", "transcript by", "translated by", "subtitled by",
+    "subtitles by", "captions by", "closed captioning by",
+    "amara.org", "opensubtitles",
+    "thank you for watching", "thanks for watching",
+    "please subscribe", "like and subscribe", "subscribe to my channel",
+)
+
+
+def _is_known_hallucination(text: str) -> bool:
+    """`KNOWN_HALLUCINATION_PHRASES`에 걸리거나, 글자다운 글자가 하나도 없는
+    (대시·말줄임표 등 whisper의 "잘 안 들림" 자리표시자만 있는) 조각이면 참.
+
+    후자 실측(2026-08-31, 영화A 오프닝): "—"만 있는 조각이 수십 개
+    떴다 — 실제 대사라면 문자(letter)가 하나도 없을 수 없다.
+    """
+    stripped = text.strip()
+    if not stripped:
+        return True
+    lower = stripped.lower()
+    if any(phrase in lower for phrase in KNOWN_HALLUCINATION_PHRASES):
+        return True
+    return not any(ch.isalnum() for ch in stripped)
+
+
 def has_vad_support(start_ms: int, end_ms: int, speech: list[tuple[int, int]],
                     speech_end: int, undetected_after: bool) -> bool:
     """이 구간이 VAD가 잡은 말소리 구간과 겹치는지. `generate()`가 자막마다
@@ -221,6 +252,24 @@ def generate(video: Path, profile: dict, script: Path | None = None,
     except OSError:
         pass  # 로그는 참고용이다 — 못 남겨도 생성 자체를 막지 않는다
 
+    if not segments:
+        return Draft([], [], {"transcript": 0})
+
+    # **whisper의 "유명한" 침묵 환각 문구는 지운다.** VAD 안 겹침 필터(아래)는
+    # "배경음에 묻힌 진짜 대사"와 "침묵에서 지어낸 것"을 못 가려서 이제
+    # 지우지 않고 표시만 한다(2026-08-31 정정, 바로 아래 참고) — 그런데
+    # 이 문구들은 다르다. 텍스트 자체가 정답이라 **추정이 아니라 사실**이다
+    # (규칙 4: 파일 안에서 알 수 있는 것은 자동으로 고친다). whisper가
+    # 유튜브 자동자막으로 학습되며 침묵·저음량 구간에서 그 학습 자료에 있던
+    # 크레딧 문구를 그대로 재현하는 건 whisper.cpp·openai-whisper 커뮤니티에
+    # 널리 보고된 현상이다(2026-08-31, 영화A 오프닝에서 실측:
+    # "Transcribed by ESO, translated by —"가 여러 번, "—"만 있는 조각이
+    # 수십 개). 실제 대사가 이 문구와 우연히 겹칠 확률은 무시할 만하다.
+    before_known = len(segments)
+    segments = [s for s in segments if not _is_known_hallucination(s.text)]
+    if len(segments) != before_known:
+        say(f"whisper의 유명한 침묵 환각 문구 {before_known - len(segments)}개를 지웠습니다"
+            " — 실제 대사가 아니라고 텍스트 자체로 확인됩니다")
     if not segments:
         return Draft([], [], {"transcript": 0})
 

@@ -19,7 +19,7 @@ from checker.ocr import (  # noqa: E402
     merge_frames,
 )
 from checker.position import JobRules, apply_marker, is_forced_narrative  # noqa: E402
-from checker.generate import has_vad_support  # noqa: E402
+from checker.generate import _is_known_hallucination, has_vad_support  # noqa: E402
 
 PASSED = 0
 FAILED: list[str] = []
@@ -3496,6 +3496,25 @@ ok("undetected_after면 speech_end 이후 구간은 검출 실패로 보고 지�
    has_vad_support(50_000, 51_000, [(0, 1000)], speech_end=1000, undetected_after=True))
 ok("undetected_after여도 speech_end 이전 구간은 그대로 안 겹치면 지지 못 받는다",
    not has_vad_support(500, 600, [(0, 100)], speech_end=1000, undetected_after=True))
+
+
+# --- _is_known_hallucination: whisper의 유명한 침묵 환각 문구는 지운다 -----
+# 2026-08-31, 영화A 오프닝 실측: "Transcribed by ESO, translated by —"
+# 반복, "—"만 있는 조각 수십 개. 텍스트 자체로 판정되는 사실이라(규칙4)
+# VAD 안 겹침(추정)과 달리 지운다.
+
+ok("'Transcribed by' 계열은 대소문자 안 가리고 걸린다",
+   _is_known_hallucination("Transcribed by ESO,"))
+ok("'translated by' 계열도 걸린다", _is_known_hallucination("translated by —"))
+ok("'thanks for watching' 계열도 걸린다",
+   _is_known_hallucination("Thanks for watching!"))
+ok("대시만 있는 조각은 글자가 없어서 걸린다", _is_known_hallucination("—"))
+ok("빈 문자열도 걸린다", _is_known_hallucination("   "))
+ok("진짜 대사는 안 걸린다", not _is_known_hallucination("Hello!"))
+ok("한글 대사는 안 걸린다(isalnum이 한글도 인정)",
+   not _is_known_hallucination("안녕하세요"))
+ok("우연히 비슷한 단어가 섞여도 대사면 안 걸린다",
+   not _is_known_hallucination("I'm watching you."))
 
 
 # --- T10(quote_role_swapped)·T11(forced_narrative_merged_with_dialogue) ---
