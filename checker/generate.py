@@ -100,36 +100,56 @@ def speaker_prefix(name: str, profile: dict) -> str:
 
 # whisper가 침묵·저음량 구간에서 재현하는 것으로 널리 보고된 문구들
 # (whisper.cpp·openai-whisper 커뮤니티, 유튜브 자동자막 학습 데이터의 흔적으로
-# 추정). 대사가 우연히 이 문구와 겹칠 확률은 무시할 만하다 — 텍스트 자체로
-# 판정 가능하니 규칙4의 "파일 안에서 알 수 있는 것"에 해당해 자동으로 지운다
-# (VAD 안 겹침처럼 오디오에서 추정하는 판단과는 다르다). 대소문자·문장부호는
-# 안 가린다.
+# 추정). **실제 사람이 말했을 확률이 사실상 0인 것만** 여기 둔다 — 텍스트
+# 자체로 판정 가능하니 규칙4의 "파일 안에서 알 수 있는 것"에 해당해 VAD와
+# 무관하게 자동으로 지운다. 대소문자·문장부호는 안 가린다.
 KNOWN_HALLUCINATION_PHRASES = (
     "transcribed by", "transcript by", "translated by", "subtitled by",
     "subtitles by", "captions by", "closed captioning by",
     "amara.org", "opensubtitles",
-    "thank you for watching", "thanks for watching",
-    "please subscribe", "like and subscribe", "subscribe to my channel",
     # 한국어 자막 제작 크레딧 문구. 2026-08-31, 드라마B E02~05
     # 4회차 전부에서 "한글자막 by 한효정"이 그대로 반복됨 — 한 회차만의
     # 우연이 아니라 이 소스(팬섭 자료로 학습된 whisper 패턴으로 추정)의
     # 특징이다. 실제 드라마 대사에 "한글자막"이라는 낱말이 나올 확률은
     # 무시할 만하다.
     "한글자막",
-    # 유튜브 영상 끝인사(2026-08-31, 같은 4회차 중 E02·E04·E05 3편에서
-    # "다음 영상에서 만나요."가 그대로 반복됨) — 드라마 대사에 나올 문구가
-    # 아니다. "구독"·"좋아요"처럼 흔한 낱말은 정상 대사와 겹칠 수 있어
-    # 넣지 않는다 — 실제로 관측된 고정 문구만 넣는다.
+)
+
+# **위 목록과 달리 실제 방송인이 방송 중에 말할 수 있는 문구다**(2026-08-31,
+# 코드 리뷰로 발견 — 처음엔 KNOWN_HALLUCINATION_PHRASES에 같이 넣어 VAD와
+# 무관하게 지웠는데, `--genre variety`·다큐(규칙16)에서는 진행자가 실제로
+# "시청해 주셔서 감사합니다"·"다음 영상에서 만나요" 같은 인사를 한다 —
+# 텍스트만으로는 확신할 수 없다. 그래서 **VAD가 이 구간에 말소리가 없다고
+# 볼 때만**(침묵에서 지어낸 게 거의 확실할 때만) 지운다 — 말소리 구간과
+# 겹치면 실제로 말했을 수 있으니 표시만 하고 남긴다(has_vad_support()가
+# 그 뒤 단계에서 표시한다).
+PLAUSIBLE_ONMIC_PHRASES = (
+    "thank you for watching", "thanks for watching",
+    "please subscribe", "like and subscribe", "subscribe to my channel",
+    # 유튜브 영상 끝인사(2026-08-31, 드라마B E02·E04·E05 3편에서
+    # "다음 영상에서 만나요."가 그대로 반복됨). "구독"·"좋아요"처럼 흔한
+    # 낱말은 정상 대사와 겹칠 수 있어 넣지 않는다 — 관측된 고정 문구만.
     "다음 영상에서 만나요",
 )
 
 
-def _is_known_hallucination(text: str) -> bool:
+def _is_known_hallucination(text: str, start_ms: int | None = None, end_ms: int | None = None,
+                            speech: list[tuple[int, int]] | None = None) -> bool:
     """`KNOWN_HALLUCINATION_PHRASES`에 걸리거나, 글자다운 글자가 하나도 없는
     (대시·말줄임표 등 whisper의 "잘 안 들림" 자리표시자만 있는) 조각이면 참.
 
     후자 실측(2026-08-31, 영화A 오프닝): "—"만 있는 조각이 수십 개
     떴다 — 실제 대사라면 문자(letter)가 하나도 없을 수 없다.
+
+    **`♪`는 예외다**(2026-08-31, 코드 리뷰로 발견) — whisper가 음악 구간에서
+    내는 정당한 음표 표시라 `isalnum()`엔 안 걸리지만 지어낸 자리표시자가
+    아니다. `translate.py`의 `_protect()`도 이 문자를 보호 대상으로 다룬다
+    — 자막에 실제로 나올 수 있는 뜻 있는 기호라는 뜻이다.
+
+    `PLAUSIBLE_ONMIC_PHRASES`는 `start_ms`·`end_ms`·`speech`(VAD 구간)를
+    받았을 때만 판정한다 — 이 구간이 VAD와 안 겹칠 때만(침묵에서 지어낸
+    게 거의 확실할 때만) 참을 돌려준다. 셋 중 하나라도 없으면(예: 옛
+    호출부·시험) 안전한 쪽으로 판정을 보류한다(거짓 — 지우지 않는다).
     """
     stripped = text.strip()
     if not stripped:
@@ -137,7 +157,11 @@ def _is_known_hallucination(text: str) -> bool:
     lower = stripped.lower()
     if any(phrase in lower for phrase in KNOWN_HALLUCINATION_PHRASES):
         return True
-    return not any(ch.isalnum() for ch in stripped)
+    if any(phrase in lower for phrase in PLAUSIBLE_ONMIC_PHRASES):
+        if start_ms is None or end_ms is None or speech is None:
+            return False
+        return not any(s < end_ms and start_ms < e for s, e in speech)
+    return not any(ch.isalnum() or ch == "♪" for ch in stripped)
 
 
 def has_vad_support(start_ms: int, end_ms: int, speech: list[tuple[int, int]],
@@ -277,7 +301,8 @@ def generate(video: Path, profile: dict, script: Path | None = None,
     # "Transcribed by ESO, translated by —"가 여러 번, "—"만 있는 조각이
     # 수십 개). 실제 대사가 이 문구와 우연히 겹칠 확률은 무시할 만하다.
     before_known = len(segments)
-    segments = [s for s in segments if not _is_known_hallucination(s.text)]
+    segments = [s for s in segments
+               if not _is_known_hallucination(s.text, s.start_ms, s.end_ms, speech)]
     if len(segments) != before_known:
         say(f"whisper의 유명한 침묵 환각 문구 {before_known - len(segments)}개를 지웠습니다"
             " — 실제 대사가 아니라고 텍스트 자체로 확인됩니다")
@@ -583,6 +608,12 @@ def generate(video: Path, profile: dict, script: Path | None = None,
                 say(f"    #{ev.index} {ts // 60}:{ts % 60:02d}  {ev.text[:40]!r}")
             if len(no_vad) > 20:
                 say(f"    ...외 {len(no_vad) - 20}곳 더")
+            # **notes.srt에도 남긴다**(2026-08-31, 코드 리뷰로 발견) — 화면
+            # 출력만으로는 사람이 실제로 여는 `<초안>.notes.srt`(cli.py가
+            # SE에 얹어 보라고 안내하는 파일)에 하나도 안 남아서, 콘솔
+            # 스크롤을 넘긴 나머지(20곳 넘는 것)는 확인할 방법이 없었다.
+            notes.extend((ev.index, "말소리 구간(VAD)과 안 겹칩니다 — 들어보고 확인 필요")
+                         for ev in no_vad)
 
     # 재분할로 번호가 바뀌었으면 원어도 새 번호로 옮긴다.
     moved_sources: dict[int, str] = {}

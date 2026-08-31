@@ -3720,6 +3720,27 @@ _ov2_events, _ov2_notes, _ov2_sources = merge_sound_events(
 ok("밀어내서 너무 짧아지면(500ms 미만) 통째로 버린다",
    not any(e.kind == "sfx" for e in _ov2_events))
 
+# **버려진 이웃을 다음 클램프의 기준으로 삼지 않는다**(2026-08-31, 드라마B E01
+# 실전 검증에서 재발견 — 합성 시험 하나만으로는 못 잡았다). VAD가 대사
+# 하나 안에서 짧은 침묵을 잘못 감지해 소리 후보 3개가 연달아 나온 경우:
+# 가운데 것이(대사와 겹쳐서) 버려지면, 세 번째 것은 그 버려진 것의 이른
+# 끝점이 아니라 실제로 살아남은 이웃(대사)의 끝점을 봐야 한다 — 안 그러면
+# 대사와 여전히 겹친 채로 통과한다.
+_cascade_dialogue = [Event(1, 0, 1000, "앞"), Event(2, 2000, 5000, "대사")]
+_cascade_sfx = [
+    Event(3, 1000, 1800, "[음악A]", kind="sfx"),   # 정상 — 두 대사 사이
+    Event(4, 3000, 3500, "[음악B]", kind="sfx"),   # 대사 한가운데 — 버려져야 함
+    Event(5, 4900, 6000, "[음악C]", kind="sfx"),   # 버려진 B가 아니라 대사 끝(5000)을 봐야 함
+]
+_casc_events, _casc_notes, _ = merge_sound_events(_cascade_dialogue, [], _cascade_sfx)
+_casc_sorted = sorted(_casc_events, key=lambda e: e.start_ms)
+ok("가운데 겹친 후보는 버려진다",
+   not any(e.text == "[음악B]" for e in _casc_sorted))
+ok("그다음 후보는 버려진 이웃이 아니라 실제 이웃(대사)을 기준으로 밀린다",
+   next(e for e in _casc_sorted if e.text == "[음악C]").start_ms == 5000)
+ok("결과에 겹침이 없다",
+   all(a.end_ms <= b.start_ms for a, b in zip(_casc_sorted, _casc_sorted[1:])))
+
 
 # --- 겹침 방지(_enforce_no_overlap) ----------------------------------------
 # "경계만 따로 정밀화"는 시도했다가 걷어냈다(ffmpeg이 짧은 구간을 독립적으로
