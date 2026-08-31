@@ -30,6 +30,7 @@ from dataclasses import dataclass, field
 
 from . import word_sense
 from .model import Event
+from .text import has_hangul
 
 # 번역하지 않고 그대로 넘길 것들. 화자명·효과음·음표는 표기 규정의 영역이라
 # 모델이 손대면 규정이 무너진다.
@@ -641,6 +642,17 @@ def translate_events(events: list[Event], translator, glossary: Glossary | None 
                 text, note = ev.text, "번역하지 못했습니다 — 원문을 남겼습니다"
 
             text = _restore(text, frame)
+            # **번역기가 한국어를 목표 언어에 섞어 낼 때가 있다(2026-08-31,
+            # 영화A·영화B 프랑스어·스웨덴어·일본어·독일어 번역 B층
+            # 심화 대조로 실측).** 두 모양이다 — "(참고: ...)" 같은 한국어
+            # 메타 설명을 덧붙이거나("Jag kommer att övervaka dig nog 좋습니다"),
+            # 단어 하나가 통째로 한국어로 남는다("유도 혼수상태にありました").
+            # 어느 쪽이든 **고쳐서 지어내지 않는다** — 뒷쪽은 한국어만 잘라내면
+            # 문장이 깨진다(foreign_dialogue.py와 같은 논리, 규칙 4). 표시만
+            # 한다. 영화B 일본어에서 1434개 중 93개(6.5%)로 나옴 — 드물지
+            # 않다.
+            if target_lang != "ko" and has_hangul(text):
+                note = (note + " / " if note else "") + "번역에 한국어가 섞였습니다 — 확인 필요"
             missed = glossary.check(ev.text, text)
             if missed:
                 note = (note + " / " if note else "") + f"고정 표기 확인: {', '.join(missed)}"

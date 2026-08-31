@@ -1162,6 +1162,28 @@ _cues = translate_events(_evs, _fake, Glossary())
 ok("빠진 줄만 다시 묻는다", len(_fake.asked) == 2 and "Goodbye" in _fake.asked[1])
 ok("다시 물은 자리를 표시한다", bool(_cues[1].note))
 
+# --- 번역기가 목표 언어에 한국어를 섞어 낼 때 표시만 한다(고치지 않는다) ---
+# 2026-08-31, 영화A·영화B 4개 언어 번역 B층 심화 대조에서 실측:
+# "(참고: ...)" 한국어 메타 설명을 덧붙이거나, 단어 하나가 통째로 한국어로
+# 남는 경우("유도 혼수상태にありました") 둘 다 나옴 — 영화B 일본어에서
+# 1434개 중 93개(6.5%). 한국어만 잘라내면 문장이 깨지므로 지어내지 않고
+# 표시만 한다(foreign_dialogue.py와 같은 논리, 규칙4).
+
+_fake = _FakeTranslator(["1. 유도 혼수상태にありました。\n"])
+_cues = translate_events([Event(1, 0, 1000, "You were in an induced coma.")],
+                         _fake, Glossary(), target_lang="ja")
+ok("목표 언어가 ko가 아닌데 한국어가 섞이면 확인 필요로 표시한다",
+   "한국어가 섞였습니다" in _cues[0].note)
+
+_fake = _FakeTranslator(["1. これは完全に日本語です。\n"])
+_cues = translate_events([Event(1, 0, 1000, "This is entirely in Japanese.")],
+                         _fake, Glossary(), target_lang="ja")
+ok("순수 목표 언어 결과는 표시하지 않는다", not _cues[0].note)
+
+_fake = _FakeTranslator(["1. 안녕하세요\n"])
+_cues = translate_events([Event(1, 0, 1000, "Hello.")], _fake, Glossary(), target_lang="ko")
+ok("목표 언어가 ko면 한국어가 있어도 당연히 표시하지 않는다", not _cues[0].note)
+
 _fake = _FakeTranslator(["", ""])
 _cues = translate_events(_evs[:1], _fake, Glossary())
 # 빈 자막은 사람이 못 보고 지나친다. 원문이 남아 있으면 눈에 띈다.
