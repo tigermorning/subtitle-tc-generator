@@ -596,11 +596,63 @@ recall 100%는 사전 커버리지가 상한이라 원리적으로 불가능하�
 
 순서에 이유가 있다. 뒤 항목이 앞 항목을 전제로 한다.
 
-### T12. 화면 캡션 OCR — 2단계(파이프라인 통합) 〔대기〕
+### T12. 화면 캡션 OCR — 2단계(파이프라인 통합) 〔끝남, 2026-08-31〕
 
 2026-08-30에 1단계(추출+인식)를 `checker/ocr.py` + `--ocr-scan`로 만들었다
 (`docs/HANDOFF.md` 7절 참고). 결정 사항이라 여기 남긴다 — 다음 세션이 엔진
 선택을 또 고민하지 않도록(규칙17):
+
+**2단계 완료(2026-08-31) — 처음 스케치보다 훨씬 가볍게 끝났다.** 조사해
+보니 `checker/position.py`의 `is_forced_narrative()`가 이미 **텍스트 마커
+만으로** 화면자막을 판정하고 있었다(`Event`에 필드가 없어도 동작) — 없던
+건 "텍스트를 마커로 감싸는 함수" 하나뿐이었다. 그래서:
+
+- `checker/model.py`: `Event.kind`(기본 `"dialogue"`, OCR은 `"caption"`) —
+  검사 로직엔 안 쓰인다, 출처를 사람이 알아보게 하는 부가 정보다(규칙4).
+- `checker/position.py`: `apply_marker(text, marker)` 신설 —
+  `is_forced_narrative()`가 알아보는 정확히 같은 모양으로 감싼다.
+- `checker/ocr.py`: `captions_to_events()`·`merge_captions()` 신설(순수
+  함수) — 대사 이벤트와 시간순 병합, 번호 재부여, 기존 노트 번호 이동,
+  신뢰도 낮은 캡션에 "확인 필요" 노트.
+- `checker/translate.py`: `to_events()`가 `kind`를 보존하도록 한 줄 고침
+  (안 고치면 OCR 캡션이 번역을 거치는 순간 `kind`가 `"dialogue"`로 되돌아감).
+- `checker/cli.py`: `--ocr`(`--generate`의 부가 플래그, `--ocr-scan`과는
+  별개) — `--fn-marker` 없이 쓰면 whisper 돌리기 전에 즉시 오류(낭비 방지).
+  `generate()` 끝난 **뒤에** 병합한다 — `resplit_all()`/`merge_cues()`가
+  OCR 텍스트를 대사와 섞거나 잘못 자를 위험을 피하고,
+  `forced_narrative.match_onscreen_duration`(화면에 떠 있던 시간 그대로)도
+  `converge()`의 CPS 재계산을 안 거쳐서 저절로 지켜진다.
+- `checker/pipeline.py` 변경 없음 — `stage_generate()`/`STAGES`는 CLI·GUI·
+  플러그인 어디서도 실제로 안 쓰여서(`_generate_mode()`가 `generate()`를
+  직접 부름) 안 쓰이는 선언에 맞추는 대신 실제 실행 경로에 붙였다.
+
+**실측(2026-08-31, 예능A 19회 일부 구간, 오디오 포함 42초 요청 —
+영상 자체 문제로 실제론 2.9초만 잘림, 그래도 유효한 실전 테스트가 됐다)**:
+`--generate --ocr --fn-marker double_quote --collision keep_both`로 돌려
+whisper 대사 1개 + OCR 캡션 2개가 정상 병합, `“…”`로 감싸짐, 번호 1→3으로
+재부여, 대사 노트(환각 의심)가 밀린 번호로 정확히 이동, 캡션 신뢰도 노트
+(0.44/0.48, "확인 필요")가 정확한 위치에 붙음. `C01`(표시시간 833~7000ms
+범위)이 500ms짜리 캡션 조각을 실제로 잡아냄 — 자동으로 안 고치고 사람에게
+넘기는 것까지 의도대로 동작.
+
+**여전히 안 한 것(다음 라운드, 규칙12 — 갈래를 동시에 안 벌인다):**
+- T10(`quote_role_swapped`)·T11(`forced_narrative_merged_with_dialogue`)
+  구현 — 지금은 마커 적용 캡션이 실제로 생겼으니 재료는 갖춰졌지만 검사
+  로직 자체는 아직 없다("미구현 검사"로 계속 보고됨, 스모크 테스트에서
+  10건 중 포함 확인).
+- `checker/pipeline.py`의 `stage_ocr_captions`/`STAGES` 등록 — GUI 쪽을
+  실제로 쓰게 되면 그때 같이 본다.
+- `rules/SCHEMA.md:50`의 낡은 "forced_narrative가 sdh에서 금지" 표기 —
+  실제 로더(`checker/profile.py`)는 이미 sdh도 허용한다(기존 테스트가
+  확인). 이번 작업과 무관해서 발견만 하고 안 고침.
+- GUI(`app/`) `--ocr` 체크박스 — CLI만(1단계와 같은 범위).
+
+`tests/run_tests.py`에 `apply_marker()` 왕복 확인·`captions_to_events`/
+`merge_captions` 병합 로직 단위 테스트 추가, 831건 전부 통과.
+
+---
+
+아래는 1단계 작업 기록(2026-08-30~31, 그대로 남겨 둔다):
 
 - **엔진: EasyOCR**(사용자 결정, 2026-08-30). Tesseract는 인쇄물 전용이라
   예능 화면 캡션의 그래픽/외곽선 폰트에서 인식률이 떨어질 걸로 판단.
@@ -647,8 +699,9 @@ recall 100%는 사전 커버리지가 상한이라 원리적으로 불가능하�
      상한 기본값을 없앴다(`None`, `--ocr-max-duration`으로만 켬) — 규칙14의
      "이전 생성물의 추정을 검증 없이 다음 고침에 반영하지 않는다"의 실제
      사례. `tests/run_tests.py` 817건 전부 통과.
-- **2단계로 넘어가기 전에 사람 확인을 받는다** — 규칙12(갈래를 동시에
-  벌이지 않는다)와 같은 이유로 1단계와 한 세션에 몰아 하지 않았다.
+- **2단계로 넘어가기 전에 사람 확인을 받았다** — 규칙12(갈래를 동시에
+  벌이지 않는다)와 같은 이유로 1단계와 한 세션에 몰아 하지 않고, 플랜 모드로
+  조사→계획→승인 절차를 다시 거쳤다(위 "2단계 완료" 항목이 그 결과).
 
 ### ~~T1. 캐릭터 시트 외부 조사~~ 〔끝남〕
 
