@@ -20,6 +20,7 @@ from checker.ocr import (  # noqa: E402
 )
 from checker.position import JobRules, apply_marker, is_forced_narrative  # noqa: E402
 from checker.generate import _is_known_hallucination, has_vad_support  # noqa: E402
+from checker.sfx import AUDIOSET_TO_CANDIDATE, speech_gaps  # noqa: E402
 
 PASSED = 0
 FAILED: list[str] = []
@@ -3583,6 +3584,25 @@ ok("인덱스가 1..N으로 매겨진다", [e.index for e in _hard_events] == [1
 ok("신뢰도 낮은 카드만 노트가 붙는다",
    [i for i, _ in _hard_notes] == [2] and "0.35" in _hard_notes[0][1])
 ok("신뢰도 높은 카드는 노트가 안 붙는다", 1 not in dict(_hard_notes))
+
+
+# --- SFX 1단계: speech_gaps(대사 없는 구간만 뽑기) -------------------------
+# 대사 위에 깔린 배경음은 여기서 안 다룬다 — 화면까지 봐야 판단할 자리라
+# 대사 없는 자리만 돌려준다(checker/sfx.py 독스트링).
+
+ok("말소리 앞뒤·사이의 빈 구간을 뽑는다",
+   speech_gaps([(2000, 4000), (6000, 7000)], duration_ms=10000, min_gap_ms=500)
+   == [(0, 2000), (4000, 6000), (7000, 10000)])
+ok("min_gap_ms보다 짧은 틈은 버린다",
+   speech_gaps([(0, 2000), (2300, 4000)], duration_ms=4000, min_gap_ms=500) == [])
+ok("겹치거나 순서 뒤섞인 말소리 구간도 정렬해서 처리한다",
+   speech_gaps([(5000, 6000), (0, 1000)], duration_ms=8000, min_gap_ms=500)
+   == [(1000, 5000), (6000, 8000)])
+ok("말소리가 전혀 없으면 전체가 하나의 빈 구간이다",
+   speech_gaps([], duration_ms=5000, min_gap_ms=500) == [(0, 5000)])
+
+ok("AUDIOSET_TO_CANDIDATE의 후보는 전부 대괄호로 감싼 문구다",
+   all(v.startswith("[") and v.endswith("]") for v in AUDIOSET_TO_CANDIDATE.values()))
 
 
 # --- 결과 ---------------------------------------------------------------

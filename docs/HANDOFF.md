@@ -102,6 +102,7 @@ A만으로 충분한지(=B를 계속 돌려야 하는지)는 `docs/corpus_status
 | 말소리 구간(VAD) | Silero VAD(ONNX, 2MB) | ffmpeg의 음량 기반 검출은 배경음악·잡음에서 무너진다(한 자료에서 30분을 구간 3개로 잘못 잡음). 모델 기반이 최악을 없앤다 |
 | 번역(1차) | Ollama 로컬 LLM — 기본 `exaone3.5:7.8b`(한국어 품질 우수, 상업 라이선스 제약 있음), 대안 `qwen2.5:7b-instruct`(Apache-2.0) | 로컬 제약 + 라이선스 선택권을 같이 준다. 3060 Ti 8GB에서 4bit 양자화로 돈다 |
 | 화자 분리 | `pyannote/speaker-diarization-community-1`(2026-08-27 도입) | whisper가 화자 구분을 안 준다 — 예능처럼 화자가 빠르게 바뀌는 자리를 `regroup.py`가 한 자막으로 뭉치는 버그의 근본 원인이었다. 4개 후보 중 3.1보다 화자 수 세기·전사 타이밍 정합이 낫다고 공식 문서가 밝힌 최신판을 선택 |
+| 소리 분류(`--sfx-scan`) | `MIT/ast-finetuned-audioset-10-10-0.4593`(2026-08-31 도입) | whisper는 대사만 받아 적어 SDH의 순수 효과음 자막(`[groans]` 등)을 처음부터 못 만든다(영화B·영화A·드라마B 정답 대조로 실측 확인). AudioSet 527종 분류가 "무슨 소리 계열인가"까지는 짐작해 준다 — 분위기·구체 동작은 못 짚어(아래 의존성 상태 참고) 1단계(보고용)만 만듦 |
 | `--against` 텍스트 유사도 | Ollama 임베딩, `paraphrase-multilingual`(2026-08-27 도입) | 글자 겹침(`SequenceMatcher`)은 의역을 못 잡는다("Mister Cho isn't that you?" vs "Aren't you Mr. Cho?" = 글자 유사도 0.18). 참/거짓 짝 10개로 4개 모델(bge-m3·paraphrase-multilingual·nomic-embed-text-v2-moe·qwen3-embedding:0.6b)을 실측 비교해 분리폭이 가장 큰 것을 골랐다(`checker/embed.py` 주석에 표 있음) |
 | BLEU·ROUGE·perplexity | **안 씀** | 시도했다가 걷어냈다. ROUGE-L이 기존 글자 유사도와 값이 같았고, 한국어 특유의 짧은 어절 때문에 BLEU가 자주 0으로 무너짐. `번역-품질-지표` 스킬에 판단 근거 기록 |
 | Whisper 파인튜닝 | **안 함(의도적)** | 자막은 대사의 축약본이지 전사가 아니다. 이것으로 ASR을 학습시키면 전사 자체가 축약을 배워버린다 — 전사는 모델 교체로만 개선한다 |
@@ -196,6 +197,41 @@ Smart App Control이 켜져 있으면 `.venv-diarize`의 torch DLL이 막힌 적
 정작 실제 대사가 결과에서 사라졌다 — `_extract_frames()`에 화면 아래
 `band`(기본 0.25) 자르기를 추가해 고침(`--ocr-scan`/`--ocr`은 캡션 위치가
 안 정해져 있어 여전히 `band=None`).
+
+### 소리 분류(`--sfx-scan`) 의존성 상태 (2026-08-31 신설)
+
+**격리 venv가 필요 없었다.** `.venv-ocr`·`.venv-diarize`와 달리, 이 컴퓨터
+시스템 파이썬에 이미 `transformers`(5.14.1)·`torch`(2.6.0+cu124)가 깔려
+있어 버전 충돌 없이 바로 됐다(직접 확인, 2026-08-31). 모델은
+`MIT/ast-finetuned-audioset-10-10-0.4593`(Audio Spectrogram Transformer,
+AudioSet 527종 라벨, 허깅페이스에서 첫 실행 시 자동 다운로드).
+
+**`transformers`의 `pipeline("audio-classification", ...)` 편의 함수를
+안 쓴다.** 파일 경로든 numpy 배열이든 내부적으로 `torchcodec`을 무조건
+import하는데, 이 컴퓨터에서 `torchcodec`의 네이티브 라이브러리 로드가
+`OSError: [WinError 127]`로 죽는다(직접 재현, 2026-08-31 — Smart App
+Control이나 DLL 버전 문제로 보이나 근본 원인은 안 팠다). 대신
+`AutoFeatureExtractor`·`ASTForAudioClassification`을 직접 불러 쓴다
+(`checker/sfx.py`) — `torchcodec`을 아예 안 거친다. 오디오는 ffmpeg으로
+16kHz 모노 wav를 뽑고 `scipy.io.wavfile`로 읽는다(`soundfile`은 이
+컴퓨터에 없어서 최소 의존성 있는 `scipy`를 골랐다).
+
+**1단계(짐작만, `checker/sfx.py`)만 됐다.** `--ocr-scan`과 같은 위치 —
+자막 Event로 만들거나 `--generate`에 자동으로 얹지 않는다(규칙4, 소리
+검출은 추정). 대사 없는 구간(VAD 기준)마다 top-1 라벨을 보고, 확신 높은
+일부만 `rules/lexicon/ko-sdh-effects.yaml`의 가장 일반형 한국어 후보로
+매핑한다("Music"→"[음악이 흐른다]" 등) — 분위기("[슬픈 음악]" 등)나
+화면을 봐야 아는 구체 동작("[신발을 쓱 벗는다]" 등)은 오디오만으로 못
+정해서 애초에 매핑표에 안 넣었다(`docs/BACKLOG.md` §0-C가 이미 이 한계를
+지적해 뒀다). 영화B로 스모크 테스트: 대사 없는 639구간 중
+505곳에서 확신 있는 라벨을 냄 — 대부분 "Music"(적절해 보임), 몇몇은
+"Speech"(VAD가 못 잡은 자리에 실제 말소리가 있을 가능성 — 이번 세션
+`has_vad_support()` 정정과 같은 부류의 신호, 자세히는 안 팠다).
+
+**아직 안 된 것**: (1) 대사와 겹치는 배경음(대화 도중 흐르는 음악 등)은
+다루지 않는다 — 지금은 "대사 없는 구간"만 본다. (2) `--generate`에 병합해
+실제 자막으로 만드는 2단계는 없다 — OCR이 1단계(`--ocr-scan`)로 검증하고
+2단계(`--generate --ocr`)로 간 것과 같은 순서를 밟을 것.
 
 ### 화자 분리(`--diarize`) 의존성 상태
 

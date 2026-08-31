@@ -837,6 +837,45 @@ def _ocr_scan_mode(args, ap) -> int:
     return 0
 
 
+def _sfx_scan_mode(args, ap) -> int:
+    """대사 없는 구간에 무슨 소리가 나는지 오디오 분류 모델로 짐작해 본다.
+
+    **보고용이다.** `checker/sfx.py` 독스트링 참고 — 자막 Event로 만들거나
+    자동 반영하지 않는다. 1단계(짐작만)까지만 한다.
+    """
+    from .media import MediaToolUnavailable, find_speech, probe
+    from .sfx import SfxUnavailable, detect_sound_events
+
+    if not args.video:
+        ap.error("--sfx-scan에는 --video가 필요합니다")
+    if not args.video.is_file():
+        ap.error(f"영상을 찾지 못했습니다: {args.video}")
+
+    try:
+        media = probe(args.video)
+        speech, how = find_speech(args.video, duration_ms=media.duration_ms, progress=print)
+        print(f"말소리 구간 {len(speech)}개 ({'모델' if how == 'vad' else '음량'})")
+        events = detect_sound_events(args.video, speech, media.duration_ms,
+                                     min_gap_ms=args.sfx_min_gap,
+                                     min_confidence=args.sfx_min_confidence,
+                                     progress=print)
+    except (MediaToolUnavailable, SfxUnavailable) as exc:
+        print(f"[오류] {exc}")
+        return 2
+
+    if not events:
+        print("소리 후보를 찾지 못했습니다.")
+        return 0
+
+    print(f"\n소리 후보 {len(events)}개 (보고용 — 자동 반영되지 않습니다,"
+          " 화면을 보고 확인해야 합니다)")
+    for e in events:
+        candidate = e.candidate or "(매핑 없음 — 라벨만 참고)"
+        print(f"  {e.start_ms:>8}–{e.end_ms:<8}ms  ({e.confidence:.2f})  "
+              f"{e.label:<28}  {candidate}")
+    return 0
+
+
 def _ocr_hardsub_mode(args, ap) -> int:
     """하드섭(화면 전체에 자막이 타 있는 영상)을 카드 단위 초안 srt로 뽑는다.
 
@@ -1172,6 +1211,17 @@ def main(argv: list[str] | None = None) -> int:
                          "읽으면 좌상단 작품명 워터마크·배경 간판 글자까지 섞인다"
                          "(실측). --ocr-scan/--ocr은 기본 None(전체 프레임) — "
                          "예능 화면 캡션은 위치가 안 정해져 있다")
+    ap.add_argument("--sfx-scan", action="store_true",
+                    help="대사 없는 구간마다 오디오 분류 모델(AudioSet)로 무슨 "
+                         "소리인지 짐작해 목록만 낸다(--video 필요). **보고용이다** "
+                         "— 소리 검출은 추정이라(규칙4) 자막 Event로 만들거나 "
+                         "자동 반영하지 않는다. 분위기(따뜻한/슬픈 등)나 화면을 "
+                         "봐야 아는 구체 동작은 못 짐작한다 — 수식어 없는 일반형"
+                         "후보만 낸다(`checker/sfx.py` 참고)")
+    ap.add_argument("--sfx-min-confidence", type=float, default=0.3,
+                    help="이 미만 확신도의 소리 후보는 버린다(기본 0.3)")
+    ap.add_argument("--sfx-min-gap", type=int, default=1000,
+                    help="대사 없는 구간이 이 미만(ms)이면 짐작하지 않는다(기본 1000)")
     ap.add_argument("--lock-timecodes", action="store_true",
                     help="**타임코드를 절대 건드리지 않는다.** TC 작업이 끝난 파일을 "
                          "받아 번역·교정만 할 때 쓴다. 자막을 나누는 것도 막는다"
@@ -1359,6 +1409,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.ocr_hardsub:
         return _ocr_hardsub_mode(args, ap)
+
+    if args.sfx_scan:
+        return _sfx_scan_mode(args, ap)
 
     if args.list:
         for prof in available_profiles():

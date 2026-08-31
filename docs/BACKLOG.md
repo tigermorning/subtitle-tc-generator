@@ -1417,3 +1417,40 @@ MVP·CORPUS_TITLES.md의 genre_maturity 언급). 매번 `tests/run_tests.py`
 801건 통과 확인 후 push.
 
 관련 커밋: `f53e7b0`, `032c03b`, `e0ce389`, `b509e8b`, `f7fd417`, `fd0cd7b`.
+
+## 2026-08-31 — 영화A·영화B TC 진단 심화 + 드라마B E02~05 개별 조사 + SFX 1단계
+
+**정답지-대조-진단 스킬(§6 멈추는 기준)을 따라 영화B·영화A를
+계속 파서 구조 버그 3개를 더 찾아 고쳤다(전부 검증 완료, `docs/HANDOFF.md`
+6절에 상세):**
+
+1. **VAD 안 겹침 필터가 배경음 대사를 조용히 삭제** — 지우지 않고 표시만
+   하도록 정정(`generate.py`, `has_vad_support()`).
+2. **whisper의 유명한 침묵 환각 문구**("Transcribed by ESO" 등, 영어) —
+   텍스트 매칭으로 자동 삭제(`_is_known_hallucination()`).
+3. **faster-whisper 문맥 전이 환각 루프**(20~30초 통째로 대사 손실, 3회
+   확인) — `condition_on_previous_text=False`+`hallucination_silence_
+   threshold=2.0`으로 고침(`transcribe.py`). 영화A로 검증: 짝지음
+   41%→67.0%, 유사도 0.67→0.77.
+
+**이어서 드라마B E02~05를 개별 조사**(E01만 깊이 보고 나머지는 최종 수치만
+확인했던 것을 채움, 위키 세션로그 지적). E01 결론이 대체로 통했다 —
+새로 나온 구조 버그는 하나뿐: **한국어 팬섭 크레딧·유튜브 끝인사도 유명
+환각 문구**("한글자막 by 한효정" 4/4회차, "다음 영상에서 만나요." 3/4회차)
+— 같은 방식으로 고침. 최종 짝지음 E01~05: 각 회차 73.7~80.8%.
+
+**SFX 자막 생성 1단계(`--sfx-scan`, 보고용) 신설** — `checker/sfx.py`.
+`docs/BACKLOG.md` §0-C가 남긴 "이 오디오가 대사인지 아닌지 판별하는
+기능이 없다"는 과제에 대한 첫 답. AudioSet 오디오 분류 모델(MIT/
+ast-finetuned-audioset)로 대사 없는 구간의 소리 종류를 짐작한다 — 분위기·
+구체 동작은 오디오만으로 못 정해서 수식어 없는 일반형 후보만 낸다.
+`--generate`에 자동 반영 안 함(OCR과 같은 1단계→2단계 순서, 규칙4).
+영화B로 스모크 테스트: 대사 없는 639구간 중 505곳에서 확신 있는
+라벨(대부분 Music, 몇몇 Applause·Zipper 등도 정확했음).
+
+**세 갈래 전부 `docs/corpus_status.yaml`·`CORPUS_TITLES.md`·`HANDOFF.md`에
+기록함**(규칙17 — 판단이 끝나면 맞는 자리에 남겨야 다음 세션이 다시 안
+찾는다). 메이드_인_코리아 항목이 corpus_status.yaml에 아예 없던 빈 자리도
+이번에 채웠다(2026-08-30 세션이 지적만 하고 안 채운 것).
+
+관련 커밋: `9371d55`, `a614e15`, `b151f26`, `dcbc4be`, `637497c`, `ccc8233`.
