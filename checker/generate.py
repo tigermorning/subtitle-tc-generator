@@ -98,6 +98,25 @@ def speaker_prefix(name: str, profile: dict) -> str:
     return f"{left}{name}{right} "
 
 
+def has_vad_support(start_ms: int, end_ms: int, speech: list[tuple[int, int]],
+                    speech_end: int, undetected_after: bool) -> bool:
+    """이 구간이 VAD가 잡은 말소리 구간과 겹치는지. `generate()`가 자막마다
+    묻는다 — 겹치지 않으면 지우지 않고 "확인 필요"로만 표시한다(2026-08-31,
+    영화B 정답 대조에서 배경음악에 묻힌 진짜 대사를 VAD가 놓치는
+    사례를 확인한 뒤 정정 — 예전엔 여기서 조용히 지웠다).
+
+    `undetected_after`가 참이고 `start_ms`가 `speech_end`(VAD가 마지막으로
+    본 자리) 이후면 무조건 겹치는 것으로 본다 — VAD 검출 자체가 못 미친
+    구간이라 "침묵"과 "검출 실패"를 구분 못 하기 때문이다(예능A 15회
+    사고 참고, 위 `generate()`의 관련 주석).
+    """
+    if not speech:
+        return True   # VAD 자체가 없으면(음량 방식 등) 이 판단을 안 한다
+    if undetected_after and start_ms >= speech_end:
+        return True
+    return any(s < end_ms and start_ms < e for s, e in speech)
+
+
 def generate(video: Path, profile: dict, script: Path | None = None,
              language: str = "auto", model: str | None = None,
              fps: float | None = None, use_gpu: bool = True,
@@ -205,46 +224,44 @@ def generate(video: Path, profile: dict, script: Path | None = None,
     if not segments:
         return Draft([], [], {"transcript": 0})
 
-    # **말소리 구간과 전혀 안 겹치는 조각은 뺀다.** whisper는 완전한 침묵에서도
-    # 자신 있게 글자를 만들어 낸다 — 흔한 실패 모드다(2026-08-26, 영화D·영화F
+    # **말소리 구간과 전혀 안 겹치는 조각은 더 이상 여기서 지우지 않는다
+    # (2026-08-31 정정).** 원래 이 필터는 whisper가 완전한 침묵에서도 자신
+    # 있게 글자를 지어내는 문제를 잡으려고 만들었다(2026-08-26, 영화D·영화F
     # and Monsters 두 영화의 오프닝 로고 구간에서 밀리초까지 같은 타임스탬프에
-    # "네! 네! 네!"·"헤이 헤이 헤이" 같은 반복이 나온 것으로 확인). 실제 말소리가
-    # 조금이라도 있으면 VAD가 잡으므로, 겹치는 구간이 하나도 없는 조각은 소리가
-    # 아니라 지어낸 것으로 본다. 지우지 않고 세어서 알린다(추정 자동 삭제가
-    # 아니라 근거 있는 필터임 — 규칙 4).
+    # "네! 네! 네!"·"헤이 헤이 헤이" 같은 반복이 나온 것으로 확인). 그런데
+    # "실제 말소리가 조금이라도 있으면 VAD가 잡는다"는 전제가 틀렸다 —
+    # 영화B 정답 대조(2026-08-31)에서 VAD(음성 모델)가 배경음악이
+    # 깔린 구간(예: 125~190초, 378~396초)에서 실제 대사("Hello!"·"Where is
+    # the fuel?"·"Wait." 등, whisper는 정확히 받아 적었다)를 통째로 못 잡는
+    # 사례를 직접 확인했다 — 65초·18초 구간이 대사가 있었는데도 통째로
+    # 사라졌다. 게다가 이 자리 원래 주석부터가 "지우지 않고 세어서 알린다"고
+    # 적어 놓고 실제로는 `segments = kept`로 지우고 있었다 — 규칙 4(추정으로
+    # 자동 교정하지 않는다)를 코드가 어기고 있었다.
+    #
+    # 그래서 여기서는 **VAD 커버리지만 계산해 두고, 최종 자막까지 살아남는지는
+    # 아래 환각 의심 검사 단계로 넘긴다** — 밀도(CPS)·신뢰도와 함께 봐야
+    # "짧지만 진짜 한 말"과 "침묵에서 지어낸 반복"을 더 잘 가른다(주석
+    # 그대로: 지우지 않고 표시만 한다).
     #
     # **VAD의 오디오 읽기 자체가 도중에 멎을 수 있다.** 컨테이너 손상 등으로
     # ffmpeg이 오디오를 끝까지 못 읽으면 `speech`가 영상 길이보다 훨씬 짧게
     # 끝난다 — 그 뒤는 "침묵"이 아니라 "검출을 못 한 구간"이다. 실측(2026-08-27,
     # 예능A 15회): VAD는 3113초에서 멎었는데 whisper 전사는 3478초까지
     # 멀쩡했다. 이 구분 없이 필터를 걸었더니 **실제 대사가 있는 마지막 6분이
-    # 통째로 삭제되는 사고**가 났다 — 막으려던 문제(침묵 환각)보다 더 큰 손실이라
-    # 반드시 갈라야 한다.
-    if speech:
-        speech_end = max(e for _, e in speech)
-        coverage_gap = media.duration_ms - speech_end
-        # 30초는 여유값이다. 진짜 무음 엔딩(크레딧 등)은 이보다 짧은 게 보통이고,
-        # 몇 분 단위로 벌어지면 검출 자체가 멎었다고 본다.
-        undetected_after = coverage_gap > 30_000
+    # 통째로 삭제되는 사고**가 났다 — 아래 검사에서도 이 구간은 판단을 보류한다.
+    speech_end = max((e for _, e in speech), default=0)
+    coverage_gap = media.duration_ms - speech_end
+    # 30초는 여유값이다. 진짜 무음 엔딩(크레딧 등)은 이보다 짧은 게 보통이고,
+    # 몇 분 단위로 벌어지면 검출 자체가 멎었다고 본다.
+    undetected_after = bool(speech) and coverage_gap > 30_000
 
-        if undetected_after:
-            say(f"말소리 검출이 영상 끝보다 {coverage_gap / 1000:.0f}초 일찍 "
-                "멎었습니다 — 그 뒤는 침묵으로 보지 않고 그대로 둡니다"
-                "(검출 자체가 못 미쳤을 수 있습니다)")
+    if undetected_after:
+        say(f"말소리 검출이 영상 끝보다 {coverage_gap / 1000:.0f}초 일찍 "
+            "멎었습니다 — 그 뒤는 침묵으로 보지 않고 그대로 둡니다"
+            "(검출 자체가 못 미쳤을 수 있습니다)")
 
-        def _has_speech(seg) -> bool:
-            if undetected_after and seg.start_ms >= speech_end:
-                return True   # 검출이 못 미친 구간 — 걸러내지 않는다
-            return any(s < seg.end_ms and seg.start_ms < e for s, e in speech)
-
-        kept = [s for s in segments if _has_speech(s)]
-        dropped = len(segments) - len(kept)
-        if dropped:
-            say(f"말소리와 전혀 안 겹치는 전사 조각 {dropped}개를 뺐습니다"
-                " — 침묵에서 whisper가 지어낸 것으로 보입니다")
-        segments = kept
-        if not segments:
-            return Draft([], [], {"transcript": 0})
+    def _has_vad_support(start_ms: int, end_ms: int) -> bool:
+        return has_vad_support(start_ms, end_ms, speech, speech_end, undetected_after)
 
     notes: list[tuple[int, str]] = []
     stats: dict = {"transcript": len(segments)}
@@ -477,6 +494,29 @@ def generate(video: Path, profile: dict, script: Path | None = None,
             say(f"    #{ev.index} {ts // 60}:{ts % 60:02d}  {ev.text[:40]!r}")
         if len(suspects) > 20:
             say(f"    ...외 {len(suspects) - 20}곳 더")
+
+    # **말소리 구간(VAD)과 전혀 안 겹치는 자막도 따로 알린다(2026-08-31,
+    # 위쪽 `_has_vad_support` 정정과 짝).** 위 환각 의심 검사와 근거가 다르다
+    # — 저건 통계(밀도·신뢰도)만 보고, 이건 VAD가 이 시간대에 소리 자체를
+    # 아예 못 찾았는지를 본다. 원인이 둘일 수 있다: 배경음악·잡음에 묻힌
+    # 진짜 대사를 VAD가 놓쳤거나(영화B 실측 — VAD가 못 잡은 65초 구간에
+    # whisper는 "Hello!"·"It's magic." 등 실제 대사를 정확히 받아 적었다),
+    # 또는 완전한 침묵에서 whisper가 지어낸 것(영화D·영화F 사례)이다.
+    # 둘을 여기서 가리지 못하니 **지우지 않고 표시만** 한다 — 지우면 전자가
+    # 손해, 안 지우면 후자가 사람 손이 한 번 더 간다. 둘 중 되돌릴 수 없는
+    # 쪽(실제 대사 삭제)을 피한다.
+    if speech:
+        no_vad = [ev for ev in result.events
+                 if not _has_vad_support(ev.start_ms, ev.end_ms)]
+        if no_vad:
+            say(f"말소리 구간(VAD)과 안 겹치는 자막 {len(no_vad)}곳 — 배경음에 묻힌 "
+                "진짜 대사이거나 침묵에서 지어낸 것, 둘 다일 수 있습니다. "
+                "영상에서 직접 들어보고 확인하세요:")
+            for ev in no_vad[:20]:
+                ts = ev.start_ms // 1000
+                say(f"    #{ev.index} {ts // 60}:{ts % 60:02d}  {ev.text[:40]!r}")
+            if len(no_vad) > 20:
+                say(f"    ...외 {len(no_vad) - 20}곳 더")
 
     # 재분할로 번호가 바뀌었으면 원어도 새 번호로 옮긴다.
     moved_sources: dict[int, str] = {}
