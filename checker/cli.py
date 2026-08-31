@@ -305,8 +305,14 @@ def _run_one(path: Path, profile: dict, args, backend) -> dict | None:
         else:
             suggestions = suggest_spotting(events, speech, args._media.fps)
 
-            # 장면 전환은 플랫폼이 적용할 때만 본다(쿠팡은 비적용).
-            if (profile.get("shot_change") or {}).get("applied"):
+            # 장면 전환은 플랫폼이 적용할 때(쿠팡은 비적용)이면서 SDH일 때만 본다.
+            # 넷플릭스 공식 문서 자체는 "applicable to all timed text files"라
+            # 번역에도 적용된다고 읽히지만, 실무에서는 TC 작업 뒤 SDH 자막을 만들 때만
+            # SE에서 장면전환을 지정하고 번역 자막 작업은 그 단계 없이 바로 들어간다
+            # (사용자 확인, 2026-08-31). 문서·규정이 이기는 게 아니라 이 프로젝트의
+            # 적용 범위를 실무에 맞춘 것이다 — rules/*/common.yaml의 공식 인용문은
+            # 그대로 둔다(규칙 3: 표시만, 덮어쓰지 않음).
+            if (profile.get("shot_change") or {}).get("applied") and profile.get("kind") == "sdh":
                 from .media import detect_shot_changes
                 from .timing import suggest_shot_snap
                 shots = detect_shot_changes(args.video)

@@ -475,10 +475,16 @@ def generate(video: Path, profile: dict, script: Path | None = None,
     # 애초부터 장면 전환을 하나도 안 본 채로 나왔다는 뜻이다. 넷플릭스 공식
     # "Timed Text Style Guide: Subtitle Timing Guidelines"(2026-08-28 확인,
     # "These rules are applicable to all timed text files produced for
-    # Netflix" — SDH 전용이 아니라 번역 자막에도 적용된다): 인점이 장면
-    # 전환 뒤 0.5초 안이면 전환 첫 프레임으로, 아웃점이 전환 앞 0.5초
-    # 안이면 전환 2프레임 전으로 당긴다.
-    if (profile.get("shot_change") or {}).get("applied"):
+    # Netflix"): 인점이 장면 전환 뒤 0.5초 안이면 전환 첫 프레임으로,
+    # 아웃점이 전환 앞 0.5초 안이면 전환 2프레임 전으로 당긴다.
+    #
+    # **다만 SDH에만 건다(2026-08-31 사용자 확인).** 위 공식 문서 문구만 보면
+    # 번역 자막도 대상처럼 읽히지만, 실무 SE 작업 순서는 TC를 먼저 잡고 —
+    # SDH 자막을 만들 때만 그 TC 위에 장면전환 지점을 지정한 뒤 작업하고,
+    # 번역 자막은 TC 작업 뒤 장면전환 지정 없이 바로 번역으로 들어간다. 문서가
+    # 틀렸다고 고치는 게 아니라(rules/*/common.yaml의 공식 인용문은 그대로
+    # 둔다) 이 도구의 적용 범위를 실무에 맞춘 것이다.
+    if (profile.get("shot_change") or {}).get("applied") and profile.get("kind") == "sdh":
         from .media import detect_shot_changes
         from .timing import suggest_shot_snap
         shots = detect_shot_changes(video)

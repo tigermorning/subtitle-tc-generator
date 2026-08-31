@@ -428,6 +428,17 @@ torch DLL이 걸린다. 어젯밤(2026-08-27)엔 됐다가 다음날 안 됐다 
   구조 버그는 이 문구 하나뿐이고, 나머지 어긋남은 사투리 오청(부산
   사투리 "우예 됐노"→"왜 됐나" 등)·SFX-only 자막·타이틀 카드("메이드 인
   코리아")처럼 이미 아는 범주였다.
+- **장면전환 스냅이 번역 자막에도 걸리고 있었다(2026-08-31)**: 2026-08-28에
+  넷플릭스 공식 문서("applicable to all timed text files")를 근거로 `--generate`가
+  SDH·번역 구분 없이 장면전환 스냅을 걸도록 고친 적이 있는데, 실무는 그렇지
+  않다는 사용자 확인을 받았다 — TC 작업 뒤 **SDH를 만들 때만** SE에서 장면전환을
+  지정하고, 번역 자막은 그 단계 없이 바로 번역에 들어간다. `checker/cli.py`·
+  `generate.py`가 이제 `shot_change.applied`와 `kind == "sdh"`를 함께 본다.
+  `rules/*/common.yaml`의 공식 인용문 자체는 안 고쳤다 — 문서 범위와 이 도구의
+  적용 범위가 다른 것뿐이다(규칙 3). 같은 회차에 SE 공식 GitHub 소스
+  (`BeautifyTimeCodesSettings.cs`)로 대조해, 기존 `SHOT_CLEARANCE_MS=500`·
+  `SHOT_OUT_LEAD_FRAMES=2` 상수가 SE 넷플릭스 프리셋과 이미 정확히 같다는 것도
+  확인했다(`rules/sources/작업자-자료/이미지-정독.md` 참고).
 
 ## 7. 미해결 — 다음 사람이 볼 것
 

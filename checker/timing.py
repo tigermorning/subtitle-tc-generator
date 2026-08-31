@@ -359,6 +359,23 @@ def suggest_spotting(events: list[Event], speech: list[tuple[int, int]], fps: fl
 #   없다). 전에는 방향을 안 가리고 "가까우면 무조건 지적"했다 — 규정에
 #   없는 경우까지 건드릴 뻔했다.
 #   쿠팡은 비적용(작업자 자료).
+#
+# 호출부(cli.py·generate.py)는 프로파일의 `shot_change.applied`뿐 아니라
+# `kind == "sdh"`도 함께 본다 — 실무에서 장면전환 지정은 SDH 작업에서만 하고
+# 번역 자막은 TC 작업 뒤 바로 번역으로 들어간다(사용자 확인, 2026-08-31).
+#
+# 확인 기록(2026-08-31): SE(SubtitleEdit) "Beautify time codes" 프로필 편집
+# 창의 넷플릭스 프리셋 값도 이 두 상수와 정확히 같다 — SE 소스
+# (`src/libse/Settings/BeautifyTimeCodesSettings.cs`, `Preset.Netflix`)에
+# `OutCuesGap = 2`(=`SHOT_OUT_LEAD_FRAMES`), `InCuesGap = 0`(인점은 전환에
+# 바로 붙인다), 초록 영역(soft zone) `12`프레임 — 24fps에서 정확히 0.5초라
+# `SHOT_CLEARANCE_MS = 500`과 같은 값이다(다른 fps에서도 SE는 이 정수를
+# fps에 맞춰 바꾸지 않는다 — 상수 그대로다). 같은 프리셋의 빨간 영역(hard
+# zone, `InCuesLeftRedZone = 7` 등)은 두 소프트/하드 임계값을 나눠 세부
+# 우선순위(연결된 자막·체이닝)를 다루는 SE만의 UI 개념이고, 넷플릭스 공식
+# 문서(위 인용)엔 그런 2단계 구분이 없다 — 그래서 여기 상수로 옮기지 않았다.
+# `rules/sources/작업자-자료/이미지-정독.md`의 "SE '프로필 편집' 프레임 표"
+# 절에 fps별 환산표와 함께 이 결론을 적어 뒀다.
 SHOT_CLEARANCE_MS = 500
 SHOT_OUT_LEAD_FRAMES = 2
 
@@ -367,8 +384,9 @@ def suggest_shot_snap(events: list[Event], shots: list[int], fps: float,
                       clearance_ms: int = SHOT_CLEARANCE_MS) -> list[SpotSuggestion]:
     """장면 전환에 어설프게 걸친 타임코드를 제안한다. 방향이 있다(위 주석).
 
-    쿠팡처럼 장면 전환을 적용하지 않는 곳에서는 이 함수를 부르지 않는다
-    (프로파일의 `shot_change.applied`가 판단한다).
+    쿠팡처럼 장면 전환을 적용하지 않는 곳, 번역 자막(SDH가 아닌 kind)에서는
+    이 함수를 부르지 않는다 — 호출부가 `shot_change.applied`와
+    `kind == "sdh"`를 함께 판단한다.
     """
     if not shots:
         return []
