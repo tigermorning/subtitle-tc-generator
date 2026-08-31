@@ -110,6 +110,17 @@ KNOWN_HALLUCINATION_PHRASES = (
     "amara.org", "opensubtitles",
     "thank you for watching", "thanks for watching",
     "please subscribe", "like and subscribe", "subscribe to my channel",
+    # 한국어 자막 제작 크레딧 문구. 2026-08-31, 드라마B E02~05
+    # 4회차 전부에서 "한글자막 by 한효정"이 그대로 반복됨 — 한 회차만의
+    # 우연이 아니라 이 소스(팬섭 자료로 학습된 whisper 패턴으로 추정)의
+    # 특징이다. 실제 드라마 대사에 "한글자막"이라는 낱말이 나올 확률은
+    # 무시할 만하다.
+    "한글자막",
+    # 유튜브 영상 끝인사(2026-08-31, 같은 4회차 중 E02·E04·E05 3편에서
+    # "다음 영상에서 만나요."가 그대로 반복됨) — 드라마 대사에 나올 문구가
+    # 아니다. "구독"·"좋아요"처럼 흔한 낱말은 정상 대사와 겹칠 수 있어
+    # 넣지 않는다 — 실제로 관측된 고정 문구만 넣는다.
+    "다음 영상에서 만나요",
 )
 
 

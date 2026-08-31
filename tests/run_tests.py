@@ -3515,6 +3515,8 @@ ok("한글 대사는 안 걸린다(isalnum이 한글도 인정)",
    not _is_known_hallucination("안녕하세요"))
 ok("우연히 비슷한 단어가 섞여도 대사면 안 걸린다",
    not _is_known_hallucination("I'm watching you."))
+ok("한국어 팬섭 크레딧('한글자막 by ...')도 걸린다(2026-08-31, 드라마B E02~05 4회차 전부에서 확인)",
+   _is_known_hallucination("한글자막 by 한효정"))
 
 
 # --- T10(quote_role_swapped)·T11(forced_narrative_merged_with_dialogue) ---
