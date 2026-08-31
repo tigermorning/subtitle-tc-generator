@@ -31,6 +31,19 @@ if _own_dir in sys.path:
 
 import json
 
+# Windows 콘솔 기본 인코딩(cp949)에서 죽지 않게 한다 — `checker/cli.py`의
+# `_fix_console_encoding()`과 같은 이유·같은 처방이지만, 이 파일은 **별도
+# 프로세스**라 cli.py의 reconfigure가 여기까지 안 미친다. 실측(2026-08-31):
+# EasyOCR이 첫 실행에서 모델을 내려받을 때 tqdm 진행바가 U+2588(전각 블록)을
+# 찍는데, cp949로는 인코딩이 안 돼 다운로드 도중 `UnicodeEncodeError`로
+# 워커가 죽는다 — 신뢰도 몇이 아니라 **모든 첫 실행이 100% 재현**됐다(영어
+# 인식 모델이 `~/.EasyOCR/model/temp.zip`으로 멈춘 채 완성되지 않음).
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        pass
+
 
 def main() -> int:
     if len(sys.argv) < 4:
