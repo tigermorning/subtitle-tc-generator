@@ -30,6 +30,7 @@ DEFAULTS = {
     "speech_method": "auto",        # auto | vad | loudness
     "whisper_language": "en",
     "translate_passes": 3,
+    "ocr_lang": "en",               # 화면 캡션(OCR) 언어 — easyocr 언어 코드
     "use_knp": True,
     "web_terms": True,              # 용어를 밖에서도 찾는다(낱말만 나간다)
     # 도구 자리 — 비우면 스스로 찾는다
@@ -70,6 +71,9 @@ OPTIONS = (
            "만들기", "choice", ("en", "ko", "ja", "zh", "auto")),
     Option("translate_passes", "번역 차수", "1차는 빠른 초벌, 2차는 용어와 맥락, "
            "3차는 말맛. 작업자가 하는 순서와 같다.", "만들기", "int"),
+    Option("ocr_lang", "화면 캡션 언어", "'화면 캡션도 OCR로 읽기'를 켰을 때 읽을 "
+           "언어(easyocr 언어 코드, 예: en·ko). 화면 그래픽 캡션의 언어이지 "
+           "번역 목표 언어가 아니다.", "만들기", "text"),
     Option("use_knp", "KNP 시트 자동으로 쓰기", "자막 옆에 KNP 파일이 있으면 읽어 용어를 "
            "고정한다. 이미 있는 것을 다시 만들게 하지 않는다.", "만들기"),
     Option("web_terms", "용어를 밖에서도 찾기", "규범 용례에 없는 용어를 위키백과에서 "

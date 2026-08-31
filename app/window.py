@@ -220,12 +220,17 @@ class MainWindow(QMainWindow):
         # 버튼(② 한국어 교정)이 되었으므로 체크박스로 또 있으면 어느 쪽이 언제 걸리는지
         # 화면만 봐서는 알 수 없다. 단계는 버튼 하나가 하나씩 맡는다.
         self.translate_check = QCheckBox("만들 때 번역까지")
+        # 화면 캡션(그래픽 자막)도 EasyOCR로 읽어 자막에 얹는다. `checker/cli.py`의
+        # `--ocr`과 같은 기능 — 표식(`--fn-marker`)이 "작업 기준..."에서 정해져
+        # 있어야 한다(`run_generate`가 실행 전에 먼저 확인한다).
+        self.ocr_check = QCheckBox("화면 캡션도 OCR로 읽기")
 
         for label, widget in (("플랫폼", self.platform_box), ("종류", self.kind_box),
                               ("원어", self.language_box)):
             bar.addWidget(QLabel(f"  {label} "))
             bar.addWidget(widget)
         bar.addWidget(self.translate_check)
+        bar.addWidget(self.ocr_check)
         bar.addSeparator()
 
         bar.addSeparator()
@@ -492,6 +497,15 @@ class MainWindow(QMainWindow):
         return load_profile(self.platform_box.currentText(), "ko",
                             self.kind_box.currentText())
 
+    def _job_rules(self):
+        """이 작업의 화면자막 표식·겹침 처리(`작업 기준...`에서 정한 값).
+
+        정해지지 않았으면(`ask`) 위치·T10·T11 검사가 조용히 안 돈다 — 검사
+        쪽이 이미 그렇게 만들어져 있다(`position.JobRules.decided`).
+        """
+        from checker.position import JobRules
+        return JobRules.from_profile(self._profile())
+
     def _corrector_path(self) -> str | None:
         """교정기 자리. 옆에 있으면 그냥 쓴다 — 설정을 만들게 하지 않는다."""
         from checker.korean import find_corrector
@@ -553,12 +567,27 @@ class MainWindow(QMainWindow):
             script = Path(path) if path else None
             self._note(f"대본: {script.name if script else '없음'}")
 
+        job_rules = None
+        if self.ocr_check.isChecked():
+            job_rules = self._job_rules()
+            if job_rules.marker == "ask":
+                # whisper 전사를 다 돌리고 나서야 막으면 낭비다 — 실행 전에 막는다
+                # (`checker/cli.py`의 `--ocr` + `--fn-marker` 검사와 같은 자리).
+                QMessageBox.warning(
+                    self, "화면자막 표식이 정해지지 않았습니다",
+                    "화면 캡션을 자막에 얹으려면 표식(따옴표·이탤릭·대괄호 등)을 "
+                    "먼저 정해야 합니다 — 툴바의 '작업 기준...'에서 고르세요.")
+                return
+
         job = jobs.GenerateJob(Path(self._video_path), self._profile(), script,
                                self.language_box.currentText(),
                                self.translate_check.isChecked(),
                                # **영상 옆에 남긴다.** 자막을 아직 저장하지 않았으므로
                                # 자막 경로가 없다 — 생성은 영상에서 시작한다.
-                               work_beside=Path(self._video_path))
+                               work_beside=Path(self._video_path),
+                               ocr=self.ocr_check.isChecked(),
+                               ocr_lang=getattr(self, "_prefs", {}).get("ocr_lang", "en"),
+                               job_rules=job_rules)
 
         # **어느 경로로 도는지 먼저 말한다.** 대본이 있으면 "전사가 왜 필요한가"라는
         # 의문이 생기는데, 전사는 글자를 얻으려는 것이 아니라 **타임코드를 잡고 대본에
@@ -578,6 +607,11 @@ class MainWindow(QMainWindow):
             guess += ", 번역까지 하면 몇 분 더" if guess else "몇 분"
         if guess:
             self._note(f"영상 {minutes:.1f}분 — {guess} 걸립니다")
+        if self.ocr_check.isChecked() and minutes:
+            # 실측(2026-08-31, 37분 영상 전체 스캔): 4시간 48분 — 영상 길이의
+            # 약 7.7배. 프레임을 전부 훑고 EasyOCR을 매번 돌리는 비용이다.
+            self._note(f"화면 캡션 OCR까지 하면 대략 {round(minutes * 7.7)}분쯤 "
+                       "더 걸립니다(실측 기준 — CPU·해상도에 따라 달라집니다)")
 
         def done(draft):
             self.model.replace(draft.events, getattr(draft, "sources", None) or None)
@@ -675,7 +709,8 @@ class MainWindow(QMainWindow):
                          "확인하세요.")
             return
         job = jobs.CheckJob(self.model.events, self._profile(), fix=False,
-                            korean=True, corrector_path=path)
+                            korean=True, corrector_path=path,
+                            job_rules=self._job_rules())
         self._start(job,
                     lambda r: self._apply_stage_result(r[0], r[1], "② 한국어 교정 완료",
                                                       track="korean"),
@@ -687,7 +722,8 @@ class MainWindow(QMainWindow):
         if not self._stage_guard("check"):
             return
         job = jobs.CheckJob(self.model.events, self._profile(), fix=True,
-                            korean=False, corrector_path=None)
+                            korean=False, corrector_path=None,
+                            job_rules=self._job_rules())
         self._start(job,
                     lambda r: self._apply_stage_result(r[0], r[1], "③ 자막 QA 완료",
                                                       track="korean"),
@@ -802,6 +838,7 @@ class MainWindow(QMainWindow):
             knp=find_for(self.subtitle_path) if self.subtitle_path else None,
             model=getattr(self, "_prefs", {}).get("translate_model"),
             cast=getattr(self, "_cast", None),
+            job_rules=self._job_rules(),
             work_beside=self.subtitle_path)
 
         def done(result):

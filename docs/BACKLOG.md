@@ -643,13 +643,42 @@ whisper 대사 1개 + OCR 캡션 2개가 정상 병합, `“…”`로 감싸짐
 구현. 실측: `--generate --ocr` 초안에서 미구현 검사 10건→8건. 양성/음성
 테스트 8건 추가, 839건 전부 통과.
 
+**GUI(`app/`)에도 붙였다(2026-08-31, 같은 날 세 번째 라운드):**
+- `app/window.py` 툴바에 "화면 캡션도 OCR로 읽기" 체크박스(`translate_check`
+  옆) — 켜면 실행 전에 `_job_rules()`(작업 기준의 마커)가 `ask`인지 먼저
+  확인해 막는다(휘스퍼를 다 돌리고 나서 막으면 낭비 — CLI의 `--ocr`+
+  `--fn-marker` 검사와 같은 자리).
+- `app/jobs.py`의 `GenerateJob`이 `generate()` 뒤에 `detect_onscreen_captions`
+  →(번역 켜져 있으면) `translate_events`/`to_events`→`merge_captions`를
+  그대로 잇는다 — CLI `_generate_mode()`와 같은 순서.
+- **버그 하나 같이 고침**: `CheckJob`/`TranslateJob`/`ReviseJob`/`PolishJob`
+  전부 `Event(e.index, e.start_ms, e.end_ms, e.text)`로 이벤트를 다시 만들며
+  `kind`를 안 넘기고 있었다 — OCR 캡션이 검사·번역·감수·윤문 어느 단계를
+  거치든 그 순간 `kind`가 `"dialogue"`로 조용히 되돌아가는 구조였다(2단계
+  때 `translate.to_events()`에서 이미 한 번 겪은 것과 같은 함정). 네 곳
+  전부 `kind=e.kind`를 추가.
+- `run_korean`/`run_check`(② ③ 버튼)·`run_polish`도 `_job_rules()`를
+  넘기게 고쳤다 — 안 넘기면 position/T10/T11 검사가 마커를 몰라 조용히
+  안 돈다(`JobRules.decided`가 `False`).
+- `app/model.py`의 표 모델이 `kind == "caption"` 줄을 다른 색(갈색)에
+  툴팁("OCR로 읽은 화면 캡션입니다 — 확인이 필요할 수 있습니다")으로
+  표시한다 — 규칙4: 화면 글자 검출은 추정이니 표에서도 구분돼야 한다.
+- `app/prefs.py`에 `ocr_lang`(기본 `"en"`) 추가 — 기존 제네릭 설정
+  렌더러(`_pref_widget`)로 공짜로 UI가 생긴다, 새 위젯 코드 안 씀.
+- 실측(37분 영상 전체 스캔, 4시간 48분): 영상 길이의 약 7.7배 걸린다는
+  경고를 생성 버튼 누르기 전에 띄운다.
+
+**GUI는 PySide6가 이 환경 시스템 파이썬에 없어 직접 못 띄워 봤다** —
+`ast.parse`로 구문만 확인했다(규칙9: PySide6 도는 테스트는 사람이 별도
+venv로 돌린다). 실제로 창 띄워서 체크박스 눌러 보는 확인은 사용자 몫.
+
 **여전히 안 한 것(다음 라운드, 규칙12 — 갈래를 동시에 안 벌인다):**
-- `checker/pipeline.py`의 `stage_ocr_captions`/`STAGES` 등록 — GUI 쪽을
-  실제로 쓰게 되면 그때 같이 본다.
+- `checker/pipeline.py`의 `stage_ocr_captions`/`STAGES` 등록 — 이 선언
+  자체를 CLI·GUI 어디서도 안 쓴다는 게 2단계 조사 때 이미 확인됨, 그
+  선언을 실제로 쓰게 만드는 건 별도 리팩터.
 - `rules/SCHEMA.md:50`의 낡은 "forced_narrative가 sdh에서 금지" 표기 —
   실제 로더(`checker/profile.py`)는 이미 sdh도 허용한다(기존 테스트가
   확인). 이번 작업과 무관해서 발견만 하고 안 고침.
-- GUI(`app/`) `--ocr` 체크박스 — CLI만(1단계와 같은 범위).
 
 `tests/run_tests.py`에 `apply_marker()` 왕복 확인·`captions_to_events`/
 `merge_captions` 병합 로직 단위 테스트 추가, 831건 전부 통과.

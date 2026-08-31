@@ -49,7 +49,8 @@ class GenerateJob(Job):
 
     def __init__(self, video: Path, profile: dict, script: Path | None,
                  language: str, translate: bool, speech: str = "auto",
-                 work_beside: Path | None = None):
+                 work_beside: Path | None = None,
+                 ocr: bool = False, ocr_lang: str = "en", job_rules=None):
         super().__init__()
         self.video, self.profile, self.script = video, profile, script
         self.language, self.translate, self.speech = language, translate, speech
@@ -57,6 +58,11 @@ class GenerateJob(Job):
         # 6.5분 영상 210개를 만들어 놓고 UI가 멈춰 그대로 잃었다(2026-08-12).
         # 전사·번역이 가장 비싼 단계라 여기가 남길 값이 제일 크다.
         self.work_beside = work_beside
+        # 화면 캡션(OCR). `checker/cli.py`의 `--ocr`과 같은 기능 —
+        # `job_rules`(화면자막 표식)가 없으면 방금 만든 캡션을 검사기가
+        # 못 알아본다(`window.py`가 실행 전에 먼저 막지만, 여기서도 한 번
+        # 더 막는다 — 조용히 넘어가지 않는다).
+        self.ocr, self.ocr_lang, self.job_rules = ocr, ocr_lang, job_rules
 
     def run(self) -> None:
         def work():
@@ -87,6 +93,33 @@ class GenerateJob(Job):
                 except Exception as exc:
                     # 남기기가 본 작업을 죽이지 않는다.
                     self.say(f"남기지 못했습니다: {exc}")
+
+            if self.ocr:
+                if not self.job_rules or self.job_rules.marker == "ask":
+                    raise RuntimeError(
+                        "화면 캡션을 자막에 얹으려면 화면자막 표식을 먼저 정해야 "
+                        "합니다(툴바의 '작업 기준...')")
+                from checker.ocr import captions_to_events, detect_onscreen_captions, merge_captions
+
+                self.say("화면 캡션을 읽습니다 — 시간이 걸릴 수 있습니다...")
+                captions = detect_onscreen_captions(self.video, lang=self.ocr_lang)
+                if not captions:
+                    self.say("화면 캡션을 찾지 못했습니다.")
+                else:
+                    caption_events = captions_to_events(
+                        captions, start_index=len(draft.events) + 1)
+                    confidences = {ev.index: c.confidence
+                                  for ev, c in zip(caption_events, captions)}
+                    if translator:
+                        from checker.translate import to_events, translate_events
+                        target_lang = self.profile.get("language") or "ko"
+                        cues = translate_events(caption_events, translator, None,
+                                                target_lang=target_lang, progress=self.say)
+                        caption_events = to_events(cues, caption_events)
+                    draft.events, draft.notes = merge_captions(
+                        draft.events, draft.notes, caption_events, confidences,
+                        self.job_rules.marker)
+                    self.say(f"화면 캡션 {len(captions)}개를 자막에 얹었습니다")
             return draft
         self._guarded(work)
 
@@ -105,7 +138,8 @@ class CheckJob(Job):
             from checker.model import Event
             from checker.pipeline import CorrectOptions, correct_and_check
 
-            events = [Event(e.index, e.start_ms, e.end_ms, e.text) for e in self.events]
+            events = [Event(e.index, e.start_ms, e.end_ms, e.text, kind=e.kind)
+                     for e in self.events]
             # 단계 순서를 여기서 정하지 않는다 — `pipeline`이 정한다. 전에는 이 파일이
             # 자기 순서를 갖고 있어서 SE 플러그인과 다른 리포트가 나왔다. 그리고
             # **한국어 위반을 버리고 있었다**(`events, _ = run_korean_pass`) — 그래서
@@ -164,7 +198,8 @@ class TranslateJob(Job):
                 work.save_source({e.index: e.text for e in self.events})
                 self.say(f"단계별 결과를 남깁니다: {work.root.name}")
 
-            source = [Event(e.index, e.start_ms, e.end_ms, e.text) for e in self.events]
+            source = [Event(e.index, e.start_ms, e.end_ms, e.text, kind=e.kind)
+                     for e in self.events]
             first = stage_translate(source, self.profile, translator=translator,
                                     glossary=glossary, progress=self.say)
             if work:
@@ -232,7 +267,8 @@ class ReviseJob(Job):
                 from checker.work import Work
                 work = Work.beside(self.work_beside)
 
-            events = [Event(e.index, e.start_ms, e.end_ms, e.text) for e in self.events]
+            events = [Event(e.index, e.start_ms, e.end_ms, e.text, kind=e.kind)
+                     for e in self.events]
             result = stage_revise(
                 events, self.profile, translator=translator, source=self.sources,
                 glossary=glossary, rounds=self.rounds, first_role=self.first_role,
@@ -285,7 +321,8 @@ class PolishJob(Job):
                 from checker.work import Work
                 keep = Work.beside(self.work_beside)
 
-            events = [Event(e.index, e.start_ms, e.end_ms, e.text) for e in self.events]
+            events = [Event(e.index, e.start_ms, e.end_ms, e.text, kind=e.kind)
+                     for e in self.events]
             result = stage_polish(
                 events, self.profile, translator=translator, source=self.sources,
                 glossary=glossary, cast=self.cast, korean=bool(self.corrector_path),

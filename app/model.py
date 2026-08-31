@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt
+from PySide6.QtGui import QColor
 
 from checker.model import Event
 from checker.writers import to_timecode
@@ -60,6 +61,15 @@ class SubtitleModel(QAbstractTableModel):
 
         if role == Qt.TextAlignmentRole and column in (0, 1, 2, 3):
             return int(Qt.AlignRight | Qt.AlignVCenter)
+
+        # **OCR로 읽은 화면 캡션은 눈에 띄어야 한다.** 규칙4: 화면 글자 검출은
+        # 추정이다 — whisper 대사와 똑같이 보이면 어느 줄을 더 의심해야 하는지
+        # 표에서 알 수 없다.
+        if event.kind == "caption":
+            if role == Qt.ForegroundRole:
+                return QColor("#8a5a00")
+            if role == Qt.ToolTipRole:
+                return "OCR로 읽은 화면 캡션입니다 — 확인이 필요할 수 있습니다"
         return None
 
     # --- 쓰기 ---------------------------------------------------------
