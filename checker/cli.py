@@ -947,6 +947,12 @@ def _generate_mode(args, ap) -> int:
         # 낭비다 — 여기서 미리 막는다(--lock-timecodes 클래시 검사와 같은 자리).
         ap.error("--ocr에는 --fn-marker가 필요합니다(화면자막 표식이 정해지지 "
                  "않으면 만든 캡션을 검사기가 못 알아봅니다)")
+    if args.sfx and args.lang != "ko":
+        # AUDIOSET_TO_CANDIDATE(checker/sfx.py)는 한국어 문구만 담고 있다 —
+        # 다른 언어는 자료가 없다(규칙9, 지어내지 않는다). 이것도 whisper를
+        # 다 돌리고 나서 막으면 낭비라 여기서 미리 확인한다.
+        ap.error("--sfx는 -l ko(한국어 SDH)에서만 됩니다 — 소리 후보 문구가 "
+                 "한국어뿐입니다")
 
     from .media import list_subtitle_streams
     existing_subs = list_subtitle_streams(args.video)
@@ -1076,6 +1082,36 @@ def _generate_mode(args, ap) -> int:
             draft.events, draft.notes = merge_captions(
                 draft.events, draft.notes, caption_events, confidences, rules.marker)
             print(f"화면 캡션 {len(captions)}개를 자막에 얹었습니다")
+
+    if args.sfx:
+        # **--sfx-scan(독립 진단)과 다르다.** 여기서는 실제로 최종 자막에
+        # 합친다. -l ko 확인은 함수 맨 위에서 이미 했다(whisper를 다 돌리고
+        # 나서 막으면 낭비다). VAD는 `generate()` 안에서 이미 한 번 돌았지만
+        # 그 결과를 밖으로 안 내보내(Draft에 없음) 여기서 다시 돈다 —
+        # `--ocr`도 같은 이유로 독립적으로 돈다.
+        from .media import find_speech, probe
+        from .sfx import SfxUnavailable, detect_sound_events, merge_sound_events, \
+            sound_events_to_draft_events
+        try:
+            media = probe(args.video)
+            speech, _how = find_speech(args.video, duration_ms=media.duration_ms,
+                                       progress=print)
+            sound_events = detect_sound_events(
+                args.video, speech, media.duration_ms,
+                min_gap_ms=args.sfx_min_gap, min_confidence=args.sfx_min_confidence,
+                progress=print)
+        except (MediaToolUnavailable, SfxUnavailable) as exc:
+            print(f"[오류] {exc}")
+            return 2
+
+        sfx_events = sound_events_to_draft_events(sound_events, start_index=len(draft.events) + 1)
+        if not sfx_events:
+            print("소리 후보를 찾지 못했습니다(매핑되는 것이 없었을 수 있습니다).")
+        else:
+            draft.events, draft.notes = merge_sound_events(
+                draft.events, draft.notes, sfx_events)
+            print(f"소리 후보 {len(sfx_events)}개를 자막에 얹었습니다"
+                  " — 전부 확인 필요로 표시됩니다")
 
     # **여기서 끝내지 않는다.** 예전에는 초안만 쓰고 검사·교정은 사용자가 다시
     # 돌려야 했는데, 그러면 버튼 이름만 보고는 어디까지 된 것인지 알 수 없다
@@ -1222,6 +1258,12 @@ def main(argv: list[str] | None = None) -> int:
                     help="이 미만 확신도의 소리 후보는 버린다(기본 0.3)")
     ap.add_argument("--sfx-min-gap", type=int, default=1000,
                     help="대사 없는 구간이 이 미만(ms)이면 짐작하지 않는다(기본 1000)")
+    ap.add_argument("--sfx", action="store_true",
+                    help="`--sfx-scan`처럼 소리 후보를 찾되, 실제로 최종 자막에 "
+                         "얹는다(--video 필요, -l ko 전용 — 후보 문구가 한국어뿐). "
+                         "얹은 자리는 예외 없이 확인 필요로 표시된다(checker/sfx.py "
+                         "참고 — 신뢰도와 무관하게 전부 추정이다). "
+                         "--sfx-min-confidence/--sfx-min-gap을 그대로 같이 쓴다")
     ap.add_argument("--lock-timecodes", action="store_true",
                     help="**타임코드를 절대 건드리지 않는다.** TC 작업이 끝난 파일을 "
                          "받아 번역·교정만 할 때 쓴다. 자막을 나누는 것도 막는다"

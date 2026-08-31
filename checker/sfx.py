@@ -16,9 +16,15 @@
 못 만든다"). `AUDIOSET_TO_CANDIDATE`는 그래서 **수식어 없는 가장 일반형만** 담는다
 — 후보를 낼 뿐 사람이 문맥을 보고 다듬는다.
 
-**`--generate`에 자동으로 얹지 않는다.** `--sfx-scan`이 목록만 낸다 — OCR이
-`--ocr-scan`(1단계, 보고용) 뒤에 `--generate --ocr`(2단계, 실제 병합)로 간
-것과 같은 순서. 2단계는 이 1단계로 실제 검증한 뒤에 만든다.
+**2단계(`--generate --sfx`, 2026-08-31): `sound_events_to_draft_events()`·
+`merge_sound_events()`를 추가했다.** `candidate`가 있는 것만 최종 자막에
+얹는다 — 매핑 없는 라벨(`--sfx-scan`에만 나오는 것)은 여전히 지어내지
+않는다. **얹은 자리마다 예외 없이 "확인 필요" 노트를 남긴다** — OCR의
+저신뢰도만 표시하는 방식과 다르다(`merge_captions`의 `note_below`).
+이유: OCR은 화면에 실제로 있는 글자를 읽는 것이라 신뢰도가 높으면 그대로
+믿을 근거가 있지만, 오디오 분류는 "무슨 소리 계열인가"만 맞혀도 정확한
+한국어 표현(분위기·구체 동작)은 항상 사람이 다듬어야 하는 초벌이다 —
+확신도와 무관하게 전부 규칙4의 "추정"이다.
 """
 
 from __future__ import annotations
@@ -29,6 +35,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .media import _as_tool_path, _find
+from .model import Event
 
 MODEL_NAME = "MIT/ast-finetuned-audioset-10-10-0.4593"
 
@@ -180,3 +187,43 @@ def detect_sound_events(video: Path, speech: list[tuple[int, int]], duration_ms:
                                      AUDIOSET_TO_CANDIDATE.get(label)))
     say(f"소리 후보 {len(events)}곳 찾음")
     return events
+
+
+def sound_events_to_draft_events(events: list[SoundEvent], start_index: int = 1) -> list[Event]:
+    """`candidate`가 있는 `SoundEvent`만 `kind="sfx"` `Event`로 바꾼다.
+
+    매핑 없는 라벨(`candidate is None`)은 뺀다 — 원 라벨만으로 한국어 자막을
+    지어내지 않는다(규칙3). 번호는 임시값이다(`merge_sound_events()`가 최종
+    번호를 다시 매긴다) — `start_index`는 대사 이벤트 번호와 안 겹치게
+    호출하는 쪽이 정한다.
+    """
+    mapped = [e for e in events if e.candidate]
+    return [Event(start_index + i, e.start_ms, e.end_ms, e.candidate, kind="sfx")
+           for i, e in enumerate(mapped)]
+
+
+def merge_sound_events(dialogue_events: list[Event], dialogue_notes: list[tuple[int, str]],
+                       sfx_events: list[Event],
+                       ) -> tuple[list[Event], list[tuple[int, str]]]:
+    """소리 후보(`Event`, `kind="sfx"`)를 대사 이벤트에 합친다. **순수 함수.**
+
+    `merge_captions()`(`ocr.py`)와 구조는 같지만 노트 규칙이 다르다 — 여기서는
+    **얹은 자리마다 예외 없이** "확인 필요"를 남긴다(모듈 독스트링 참고,
+    OCR처럼 신뢰도로 가르지 않는다). 시간순으로 정렬하고 번호를 1..N으로
+    다시 매기며, `dialogue_notes`도 새 번호로 옮긴다(안 옮기면 밀린 번호가
+    엉뚱한 자막을 가리킨다).
+    """
+    dialogue_index_by_id = {id(e): e.index for e in dialogue_events}
+    combined = sorted(dialogue_events + sfx_events, key=lambda e: e.start_ms)
+
+    remap: dict[int, int] = {}
+    sfx_notes: list[tuple[int, str]] = []
+    for new_i, e in enumerate(combined, 1):
+        if e.kind == "sfx":
+            sfx_notes.append((new_i, "오디오 분류 추정 — 화면 보고 확인 필요"))
+        else:
+            remap[dialogue_index_by_id[id(e)]] = new_i
+        e.index = new_i
+
+    merged_notes = [(remap.get(i, i), msg) for i, msg in dialogue_notes] + sfx_notes
+    return combined, merged_notes

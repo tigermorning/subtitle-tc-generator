@@ -20,7 +20,10 @@ from checker.ocr import (  # noqa: E402
 )
 from checker.position import JobRules, apply_marker, is_forced_narrative  # noqa: E402
 from checker.generate import _is_known_hallucination, has_vad_support  # noqa: E402
-from checker.sfx import AUDIOSET_TO_CANDIDATE, speech_gaps  # noqa: E402
+from checker.sfx import (  # noqa: E402
+    AUDIOSET_TO_CANDIDATE, SoundEvent, merge_sound_events, sound_events_to_draft_events,
+    speech_gaps,
+)
 
 PASSED = 0
 FAILED: list[str] = []
@@ -3603,6 +3606,37 @@ ok("말소리가 전혀 없으면 전체가 하나의 빈 구간이다",
 
 ok("AUDIOSET_TO_CANDIDATE의 후보는 전부 대괄호로 감싼 문구다",
    all(v.startswith("[") and v.endswith("]") for v in AUDIOSET_TO_CANDIDATE.values()))
+
+
+# --- SFX 2단계: sound_events_to_draft_events·merge_sound_events -----------
+# candidate 없는 라벨은 지어내지 않고 뺀다(규칙3). 얹은 자리는 신뢰도와
+# 무관하게 예외 없이 확인 필요 노트가 붙는다(OCR과 다른 점, 모듈 독스트링).
+
+_sound_events = [
+    SoundEvent(2000, 4000, "Music", 0.6, "[음악이 흐른다]"),
+    SoundEvent(9000, 10000, "Silence", 0.9, None),  # 매핑 없음 — 빠져야 한다
+]
+_sfx_draft = sound_events_to_draft_events(_sound_events, start_index=10)
+ok("매핑 없는 라벨은 빠진다", len(_sfx_draft) == 1 and _sfx_draft[0].text == "[음악이 흐른다]")
+ok("sfx 초안 이벤트는 kind=sfx다", _sfx_draft[0].kind == "sfx")
+
+_sfx_dialogue = [Event(1, 0, 1000, "안녕"), Event(2, 5000, 6000, "잘가")]
+_sfx_merged_events, _sfx_merged_notes = merge_sound_events(
+    _sfx_dialogue, [(1, "환각 의심")], _sfx_draft)
+
+ok("합쳐진 이벤트가 시간순이다",
+   [e.start_ms for e in _sfx_merged_events] == sorted(e.start_ms for e in _sfx_merged_events))
+ok("합쳐진 이벤트 번호가 1..N으로 새로 매겨진다",
+   [e.index for e in _sfx_merged_events] == list(range(1, len(_sfx_merged_events) + 1)))
+_sfx_note_idx = next(
+    e.index for e in _sfx_merged_events if e.kind == "sfx")
+ok("얹은 소리 후보는 신뢰도(0.6, 낮지 않음)와 무관하게 확인 필요 노트가 붙는다",
+   any(i == _sfx_note_idx and "확인 필요" in msg for i, msg in _sfx_merged_notes))
+_sfx_dialogue_note_idx = next(i for i, msg in _sfx_merged_notes if msg == "환각 의심")
+_sfx_expected_dialogue_new_index = next(
+    e.index for e in _sfx_merged_events if e.kind == "dialogue" and e.start_ms == 0)
+ok("기존 대사 노트가 밀린 번호로 옮겨진다",
+   _sfx_dialogue_note_idx == _sfx_expected_dialogue_new_index)
 
 
 # --- 결과 ---------------------------------------------------------------
