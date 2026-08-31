@@ -909,7 +909,7 @@ def _ocr_hardsub_mode(args, ap) -> int:
             min_confidence=args.ocr_min_confidence,
             min_similarity=args.ocr_min_similarity,
             max_duration_ms=args.ocr_max_duration, full_scan=not args.ocr_fast,
-            band=band)
+            band=band, refine=not args.ocr_no_refine, refine_fps=args.ocr_refine_fps)
     except (MediaToolUnavailable, OcrUnavailable) as exc:
         print(f"[오류] {exc}")
         return 2
@@ -1256,6 +1256,16 @@ def main(argv: list[str] | None = None) -> int:
                          "읽으면 좌상단 작품명 워터마크·배경 간판 글자까지 섞인다"
                          "(실측). --ocr-scan/--ocr은 기본 None(전체 프레임) — "
                          "예능 화면 캡션은 위치가 안 정해져 있다")
+    ap.add_argument("--ocr-refine-fps", type=float, default=12.0,
+                    help="--ocr-hardsub가 캡션 경계를 정밀화할 때 앞뒤 한 스텝만 "
+                         "이 fps로 다시 잰다(기본 12). 소리는 안 쓴다 — 하드섭은 "
+                         "화면 픽셀에 이미 정확한 타이밍이 있어서 그 프레임을 "
+                         "직접 찾는 쪽이 음성 추정보다 정확하다(사용자와 논의해 "
+                         "확정, 2026-08-31)")
+    ap.add_argument("--ocr-no-refine", action="store_true",
+                    help="--ocr-hardsub의 경계 정밀화를 끈다(빠른 미리보기용). "
+                         "기본은 켜짐 — 굵은 샘플(500ms 간격) 그대로면 TC가 "
+                         "부정확하다(실측)")
     ap.add_argument("--sfx-scan", action="store_true",
                     help="대사 없는 구간마다 오디오 분류 모델(AudioSet)로 무슨 "
                          "소리인지 짐작해 목록만 낸다(--video 필요). **보고용이다** "

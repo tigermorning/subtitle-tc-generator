@@ -15,8 +15,8 @@ from checker.model import Event  # noqa: E402
 from checker.profile import _merge, _validate  # noqa: E402
 from checker.text import count_chars  # noqa: E402
 from checker.ocr import (  # noqa: E402
-    OcrCaption, captions_to_draft_srt_events, captions_to_events, merge_captions,
-    merge_frames,
+    OcrCaption, _find_transition, captions_to_draft_srt_events, captions_to_events,
+    merge_captions, merge_frames, refine_caption_boundaries,
 )
 from checker.position import JobRules, apply_marker, is_forced_narrative  # noqa: E402
 from checker.generate import _is_known_hallucination, has_vad_support  # noqa: E402
@@ -3652,6 +3652,46 @@ _sfx_expected_dialogue_new_index = next(
     e.index for e in _sfx_merged_events if e.kind == "dialogue" and e.start_ms == 0)
 ok("기존 대사 노트가 밀린 번호로 옮겨진다",
    _sfx_dialogue_note_idx == _sfx_expected_dialogue_new_index)
+
+
+# --- 하드섭 TC 정밀화(refine_caption_boundaries, _find_transition) --------
+# 굵은 샘플(500ms 간격)만으로는 TC가 부정확하다는 지적(2026-08-31, 실사용) —
+# 소리 없이 경계 앞뒤만 촘촘히 다시 재서 정확한 프레임을 찾는다.
+
+ok("_find_transition: 상승 경계를 찾는다",
+   _find_transition([(0.0, 5.0), (0.1, 6.0), (0.2, 40.0), (0.3, 42.0)], rising=True) == 0.2)
+ok("_find_transition: 하강 경계를 찾는다",
+   _find_transition([(0.0, 42.0), (0.1, 40.0), (0.2, 6.0), (0.3, 5.0)], rising=False) == 0.2)
+ok("_find_transition: 변화가 없으면 못 찾는다(None)",
+   _find_transition([(0.0, 10.0), (0.1, 10.0), (0.2, 10.0)], rising=True) is None)
+ok("_find_transition: 표본이 하나뿐이면 못 찾는다",
+   _find_transition([(0.0, 5.0)], rising=True) is None)
+
+_fake_caption = OcrCaption(start_ms=1000, end_ms=2000, text="대사", confidence=0.8)
+
+
+def _fake_signal(video, start_ms, end_ms, band, fps):
+    if end_ms == 1000:          # 시작 경계 창 [0, 1000]
+        return [(0.0, 5.0), (0.5, 6.0), (0.7, 40.0), (1.0, 41.0)]
+    if start_ms == 1000:        # 끝 경계 창 [1000, 2000]
+        return [(1.0, 40.0), (1.3, 39.0), (1.8, 6.0), (2.0, 5.0)]
+    return []
+
+
+_refined = refine_caption_boundaries(
+    Path("dummy.mp4"), [_fake_caption], band=0.25, step_ms=1000, fps=12.0,
+    signal=_fake_signal)
+ok("정밀화된 시작이 굵은 값 대신 정확한 지점으로 바뀐다", _refined[0].start_ms == 700)
+ok("정밀화된 끝이 굵은 값 대신 정확한 지점으로 바뀐다", _refined[0].end_ms == 1800)
+ok("텍스트·신뢰도는 그대로 유지된다",
+   _refined[0].text == "대사" and _refined[0].confidence == 0.8)
+
+_flat_signal = lambda video, s, e, band, fps: [(s / 1000, 10.0), (e / 1000, 10.0)]
+_unrefined = refine_caption_boundaries(
+    Path("dummy.mp4"), [_fake_caption], band=0.25, step_ms=1000, fps=12.0,
+    signal=_flat_signal)
+ok("정밀화 실패(신호 변화 없음)면 굵은 값을 그대로 둔다",
+   _unrefined[0].start_ms == 1000 and _unrefined[0].end_ms == 2000)
 
 
 # --- 결과 ---------------------------------------------------------------
