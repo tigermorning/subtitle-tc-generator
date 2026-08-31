@@ -109,6 +109,29 @@ Ollama다. **원고가 이 컴퓨터 밖으로 나가지 않는다.** 원어 스
 전사와 스크립트는 **어느 쪽도 정답으로 두지 않는다.** 어긋난 자리는 기계가 정하지 않고
 표시한다. 소리를 못 찾은 스크립트 줄은 지우지 않고 길이 0으로 남긴다.
 
+### 화면 캡션·비대사 소리 (`--ocr` / `--sfx`)
+
+whisper는 말소리만 받아 적는다 — 화면에 타 있는 글자, 대사 없는 구간의 효과음은
+따로 읽어야 한다. 둘 다 **보고용 1단계(`--ocr-scan`/`--sfx-scan`)와 실제로 얹는
+2단계(`--ocr`/`--sfx`)로 나뉜다**(규칙4 — 추정은 표시만, 확실한 것만 자동 반영).
+
+```bash
+python -m checker --ocr-scan --video ep01.mkv --ocr-lang ko          # 화면 캡션 목록만
+python -m checker --generate --video ep01.mkv -l ko -k sdh \
+                  --ocr --fn-marker bracket                          # 실제로 얹기(마커 필수)
+python -m checker --ocr-hardsub --video ep01.mkv                     # 하드섭 -> 초안 srt
+python -m checker --sfx-scan --video ep01.mkv                        # 소리 후보 목록만
+```
+
+- **화면 캡션**은 EasyOCR을 격리 venv(`.venv-ocr/`)에서 서브프로세스로 돌려 읽는다.
+  `--ocr-hardsub`(임베디드 트랙이 없는 하드섭 영상, 71분 기준 최대 7~8시간짜리 스캔)는
+  프레임마다 결과를 디스크에 남겨 절전·재부팅으로 끊겨도 이어서 돈다 — 결과는
+  정답지가 아니다, 사람이 영상과 대조해 고친 뒤에만 학습 자료가 된다.
+- **비대사 소리**는 AudioSet 오디오 분류(`MIT/ast-finetuned-audioset`)로 VAD가 이미
+  "대사 없음"으로 확정한 구간이 무슨 소리 계열인지 짐작한다(`-l ko -k sdh` 전용).
+  얹은 자리는 신뢰도와 무관하게 예외 없이 "확인 필요"로 표시된다 — 분위기·구체
+  동작은 오디오만으로 못 정하기 때문이다.
+
 ### 번역 (`--translate`)
 
 ```bash
