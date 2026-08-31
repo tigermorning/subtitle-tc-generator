@@ -198,6 +198,16 @@ Smart App Control이 켜져 있으면 `.venv-diarize`의 torch DLL이 막힌 적
 `band`(기본 0.25) 자르기를 추가해 고침(`--ocr-scan`/`--ocr`은 캡션 위치가
 안 정해져 있어 여전히 `band=None`).
 
+**TC 정밀도(같은 날 후속)**: "굵게 훑고 경계만 따로 촘촘히 재확인"을 세 번
+고치다가 접근 자체를 걷어냈다 — ffmpeg이 짧은 구간을 독립적으로 seek하면
+실제 내용과 다른 프레임을 준다는 게 원인이었다(같은 시각인데 연속 디코딩
+프레임엔 자막이 보이고 독립 seek 프레임엔 안 보임, 프레임을 직접 저장해
+확인). `refine_caption_boundaries` 등 정밀화 층을 전부 빼고, 이미 정확하다고
+확인된 연속 디코딩을 그대로 촘촘한 fps로 쓴다 — `--ocr-hardsub`의
+`sample_fps` 기본값을 12로 올렸다(2fps 대비 6배 느림, 71분 영상 기준
+7~8시간 — 시간보다 정확도 우선). 자세한 시행착오는 `checker/ocr.py` 모듈
+독스트링과 `docs/BACKLOG.md` T13 참고.
+
 ### 소리 분류(`--sfx-scan`) 의존성 상태 (2026-08-31 신설)
 
 **격리 venv가 필요 없었다.** `.venv-ocr`·`.venv-diarize`와 달리, 이 컴퓨터
