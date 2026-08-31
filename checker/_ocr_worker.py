@@ -73,7 +73,23 @@ def main() -> int:
 
     results = []
     for ms, frame_path in frames:
-        detections = reader.readtext(frame_path)
+        # **프레임 하나가 죽어도 나머지를 계속 돈다.** 실측(2026-08-31,
+        # 손상된 프레임으로 재현): `readtext()`는 프레임을 못 읽으면(끊긴
+        # ffmpeg 출력·0바이트 파일 등) 예외를 던진다(`OSError`) — 잡지
+        # 않으면 이 함수는 결과를 마지막에 한 번에 `out_json`으로 쓰므로,
+        # 프레임 하나가 루프 중간에 이 예외로 죽으면 그때까지 처리한 결과가
+        # **전부** 사라진다(`out_json` 자체가 안 만들어져 부모 프로세스는
+        # "실패"로만 본다). `--ocr-hardsub`처럼 몇 시간짜리 전체 회차 스캔
+        # 중 프레임 한 장 때문에 처음부터 다시 도는 것을 막는다 — 이
+        # 프레임은 "글자 없음"과 같은 값(빈 텍스트, 신뢰도 0)으로 남기고
+        # 계속한다(`merge_frames()`가 어차피 이런 프레임은 걸러낸다).
+        try:
+            detections = reader.readtext(frame_path)
+        except Exception as exc:
+            print(f"프레임을 읽지 못해 건너뜁니다({frame_path}): {exc}",
+                  file=sys.stderr)
+            results.append([int(ms), "", 0.0])
+            continue
         if not detections:
             results.append([int(ms), "", 0.0])
             continue
