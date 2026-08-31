@@ -15,9 +15,11 @@ from checker.model import Event  # noqa: E402
 from checker.profile import _merge, _validate  # noqa: E402
 from checker.text import count_chars  # noqa: E402
 from checker.ocr import (  # noqa: E402
-    OcrCaption, captions_to_events, merge_captions, merge_frames,
+    OcrCaption, captions_to_draft_srt_events, captions_to_events, merge_captions,
+    merge_frames,
 )
 from checker.position import JobRules, apply_marker, is_forced_narrative  # noqa: E402
+from checker.generate import has_vad_support  # noqa: E402
 
 PASSED = 0
 FAILED: list[str] = []
@@ -3479,6 +3481,23 @@ ok("신뢰도 높은 캡션(0.86)은 확인 필요 노트가 안 붙는다",
    not any(i == _high_conf_idx for i, msg in _merged_notes if "확인 필요" in msg))
 
 
+# --- has_vad_support: VAD와 안 겹치는 자막은 지우지 않고 표시만 한다 -------
+# 2026-08-31, 영화B 정답 대조: VAD가 배경음악 깔린 구간에서
+# 진짜 대사("Hello!" 등)를 놓치는 사례를 확인 — 예전엔 여기서 조용히 지웠다.
+
+ok("VAD 구간과 겹치면 지지받는다",
+   has_vad_support(1000, 2000, [(500, 1500)], speech_end=1500, undetected_after=False))
+ok("VAD 구간과 전혀 안 겹치면 지지받지 못한다(하지만 호출부가 지우지 않는다)",
+   not has_vad_support(5000, 6000, [(0, 1000), (8000, 9000)],
+                       speech_end=9000, undetected_after=False))
+ok("VAD 자체가 비어 있으면(음량 방식 등) 항상 지지받는다",
+   has_vad_support(5000, 6000, [], speech_end=0, undetected_after=False))
+ok("undetected_after면 speech_end 이후 구간은 검출 실패로 보고 지지받는다",
+   has_vad_support(50_000, 51_000, [(0, 1000)], speech_end=1000, undetected_after=True))
+ok("undetected_after여도 speech_end 이전 구간은 그대로 안 겹치면 지지 못 받는다",
+   not has_vad_support(500, 600, [(0, 100)], speech_end=1000, undetected_after=True))
+
+
 # --- T10(quote_role_swapped)·T11(forced_narrative_merged_with_dialogue) ---
 # 화면 캡션 2단계로 마커 적용 캡션이 실제로 생기니 이 두 검사(전엔 "미구현"으로만
 # 보고됐다)를 구현한다.
@@ -3525,6 +3544,24 @@ ok("T11: 마커가 정해지지 않았으면 검사하지 않는다", "T11" not 
 ok("T10/T11이 미구현 목록에서 빠졌다(마커가 정해진 넷플릭스 한국어 번역)",
    "T10" not in _r_swapped["unimplemented_checks"]
    and "T11" not in _r_merged["unimplemented_checks"])
+
+
+# --- 하드섭 OCR 초안(captions_to_draft_srt_events) -------------------------
+# corpus_build.py:90-91과 같은 원칙 — OCR은 정답지가 아니다. 카드 하나 = 자막
+# 하나로 그대로 옮기고(마커로 안 감싼다), 신뢰도 낮은 카드만 노트로 남긴다.
+
+_hard_caps = [OcrCaption(0, 2000, "그럼에도 말하고 싶다", 0.82, frame_count=4),
+             OcrCaption(3000, 5000, "흐릿하게 읽힘", 0.35, frame_count=2)]
+_hard_events, _hard_notes = captions_to_draft_srt_events(_hard_caps)
+
+ok("카드 하나가 자막 하나로 그대로 옮겨진다(마커로 안 감싼다)",
+   [e.text for e in _hard_events] == ["그럼에도 말하고 싶다", "흐릿하게 읽힘"])
+ok("하드섭 초안 이벤트는 kind=caption이다",
+   all(e.kind == "caption" for e in _hard_events))
+ok("인덱스가 1..N으로 매겨진다", [e.index for e in _hard_events] == [1, 2])
+ok("신뢰도 낮은 카드만 노트가 붙는다",
+   [i for i, _ in _hard_notes] == [2] and "0.35" in _hard_notes[0][1])
+ok("신뢰도 높은 카드는 노트가 안 붙는다", 1 not in dict(_hard_notes))
 
 
 # --- 결과 ---------------------------------------------------------------

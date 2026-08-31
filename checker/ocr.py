@@ -59,6 +59,15 @@ Tomy / Scarlet" **이름 캡션이 25초 넘게 픽셀 단위로 그대로**였�
 선에서 드는 안전장치라 남겨 뒀다. 상한처럼 "증거 없이 실측 결과를 인위적으로
 바꾸는" 부작용이 없다(같은 텍스트가 반복되면 anchor와도 계속 비슷해 정상
 병합된다 — 확인함).
+
+**3단계(2026-08-31): `captions_to_draft_srt_events()`를 추가했다.**
+`--ocr-hardsub`에서만 쓰인다 — 하드섭(화면 전체에 자막이 계속 타 있는 영상,
+임베디드 자막 트랙이 아예 없는 경우) 전용. 2단계의 `captions_to_events`/
+`merge_captions`과 달리 마커로 안 감싸고 카드 하나를 자막 하나로 그대로
+옮긴다 — OCR 텍스트가 부가 캡션이 아니라 대사 그 자체이기 때문이다. 결과는
+`tools/corpus_build.py:90-91`과 같은 이유로 **정답지가 아니다** — 사람이
+영상과 대조해 고친 뒤에만 `학습한 TC 및 자막 모음/`에 들어간다
+(`.claude/skills/정답지-학습/SKILL.md` 참고).
 """
 
 from __future__ import annotations
@@ -116,9 +125,19 @@ def _find_ocr_python() -> Path:
 
 
 def _extract_frames(video: Path, spans: list[tuple[int, int]], sample_fps: float,
-                    out_dir: Path) -> list[tuple[int, Path]]:
-    """구간마다 프레임을 뽑는다. [(시각ms, 파일경로)] — 시각순."""
+                    out_dir: Path, band: float | None = None) -> list[tuple[int, Path]]:
+    """구간마다 프레임을 뽑는다. [(시각ms, 파일경로)] — 시각순.
+
+    `band`를 주면 화면 아래 그 비율만 잘라서 읽는다(`media.detect_bottom_text`의
+    자르기 계산과 똑같다 — `crop=iw:ih*band:0:ih*(1-band)`). **대사 하드섭
+    전용이다** — 대사 자막은 관례상 항상 화면 아래 중앙에 뜨는데, 전체 프레임을
+    읽으면 좌상단 작품명 워터마크·배경 간판 글자까지 섞여 카드 하나에 다 뭉친다
+    (실측, 2026-08-31: 자르기 없이 돌렸더니 "모두가 자신의 무가치함과 싸우고
+    있다" 워터마크가 대사 대신 계속 잡혔다). `--ocr-scan`/`--ocr`(예능 화면
+    캡션, 위치가 안 정해짐)에는 안 쓴다 — 거긴 여전히 전체를 본다.
+    """
     step_ms = int(1000 / sample_fps)
+    crop = f",crop=iw:ih*{band}:0:ih*{1 - band}" if band else ""
     frames: list[tuple[int, Path]] = []
     for span_i, (start_ms, end_ms) in enumerate(spans):
         pattern = out_dir / f"span{span_i:03d}_%06d.png"
@@ -126,7 +145,7 @@ def _extract_frames(video: Path, spans: list[tuple[int, int]], sample_fps: float
             [_find("ffmpeg"), "-hide_banner", "-nostats",
              "-ss", f"{start_ms / 1000:.3f}", "-to", f"{end_ms / 1000:.3f}",
              "-i", _as_tool_path(video),
-             "-vf", f"fps={sample_fps}", "-y", _as_tool_path(pattern)],
+             "-vf", f"fps={sample_fps}{crop}", "-y", _as_tool_path(pattern)],
             capture_output=True, text=True, check=False,
             encoding="utf-8", errors="replace",
         )
@@ -236,7 +255,7 @@ def merge_frames(results: list[tuple[int, str, float]], sample_step_ms: int,
 def detect_onscreen_captions(video: Path, lang: str = "en", sample_fps: float = 2.0,
                              min_confidence: float = 0.4, min_similarity: float = 0.6,
                              max_duration_ms: int | None = None, full_scan: bool = True,
-                             engine=None) -> list[OcrCaption]:
+                             band: float | None = None, engine=None) -> list[OcrCaption]:
     """화면 캡션을 읽는다. **보고용이다** — 규칙 4: 화면 글자 검출은 추정이다.
 
     `full_scan=True`(기본)면 영상 전체를 `sample_fps`로 고르게 훑는다 — 느리지만
@@ -245,6 +264,12 @@ def detect_onscreen_captions(video: Path, lang: str = "en", sample_fps: float = 
     (실측, 2026-08-30: 이 선필터가 예능A 19회에서 캡션을 0개 찾았다 —
     캡션이 인물 옆 중앙~오른쪽에 뜨는 예능이었다). 위치가 항상 화면 아래인 걸
     아는 자료에서만 빠른 쪽을 쓴다.
+
+    `band`(0~1)를 주면 화면 아래 그 비율만 잘라서 읽는다(`_extract_frames`
+    참고) — `full_scan`과는 다른 축이다: `full_scan`은 **언제**(시간대) 볼지,
+    `band`는 **어디**(화면 안 위치)를 볼지 정한다. 대사 하드섭(`--ocr-hardsub`)
+    전용 — 좌상단 워터마크·배경 간판 글자가 안 섞인다. 위치가 안 정해진 예능
+    화면 캡션(`--ocr-scan`/`--ocr`)에는 기본으로 안 쓴다(`band=None`, 전체 프레임).
 
     `engine`은 테스트에서 실제 EasyOCR 워커 대신 넣는 콜러블
     (`list[(ms, path)], lang -> list[(ms, text, conf)]`). 안 주면 `.venv-ocr`을 부른다.
@@ -260,7 +285,7 @@ def detect_onscreen_captions(video: Path, lang: str = "en", sample_fps: float = 
 
     run = engine or _run_worker
     with tempfile.TemporaryDirectory(prefix="stc-ocr-frames-") as tmp:
-        frames = _extract_frames(video, spans, sample_fps, Path(tmp))
+        frames = _extract_frames(video, spans, sample_fps, Path(tmp), band=band)
         results = run(frames, lang)
 
     return merge_frames(results, int(1000 / sample_fps), min_confidence, min_similarity,
@@ -310,3 +335,29 @@ def merge_captions(dialogue_events: list[Event], dialogue_notes: list[tuple[int,
 
     merged_notes = [(remap.get(i, i), msg) for i, msg in dialogue_notes] + caption_notes
     return combined, merged_notes
+
+
+def captions_to_draft_srt_events(captions: list[OcrCaption], min_confidence_note: float = 0.6,
+                                 ) -> tuple[list[Event], list[tuple[int, str]]]:
+    """OCR로 읽은 화면 캡션(카드 단위)을 자막 **초안** `Event`로 바꾼다.
+
+    **정답지가 아니다.** `tools/corpus_build.py`의 원칙과 같다 — "OCR을 거친
+    것은 타임코드도 글자도 근사값이 되므로 정답 자료로 쓰지 않는다"
+    (`tools/corpus_build.py:90-91`). 하드섭(화면 전체에 자막이 타 있는 영상)처럼
+    임베디드 자막 트랙이 아예 없어 `corpus_build.py`로 못 뽑을 때만 쓴다 — 사람이
+    영상과 대조해 고친 뒤에야 `.claude/skills/정답지-학습/`의 §4 이후(원본 그대로
+    `학습한 TC 및 자막 모음/`에 복사)를 밟을 수 있다.
+
+    `captions_to_events()`/`merge_captions()`(2단계 — whisper 대사 위에 얹는
+    부가 캡션용, 마커로 감싸고 다른 draft와 병합함)와는 **다른 함수**다. 여기선
+    OCR 텍스트가 대사 그 자체이므로 마커를 안 감싸고 카드 하나 = 자막 하나로
+    그대로 옮긴다.
+
+    신뢰도가 `min_confidence_note` 미만인 카드는 노트로 남긴다(규칙4 — 알리기만
+    하고 자동으로 고치지 않는다).
+    """
+    events = [Event(i, c.start_ms, c.end_ms, c.text, kind="caption")
+             for i, c in enumerate(captions, 1)]
+    notes = [(i, f"OCR 신뢰도 {c.confidence:.2f} — 영상과 대조해 확인")
+            for i, c in enumerate(captions, 1) if c.confidence < min_confidence_note]
+    return events, notes
