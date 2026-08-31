@@ -10,10 +10,18 @@
 `_ocr_worker.py`를 격리 venv의 파이썬으로 실행해 결과만 JSON으로 받는다. 프레임
 추출 자체는 ffmpeg 서브프로세스라 무거운 의존성이 없어 시스템 파이썬에서 한다.
 
-**1단계: 추출+인식까지만.** 결과는 **보고용**이다 — 화면 글자 검출은 추정이다
-(규칙 4, `detect_bottom_text`의 독스트링과 같은 이유). 자막 `Event`로 만들거나
-파이프라인에 자동 반영하지 않는다. `Event` 병합·`forced_narrative` 서식 적용은
-다음 단계로 미룬다(`docs/BACKLOG.md` 참고).
+**1단계: 추출+인식까지만.** `detect_onscreen_captions()`가 내는 결과는
+**보고용**이다 — 화면 글자 검출은 추정이다(규칙 4, `detect_bottom_text`의
+독스트링과 같은 이유). `--ocr-scan`은 이 결과를 출력만 하지 자막 `Event`로
+바꾸지 않는다.
+
+**2단계(2026-08-31): `captions_to_events()`·`merge_captions()`를 추가했다.**
+`--generate --ocr`에서만 쓰인다 — `checker/position.py`의 `is_forced_narrative()`
+가 이미 **텍스트 마커만으로** 화면자막을 알아보므로(`Event`에 새 필드 없이도
+동작), 여기서 할 일은 마커를 입히고 대사 이벤트와 시간순으로 합쳐 번호를
+다시 매기는 것뿐이다. 마커가 정해지지 않았으면(`ask`) 이 경로 자체를 막는다
+(`checker/cli.py`의 `--ocr` 가드) — 마커 없이 합치면 방금 만든 캡션을 검사기가
+못 알아본다.
 
 **실측 반영(2026-08-30, 예능A 19회 "Screwballs S02E19"로 스모크
 테스트) — 구조 둘을 고침:**
@@ -64,6 +72,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .media import MediaToolUnavailable, _as_tool_path, _find, detect_bottom_text
+from .model import Event
+from .position import apply_marker
 
 
 class OcrUnavailable(Exception):
@@ -255,3 +265,48 @@ def detect_onscreen_captions(video: Path, lang: str = "en", sample_fps: float = 
 
     return merge_frames(results, int(1000 / sample_fps), min_confidence, min_similarity,
                        max_duration_ms)
+
+
+def captions_to_events(captions: list[OcrCaption], start_index: int = 1) -> list[Event]:
+    """`OcrCaption` 목록을 `kind="caption"` `Event`로 바꾼다. 번역·마커 적용 **전**
+    단계 — 인덱스는 임시값이다(`merge_captions()`가 최종 번호를 다시 매긴다).
+    `start_index`는 대사 이벤트 번호와 안 겹치게 호출하는 쪽이 정한다.
+    """
+    return [Event(start_index + i, c.start_ms, c.end_ms, c.text, kind="caption")
+            for i, c in enumerate(captions)]
+
+
+def merge_captions(dialogue_events: list[Event], dialogue_notes: list[tuple[int, str]],
+                   caption_events: list[Event], confidences: dict[int, float],
+                   marker: str, note_below: float = 0.6,
+                   ) -> tuple[list[Event], list[tuple[int, str]]]:
+    """화면 캡션(`Event`, 아직 번역·마커 전)을 대사 이벤트에 합친다. **순수 함수.**
+
+    - `position.apply_marker()`로 최종 텍스트를 만든다(그래야 `is_forced_narrative()`
+      가 나중에 알아본다 — `Event.kind`는 검사 로직이 안 본다, 사람이 보는 부가
+      정보일 뿐이다).
+    - 시간순으로 정렬하고 번호를 1..N으로 다시 매긴다.
+    - `dialogue_notes`(대사 쪽, `generate()`가 이미 만든 것)도 새 번호로 옮긴다
+      — 안 옮기면 캡션이 끼어들며 밀린 번호가 엉뚱한 자막을 가리키게 된다.
+    - `confidences`(임시 인덱스 -> 신뢰도)가 `note_below` 미만인 캡션은 "확인
+      필요" 노트를 남긴다(규칙4 — 화면 글자 검출은 추정이니 표시만 하고 자동
+      반영은 여기까지, 값 자체를 고치지 않는다).
+    """
+    marked = [Event(e.index, e.start_ms, e.end_ms, apply_marker(e.text, marker),
+                    kind="caption") for e in caption_events]
+    dialogue_index_by_id = {id(e): e.index for e in dialogue_events}
+    combined = sorted(dialogue_events + marked, key=lambda e: e.start_ms)
+
+    remap: dict[int, int] = {}
+    caption_notes: list[tuple[int, str]] = []
+    for new_i, e in enumerate(combined, 1):
+        if e.kind == "caption":
+            conf = confidences.get(e.index)
+            if conf is not None and conf < note_below:
+                caption_notes.append((new_i, f"OCR 인식(신뢰도 {conf:.2f}) — 확인 필요"))
+        else:
+            remap[dialogue_index_by_id[id(e)]] = new_i
+        e.index = new_i
+
+    merged_notes = [(remap.get(i, i), msg) for i, msg in dialogue_notes] + caption_notes
+    return combined, merged_notes

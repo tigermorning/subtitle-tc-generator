@@ -654,5 +654,6 @@ def translate_events(events: list[Event], translator, glossary: Glossary | None 
 def to_events(cues: list[TranslatedCue], events: list[Event]) -> list[Event]:
     """번역문을 자막으로. 타임코드는 원어 것을 그대로 쓴다."""
     by_index = {c.index: c.text for c in cues}
-    return [Event(ev.index, ev.start_ms, ev.end_ms, by_index.get(ev.index, ev.text))
+    return [Event(ev.index, ev.start_ms, ev.end_ms, by_index.get(ev.index, ev.text),
+                  kind=ev.kind)
             for ev in events]

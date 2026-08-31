@@ -847,6 +847,11 @@ def _generate_mode(args, ap) -> int:
         ap.error("--generate에는 --video가 필요합니다")
     if not args.video.is_file():
         ap.error(f"영상을 찾지 못했습니다: {args.video}")
+    if args.ocr and not args.fn_marker:
+        # whisper 전사(몇 분~몇십 분)를 다 돌리고 나서야 마커가 없다고 알리면
+        # 낭비다 — 여기서 미리 막는다(--lock-timecodes 클래시 검사와 같은 자리).
+        ap.error("--ocr에는 --fn-marker가 필요합니다(화면자막 표식이 정해지지 "
+                 "않으면 만든 캡션을 검사기가 못 알아봅니다)")
 
     from .media import list_subtitle_streams
     existing_subs = list_subtitle_streams(args.video)
@@ -940,17 +945,49 @@ def _generate_mode(args, ap) -> int:
         print("말소리를 찾지 못했습니다.")
         return 1
 
+    from .position import JobRules
+    rules = JobRules.from_profile(profile, {
+        "marker": args.fn_marker, "policy": args.collision,
+        "move_to": args.collision_move_to,
+    })
+
+    if args.ocr:
+        # **--ocr-scan(독립 진단)과 다르다.** 여기서는 실제로 최종 자막에
+        # 합친다 — 마커 없이 합치면 방금 만든 캡션을 `is_forced_narrative()`가
+        # 못 알아보고 겹침 검사(C10 등)도 못 잡는다. `--fn-marker` 자체는
+        # 함수 맨 위에서 이미 확인했다(whisper를 다 돌리고 나서 막으면 낭비다).
+        from .ocr import OcrUnavailable, captions_to_events, detect_onscreen_captions, merge_captions
+        try:
+            captions = detect_onscreen_captions(
+                args.video, lang=args.ocr_lang, sample_fps=args.ocr_sample_fps,
+                min_confidence=args.ocr_min_confidence,
+                min_similarity=args.ocr_min_similarity,
+                max_duration_ms=args.ocr_max_duration, full_scan=not args.ocr_fast)
+        except (MediaToolUnavailable, OcrUnavailable) as exc:
+            print(f"[오류] {exc}")
+            return 2
+
+        if not captions:
+            print("화면 캡션을 찾지 못했습니다.")
+        else:
+            caption_events = captions_to_events(captions, start_index=len(draft.events) + 1)
+            confidences = {ev.index: c.confidence for ev, c in zip(caption_events, captions)}
+            if translator:
+                from .translate import to_events, translate_events
+                target_lang = profile.get("language") or "ko"
+                cues = translate_events(caption_events, translator, glossary,
+                                        target_lang=target_lang, progress=print)
+                caption_events = to_events(cues, caption_events)
+            draft.events, draft.notes = merge_captions(
+                draft.events, draft.notes, caption_events, confidences, rules.marker)
+            print(f"화면 캡션 {len(captions)}개를 자막에 얹었습니다")
+
     # **여기서 끝내지 않는다.** 예전에는 초안만 쓰고 검사·교정은 사용자가 다시
     # 돌려야 했는데, 그러면 버튼 이름만 보고는 어디까지 된 것인지 알 수 없다
     # (사용자 지적). 만들었으면 검사까지 하고, 고칠 수 있는 것은 고쳐서 낸다.
     events = draft.events
     if not args.no_check:
         from .fixes import apply_fixes
-        from .position import JobRules
-        rules = JobRules.from_profile(profile, {
-            "marker": args.fn_marker, "policy": args.collision,
-            "move_to": args.collision_move_to,
-        })
 
         # 단계 순서를 여기서 정하지 않는다 — `pipeline`이 정한다. 그리고 전에는
         # 한국어 위반(`ko_violations`)을 받아 놓고 쓰지 않아 **화면에 한 건도 뜨지
@@ -1225,6 +1262,13 @@ def main(argv: list[str] | None = None) -> int:
     gen.add_argument("--glossary", type=Path,
                      help="표기 통일표. `원어=한국어` 한 줄에 하나. "
                           "발주처가 주는 표를 그대로 쓴다")
+    gen.add_argument("--ocr", action="store_true",
+                     help="화면 캡션(그래픽 자막)도 EasyOCR로 읽어 대사 자막에 "
+                          "얹는다. **--fn-marker가 반드시 있어야 한다** — 마커 "
+                          "없이 합치면 방금 만든 캡션을 검사기가 못 알아본다. "
+                          "--ocr-scan(독립 진단)과 다르다 — 이건 실제로 최종 "
+                          "자막에 들어간다. --ocr-lang/--ocr-sample-fps 등"
+                          "세부 조정 플래그를 그대로 같이 쓴다")
     args = ap.parse_args(argv)
 
     if args.generate:

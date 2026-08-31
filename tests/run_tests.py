@@ -11,9 +11,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from checker import check_events, load_profile, ProfileError  # noqa: E402
+from checker.model import Event  # noqa: E402
 from checker.profile import _merge, _validate  # noqa: E402
 from checker.text import count_chars  # noqa: E402
-from checker.ocr import merge_frames  # noqa: E402
+from checker.ocr import (  # noqa: E402
+    OcrCaption, captions_to_events, merge_captions, merge_frames,
+)
+from checker.position import JobRules, apply_marker, is_forced_narrative  # noqa: E402
 
 PASSED = 0
 FAILED: list[str] = []
@@ -3418,6 +3422,61 @@ ok("갈린 첫 캡션의 길이가 지정한 최대 지속시간을 넘지 않�
 _no_cap = merge_frames(_long_same, _step)
 ok("기본은 지속시간 상한이 없다 — 정적 캡션(이름표 등)을 쪼개지 않는다",
    len(_no_cap) == 1)
+
+
+# --- 화면 캡션 2단계: 마커 적용(apply_marker) ------------------------------
+# is_forced_narrative()가 나중에 그대로 알아보는지가 핵심이다 — 다른 모양으로
+# 감싸면 방금 만든 캡션을 검사기 스스로 못 알아본다(왕복 확인).
+
+for _marker in ("double_quote", "italic", "bracket"):
+    _wrapped = apply_marker("화면 텍스트", _marker)
+    ok(f"apply_marker({_marker!r})가 감싼 텍스트를 is_forced_narrative가 다시 알아본다",
+       is_forced_narrative(_wrapped, rules=JobRules(marker=_marker, policy="keep_both")))
+
+ok("marker=none이면 감싸지 않는다", apply_marker("화면 텍스트", "none") == "화면 텍스트")
+ok('marker=double_quote는 U+201C/U+201D로 감싼다',
+   apply_marker("화면 텍스트", "double_quote") == "“화면 텍스트”")
+
+
+# --- 화면 캡션 2단계: Event 변환·병합(captions_to_events, merge_captions) --
+
+_caps = [OcrCaption(1000, 3000, "Sebastiam", 0.86, frame_count=5),
+        OcrCaption(5000, 7000, "흐릿한 글자", 0.30, frame_count=2)]
+_cap_events = captions_to_events(_caps, start_index=10)
+ok("captions_to_events가 kind=caption으로 만든다",
+   all(e.kind == "caption" for e in _cap_events))
+ok("captions_to_events의 인덱스가 start_index부터 이어진다",
+   [e.index for e in _cap_events] == [10, 11])
+
+_dialogue = [Event(1, 0, 1000, "안녕"), Event(2, 4000, 4500, "잘가")]
+_confidences = {e.index: c.confidence for e, c in zip(_cap_events, _caps)}
+_merged_events, _merged_notes = merge_captions(
+    _dialogue, [(1, "환각 의심")], _cap_events, _confidences, "bracket")
+
+ok("합쳐진 이벤트가 시간순이다",
+   [e.start_ms for e in _merged_events] == sorted(e.start_ms for e in _merged_events))
+ok("합쳐진 이벤트 번호가 1..N으로 새로 매겨진다",
+   [e.index for e in _merged_events] == list(range(1, len(_merged_events) + 1)))
+ok("합쳐진 뒤에도 캡션 개수·대사 개수 합이 맞는다", len(_merged_events) == 4)
+
+_caption_in_merged = [e for e in _merged_events if e.kind == "caption"]
+ok("캡션 텍스트가 bracket 마커로 감싸졌다",
+   all(e.text.startswith("[") and e.text.endswith("]") for e in _caption_in_merged))
+
+_dialogue_note_idx = next(i for i, msg in _merged_notes if msg == "환각 의심")
+_expected_dialogue_new_index = next(
+    e.index for e in _merged_events if e.kind == "dialogue" and e.start_ms == 0)
+ok("기존 대사 노트가 밀린 번호로 옮겨진다(안 옮기면 엉뚱한 자막을 가리킨다)",
+   _dialogue_note_idx == _expected_dialogue_new_index)
+
+_low_conf_idx = next(
+    e.index for e in _merged_events if e.kind == "caption" and "흐릿한" in e.text)
+ok("신뢰도 낮은 캡션은 확인 필요 노트가 붙는다",
+   any(i == _low_conf_idx and "확인 필요" in msg for i, msg in _merged_notes))
+_high_conf_idx = next(
+    e.index for e in _merged_events if e.kind == "caption" and "Sebastiam" in e.text)
+ok("신뢰도 높은 캡션(0.86)은 확인 필요 노트가 안 붙는다",
+   not any(i == _high_conf_idx for i, msg in _merged_notes if "확인 필요" in msg))
 
 
 # --- 결과 ---------------------------------------------------------------

@@ -160,6 +160,20 @@ def is_forced_narrative(text: str, profile: dict | None = None,
     return False
 
 
+def apply_marker(text: str, marker: str) -> str:
+    """화면자막 텍스트를 `marker`로 감싼다. `is_forced_narrative()`가 나중에
+    그대로 알아보도록 **정확히 같은 모양**으로 감싼다(위 함수와 짝) —
+    다른 모양으로 감싸면 방금 만든 캡션을 검사기 스스로 못 알아본다.
+    """
+    if marker == "double_quote":
+        return f"“{text}”"
+    if marker == "italic":
+        return f"<i>{text}</i>"
+    if marker == "bracket":
+        return f"[{text}]"
+    return text
+
+
 def overlaps(a: Event, b: Event) -> bool:
     return a.start_ms < b.end_ms and b.start_ms < a.end_ms
 

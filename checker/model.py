@@ -17,6 +17,11 @@ class Event:
     start_ms: int
     end_ms: int
     text: str
+    # 대사(whisper 전사)인지 화면 캡션(OCR)인지. 검사·충돌 로직은 이 값이
+    # 아니라 텍스트에 붙은 마커로 판정한다(position.is_forced_narrative) —
+    # 이 필드는 출처를 사람이 알아보게 하는 부가 정보일 뿐이다(규칙4: 화면
+    # 글자 검출은 추정이니 표시는 해 둔다).
+    kind: str = "dialogue"
 
     @property
     def duration_ms(self) -> int:
@@ -33,6 +38,7 @@ class Event:
             start_ms=int(d["start_ms"]),
             end_ms=int(d["end_ms"]),
             text=str(d["text"]),
+            kind=str(d.get("kind", "dialogue")),
         )
 
 
