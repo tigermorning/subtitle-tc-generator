@@ -668,9 +668,17 @@ whisper 대사 1개 + OCR 캡션 2개가 정상 병합, `“…”`로 감싸짐
 - 실측(37분 영상 전체 스캔, 4시간 48분): 영상 길이의 약 7.7배 걸린다는
   경고를 생성 버튼 누르기 전에 띄운다.
 
-**GUI는 PySide6가 이 환경 시스템 파이썬에 없어 직접 못 띄워 봤다** —
-`ast.parse`로 구문만 확인했다(규칙9: PySide6 도는 테스트는 사람이 별도
-venv로 돌린다). 실제로 창 띄워서 체크박스 눌러 보는 확인은 사용자 몫.
+**GUI 검증: 시스템 파이썬엔 PySide6가 없지만, 옆 리포
+`korean-subtitle-corrector/.venv/Scripts/python.exe`에 이미 깔려 있다**
+(pre-commit 훅이 이 경로를 직접 알려준다 — app/를 건드리면 뜨는
+"PySide6까지 도는 776건은 훅이 못 돌린다" 메시지에 포함돼 있다). 그
+파이썬으로 `tests/run_tests.py`를 돌리면 839→871건(PySide6라 건너뛰던
+32건까지)으로 늘어나 전부 통과했고, `app.model.SubtitleModel`을 직접
+띄워 `kind="caption"` 이벤트의 `ForegroundRole`(갈색 `#8a5a00`)·
+`ToolTipRole`을 실측 확인했다. `app.jobs.GenerateJob(ocr=True, ...)`
+생성자와 `app.window`/`app.prefs` 임포트도 이 파이썬으로 직접 확인함 —
+**"PySide6 없어서 구문만 봤다"는 다음엔 안 통한다, 이 venv를 쓰면 된다.**
+창을 실제로 띄워 마우스로 체크박스 눌러 보는 것만 사용자 몫으로 남는다.
 
 **여전히 안 한 것(다음 라운드, 규칙12 — 갈래를 동시에 안 벌인다):**
 - `checker/pipeline.py`의 `stage_ocr_captions`/`STAGES` 등록 — 이 선언

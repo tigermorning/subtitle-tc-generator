@@ -318,8 +318,12 @@ torch DLL이 걸린다. 어젯밤(2026-08-27)엔 됐다가 다음날 안 됐다 
   확인, 표에서 캡션 줄 색·툴팁 구분. 붙이면서 `CheckJob`/`TranslateJob`/
   `ReviseJob`/`PolishJob`이 `Event`를 다시 만들 때 `kind`를 안 넘기던
   버그도 같이 고침(안 고쳤으면 OCR 캡션이 검사·번역 단계를 거치는 순간
-  다시 대사로 보였을 것). **GUI는 PySide6가 없어 직접 못 띄워 봤다** —
-  구문만 확인, 실제 클릭 확인은 사용자 몫. **여전히 안 된 것**:
+  다시 대사로 보였을 것). **GUI 검증은 옆 리포의 venv로 실제로 했다** —
+  `korean-subtitle-corrator/.venv/Scripts/python.exe`에 PySide6가 이미
+  있다(pre-commit 훅이 app/ 건드릴 때 이 경로를 알려준다). 그걸로
+  `SubtitleModel`의 캡션 색·툴팁을 직접 띄워 확인, `tests/run_tests.py`도
+  839→871건(PySide6 몫까지)으로 전부 통과. 창 띄워 마우스로 눌러 보는
+  것만 사용자 몫. **여전히 안 된 것**:
   `pipeline.py`의 `stage_ocr_captions` 등록(그 선언 자체를 CLI·GUI 다
   안 쓴다는 게 이미 확인됨 — 별도 리팩터).
 - **영상 파일 자체 손상은 복구 불가.** 예능A 15·16회처럼 컨테이너가
