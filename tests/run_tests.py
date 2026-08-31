@@ -3479,6 +3479,54 @@ ok("신뢰도 높은 캡션(0.86)은 확인 필요 노트가 안 붙는다",
    not any(i == _high_conf_idx for i, msg in _merged_notes if "확인 필요" in msg))
 
 
+# --- T10(quote_role_swapped)·T11(forced_narrative_merged_with_dialogue) ---
+# 화면 캡션 2단계로 마커 적용 캡션이 실제로 생기니 이 두 검사(전엔 "미구현"으로만
+# 보고됐다)를 구현한다.
+# 주의: 위(994행 부근)에서 `ev`를 `Event` 인스턴스로 재할당해 놓아 이 지점부터는
+# `ev()` 헬퍼 함수를 못 쓴다(플랫 스크립트라 전역이 그대로 덮인다) — 딕셔너리를
+# 직접 만든다.
+
+def _tev(text: str, index: int = 1, start: int = 0, end: int = 3000) -> dict:
+    return {"index": index, "start_ms": start, "end_ms": end, "text": text}
+
+
+_ko_tr = load_profile("netflix", "ko", "translation")
+_dq_rules = JobRules(marker="double_quote", policy="keep_both")
+
+_r_swapped = check_events(
+    [_tev('안녕, "정말?" 이라고 말했다')], _ko_tr, job_rules=_dq_rules)
+ok("T10: 대사 안 인용에 큰따옴표를 쓰면 잡는다", "T10" in ids(_r_swapped))
+
+_r_full_caption = check_events(
+    [_tev("“PRESENTED BY SCREWBALLS”")], _ko_tr, job_rules=_dq_rules)
+ok("T10: 이벤트 전체가 화면자막이면 정상 사용이라 안 잡는다",
+   "T10" not in ids(_r_full_caption))
+
+_italic_rules = JobRules(marker="italic", policy="keep_both")
+_r_other_marker = check_events(
+    [_tev('안녕, "정말?" 이라고 말했다')], _ko_tr, job_rules=_italic_rules)
+ok("T10: 마커가 double_quote가 아니면 이 검사는 안 돈다",
+   "T10" not in ids(_r_other_marker))
+
+_r_merged = check_events(
+    [_tev("“PRESENTED BY SCREWBALLS”\n오늘도 즐거운 하루")], _ko_tr, job_rules=_dq_rules)
+ok("T11: 한 자막 안에 화면자막과 대사가 섞이면 잡는다", "T11" in ids(_r_merged))
+
+_r_both_dialogue = check_events([_tev("안녕\n반가워")], _ko_tr, job_rules=_dq_rules)
+ok("T11: 둘 다 대사면 안 잡는다", "T11" not in ids(_r_both_dialogue))
+
+_r_both_caption = check_events(
+    [_tev("“첫째 줄”\n“둘째 줄”")], _ko_tr, job_rules=_dq_rules)
+ok("T11: 둘 다 화면자막이면 안 잡는다", "T11" not in ids(_r_both_caption))
+
+_r_ask = check_events([_tev("“PRESENTED”\n오늘도 즐거운 하루")], _ko_tr, job_rules=JobRules())
+ok("T11: 마커가 정해지지 않았으면 검사하지 않는다", "T11" not in ids(_r_ask))
+
+ok("T10/T11이 미구현 목록에서 빠졌다(마커가 정해진 넷플릭스 한국어 번역)",
+   "T10" not in _r_swapped["unimplemented_checks"]
+   and "T11" not in _r_merged["unimplemented_checks"])
+
+
 # --- 결과 ---------------------------------------------------------------
 
 print(f"통과 {PASSED}건")

@@ -14,6 +14,7 @@ from __future__ import annotations
 import re
 
 from .model import Event
+from .position import is_forced_narrative
 from .text import count_chars, chars_per_second, strip_tags, has_hangul, is_foreign_language_text
 
 REGISTRY: dict[str, callable] = {}
@@ -870,6 +871,52 @@ def _dialogue_double_quote(ev: Event, ctx: dict):
         if '"' in s or "“" in s or "”" in s:
             out.append((i, "말자막이면 큰따옴표를 쓰지 않습니다"))
     return out
+
+
+@check("quote_role_swapped")
+def _quote_role_swapped(ev: Event, ctx: dict):
+    """T10(넷플릭스). 화면 텍스트는 큰따옴표, 대사 안 인용은 작은따옴표.
+
+    작업 마커가 `double_quote`일 때만 뜻이 있다(그 값이 화면자막 표식이라
+    가정하는 규칙이라, 다른 마커를 쓰는 작업에서는 아예 성립하지 않는다).
+    이벤트 전체가 이미 온전한 화면자막(마커로 통째로 감싸짐)이면 정상 사용
+    이니 건너뛴다 — 문제는 **대사 줄 안에서** 인용을 큰따옴표로 적은 경우다.
+    `dialogue_double_quote`(쿠팡·디즈니 CT02/DT02, 화면자막도 큰따옴표를
+    안 쓰는 곳)와는 다른 규칙이라 따로 둔다.
+    """
+    rules = ctx.get("job_rules")
+    if not rules or rules.marker != "double_quote":
+        return []
+    if is_forced_narrative(ev.text, ctx.get("profile"), rules):
+        return []
+    out = []
+    for i, line in enumerate(ev.lines, 1):
+        s = strip_tags(line)
+        if '"' in s or "“" in s or "”" in s:
+            out.append((i, "화면 텍스트는 큰따옴표, 인용은 작은따옴표입니다"))
+    return out
+
+
+@check("forced_narrative_merged_with_dialogue")
+def _forced_narrative_merged_with_dialogue(ev: Event, ctx: dict):
+    """T11(넷플릭스). 강제 자막과 대사를 같은 자막(한 이벤트)에 합치지 않는다.
+
+    한 줄은 화면자막 마커로 감싸져 있고 다른 줄은 안 그런 채로 같은 이벤트
+    안에 있으면, 성격이 다른 둘이 한 카드에 섞인 것이다 — 위치도 다르고
+    번역 취급(`merge_with_dialogue: forbidden`, `ko-translation.yaml`)도
+    달라야 하는데 한 덩어리면 구분이 안 된다. 마커가 정해지지 않았으면
+    (`ask`) 무엇이 화면자막인지 알 길이 없으니 검사하지 않는다.
+    """
+    rules = ctx.get("job_rules")
+    if not rules or rules.marker == "ask":
+        return []
+    lines = ev.lines
+    if len(lines) < 2:
+        return []
+    marked = [is_forced_narrative(line, ctx.get("profile"), rules) for line in lines]
+    if any(marked) and not all(marked):
+        return [(None, "강제 자막과 대사를 같은 자막에 합치지 않습니다")]
+    return []
 
 
 @check("unit_composed_character")
