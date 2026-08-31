@@ -913,15 +913,26 @@ def _ocr_hardsub_mode(args, ap) -> int:
     # 워터마크·배경 간판 글자까지 섞인다(실측, 2026-08-31). 기본 0.25.
     band = args.ocr_band if args.ocr_band is not None else 0.25
     sample_fps = args.ocr_sample_fps if args.ocr_sample_fps is not None else 12.0
+
+    # **이어하기(2026-08-31).** 71분 영상 기준 7~8시간짜리 스캔이다(위
+    # 독스트링) — 절전·재부팅·강제 종료로 끊기면 처음부터 다시 도는 비용을
+    # 감당하기 어렵다. `checker/ocr.py`의 `detect_onscreen_captions`가
+    # 프레임마다 이 경로에 진행 상황을 남기고, 다음에 같은 영상·설정으로
+    # 다시 부르면 이어서 돈다(설정이 달라졌으면 자동으로 새로 시작한다).
+    checkpoint = (args.out or args.video).with_suffix(".ocr-checkpoint.json")
+    if checkpoint.is_file():
+        print(f"이전에 끊긴 스캔을 이어갑니다: {checkpoint}", file=sys.stderr)
     try:
         captions = detect_onscreen_captions(
             args.video, lang=args.ocr_lang, sample_fps=sample_fps,
             min_confidence=args.ocr_min_confidence,
             min_similarity=args.ocr_min_similarity,
             max_duration_ms=args.ocr_max_duration, full_scan=not args.ocr_fast,
-            band=band)
+            band=band, checkpoint_path=checkpoint)
     except (MediaToolUnavailable, OcrUnavailable) as exc:
         print(f"[오류] {exc}")
+        print(f"진행 상황은 저장돼 있습니다 — 같은 명령을 다시 돌리면 "
+              f"이어서 합니다: {checkpoint}", file=sys.stderr)
         return 2
 
     if not captions:

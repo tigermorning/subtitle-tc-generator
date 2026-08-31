@@ -192,8 +192,16 @@ def _extract_frames(video: Path, spans: list[tuple[int, int]], sample_fps: float
     return frames
 
 
-def _run_worker(frames: list[tuple[int, Path]], lang: str) -> list[tuple[int, str, float]]:
-    """격리 venv에서 프레임마다 OCR을 돌린다. [(시각ms, 텍스트, 신뢰도)]."""
+def _run_worker(frames: list[tuple[int, Path]], lang: str,
+                checkpoint_path: Path | None = None) -> list[tuple[int, str, float]]:
+    """격리 venv에서 프레임마다 OCR을 돌린다. [(시각ms, 텍스트, 신뢰도)].
+
+    `checkpoint_path`를 주면 결과를 임시 폴더 대신 그 경로에 직접 쌓는다 —
+    `_ocr_worker.py`가 프레임마다 그 파일에 바로 남기므로, 중간에 끊겨도
+    같은 경로로 다시 부르면 이미 된 프레임은 다시 안 돌고 이어서 돈다.
+    이 경로가 지금 스캔(영상·설정)에 맞는 체크포인트인지는 부르는 쪽
+    (`detect_onscreen_captions`)이 미리 확인한다 — 여기서는 그냥 쓴다.
+    """
     if not frames:
         return []
     ocr_python = _find_ocr_python()
@@ -201,7 +209,7 @@ def _run_worker(frames: list[tuple[int, Path]], lang: str) -> list[tuple[int, st
 
     with tempfile.TemporaryDirectory(prefix="stc-ocr-") as tmp:
         manifest = Path(tmp) / "frames.json"
-        out_json = Path(tmp) / "results.json"
+        out_json = checkpoint_path if checkpoint_path is not None else Path(tmp) / "results.json"
         manifest.write_text(
             json.dumps([[ms, str(path)] for ms, path in frames]), encoding="utf-8")
         result = subprocess.run(
@@ -212,9 +220,60 @@ def _run_worker(frames: list[tuple[int, Path]], lang: str) -> list[tuple[int, st
         if result.returncode != 0 or not out_json.is_file():
             detail = (result.stderr or "").strip()
             detail = detail[-500:] if detail else f"종료 코드 {result.returncode}"
+            # **체크포인트는 여기서 안 지운다.** 실패해도 워커가 프레임마다
+            # 이미 디스크에 남긴 진행 상황이 `out_json`(=`checkpoint_path`)에
+            # 그대로 있다 — 다음에 같은 인자로 다시 부르면 그 자리부터 이어간다.
             raise OcrUnavailable(f"화면 캡션 인식에 실패했습니다: {detail}")
         data = json.loads(out_json.read_text(encoding="utf-8"))
     return [(int(ms), str(text), float(conf)) for ms, text, conf in data]
+
+
+def _checkpoint_fingerprint(video: Path, lang: str, sample_fps: float,
+                            band: float | None, full_scan: bool) -> dict:
+    """이 스캔을 다시 알아볼 수 있는 값들. 하나라도 바뀌면 예전 체크포인트를 못 믿는다.
+
+    영상은 **크기+수정시각**으로 식별한다(경로만 보면 같은 이름의 다른
+    영상으로 갈아치워진 것을 못 잡는다).
+    """
+    stat = video.stat()
+    return {"video": str(Path(video).resolve()), "video_size": stat.st_size,
+            "video_mtime": stat.st_mtime, "lang": lang, "sample_fps": sample_fps,
+            "band": band, "full_scan": full_scan}
+
+
+def _prepare_checkpoint(checkpoint_path: Path, fingerprint: dict) -> None:
+    """체크포인트가 지금 설정과 안 맞으면 지운다 — 이어받을 자격이 없다.
+
+    지문은 결과 파일 옆에 `<이름>.meta.json`으로 따로 둔다. `_ocr_worker.py`가
+    쓰는 결과 파일 형식(`[[ms, text, conf], ...]`)은 안 건드린다 — 지문
+    검증은 순전히 이 파일(`ocr.py`) 몫이다.
+    """
+    meta_path = checkpoint_path.with_name(checkpoint_path.name + ".meta.json")
+    stored = None
+    if meta_path.is_file():
+        try:
+            stored = json.loads(meta_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            stored = None
+    if stored != fingerprint and checkpoint_path.is_file():
+        checkpoint_path.unlink()
+    meta_path.write_text(json.dumps(fingerprint), encoding="utf-8")
+
+
+def _cleanup_checkpoint(checkpoint_path: Path) -> None:
+    """스캔이 끝까지 성공하면 체크포인트를 치운다.
+
+    남겨 두면 다음 실행이 "이전 체크포인트를 이어받는다"고 믿어 버린다 —
+    사실은 완전히 새 스캔인데 우연히 지문(영상·설정)이 같은 경우다(같은
+    영상을 일부러 다시 스캔하는 경우 등). 끊긴 실행만 이어받게 하려면,
+    다 끝난 체크포인트는 그 자리에서 지워야 한다.
+    """
+    meta_path = checkpoint_path.with_name(checkpoint_path.name + ".meta.json")
+    for p in (checkpoint_path, meta_path):
+        try:
+            p.unlink()
+        except OSError:
+            pass
 
 
 def _normalize(text: str) -> str:
@@ -303,7 +362,8 @@ def _enforce_no_overlap(captions: list[OcrCaption]) -> list[OcrCaption]:
 def detect_onscreen_captions(video: Path, lang: str = "en", sample_fps: float = 2.0,
                              min_confidence: float = 0.4, min_similarity: float = 0.6,
                              max_duration_ms: int | None = None, full_scan: bool = True,
-                             band: float | None = None, engine=None) -> list[OcrCaption]:
+                             band: float | None = None, engine=None,
+                             checkpoint_path: Path | None = None) -> list[OcrCaption]:
     """화면 캡션을 읽는다. **보고용이다** — 규칙 4: 화면 글자 검출은 추정이다.
 
     `full_scan=True`(기본)면 영상 전체를 **처음부터 끝까지 안 끊고**
@@ -334,6 +394,17 @@ def detect_onscreen_captions(video: Path, lang: str = "en", sample_fps: float = 
 
     `engine`은 테스트에서 실제 EasyOCR 워커 대신 넣는 콜러블
     (`list[(ms, path)], lang -> list[(ms, text, conf)]`). 안 주면 `.venv-ocr`을 부른다.
+
+    **이어하기(2026-08-31)**: `checkpoint_path`를 주면 워커가 프레임마다
+    결과를 그 경로에 바로 남긴다(`_run_worker`·`_ocr_worker.py` 참고) —
+    `--ocr-hardsub`(71분 영상 기준 7~8시간짜리 스캔)처럼 오래 걸리는 호출이
+    중간에 끊겨도(절전·재부팅·강제 종료) 같은 인자로 다시 부르면 이미 된
+    프레임은 다시 안 돌고 이어서 돈다. 지금 (영상·언어·fps·band·full_scan)
+    조합과 다른 체크포인트는 지우고 새로 시작한다(`_prepare_checkpoint`) —
+    다른 영상이나 다른 설정의 옛 결과를 이어받는 사고를 막는다. 스캔이
+    끝까지 성공하면 체크포인트는 치운다(`_cleanup_checkpoint`) — 남겨 두면
+    다음 실행이 그 완료된 파일을 "이어받는다"고 오해한다. 안 주면(기본)
+    예전처럼 끊기면 처음부터 다시 돈다.
     """
     if full_scan:
         from .media import probe
@@ -344,10 +415,18 @@ def detect_onscreen_captions(video: Path, lang: str = "en", sample_fps: float = 
     if not spans:
         return []
 
-    run = engine or _run_worker
+    use_checkpoint = checkpoint_path is not None and engine is None
+    if use_checkpoint:
+        fingerprint = _checkpoint_fingerprint(video, lang, sample_fps, band, full_scan)
+        _prepare_checkpoint(checkpoint_path, fingerprint)
+
+    run = engine or (lambda fr, lg: _run_worker(fr, lg, checkpoint_path))
     with tempfile.TemporaryDirectory(prefix="stc-ocr-frames-") as tmp:
         frames = _extract_frames(video, spans, sample_fps, Path(tmp), band=band)
         results = run(frames, lang)
+
+    if use_checkpoint:
+        _cleanup_checkpoint(checkpoint_path)
 
     captions = merge_frames(results, int(1000 / sample_fps), min_confidence, min_similarity,
                             max_duration_ms)

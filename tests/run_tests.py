@@ -15,7 +15,8 @@ from checker.model import Event  # noqa: E402
 from checker.profile import _merge, _validate  # noqa: E402
 from checker.text import count_chars  # noqa: E402
 from checker.ocr import (  # noqa: E402
-    OcrCaption, _enforce_no_overlap, captions_to_draft_srt_events, captions_to_events,
+    OcrCaption, _checkpoint_fingerprint, _cleanup_checkpoint, _enforce_no_overlap,
+    _prepare_checkpoint, captions_to_draft_srt_events, captions_to_events,
     merge_captions, merge_frames,
 )
 from checker.position import JobRules, apply_marker, is_forced_narrative  # noqa: E402
@@ -3759,6 +3760,61 @@ ok("이미 안 겹치면 그대로 둔다", _enforce_no_overlap(_r_clean) == _r_
 _r_unsorted = [OcrCaption(600, 1000, "B", 0.9), OcrCaption(0, 500, "A", 0.9)]
 ok("시간순으로 정렬해서 돌려준다",
    [c.start_ms for c in _enforce_no_overlap(_r_unsorted)] == [0, 600])
+
+
+# --- OCR 이어하기(체크포인트) ------------------------------------------------
+# `--ocr-hardsub`는 71분 영상 기준 7~8시간짜리 스캔이다(`checker/ocr.py` 모듈
+# 독스트링) — 절전·재부팅으로 끊기면 처음부터 다시 도는 비용을 감당하기
+# 어렵다는 게 코드 동작 분석으로 드러났다(2026-08-31, 실제 재현은 아직 못
+# 했다 — 몇 시간대 작업이라). 실제 EasyOCR 워커(`_ocr_worker.py`)의 프레임별
+# 이어쓰기 자체는 격리 venv가 있어야 해서 여기서 못 돌리지만(다른 워커
+# 파일들과 같은 제약), 어느 체크포인트를 믿어도 되는지 판단하는
+# `_prepare_checkpoint`/`_checkpoint_fingerprint`/`_cleanup_checkpoint`는
+# 순수 파이썬이라 여기서 잰다.
+import tempfile as _ocrck_tf  # noqa: E402
+import json as _ocrck_json  # noqa: E402
+
+with _ocrck_tf.TemporaryDirectory(prefix="stc-ocrck-") as _ocrck_dir:
+    _ocrck_dir = Path(_ocrck_dir)
+    _ocrck_video = _ocrck_dir / "movie.mp4"
+    _ocrck_video.write_bytes(b"fake video bytes")
+    _ocrck_cp = _ocrck_dir / "movie.ocr-checkpoint.json"
+    _ocrck_meta = _ocrck_dir / "movie.ocr-checkpoint.json.meta.json"
+
+    _fp_a = _checkpoint_fingerprint(_ocrck_video, "en", 12.0, 0.25, True)
+    _fp_b = _checkpoint_fingerprint(_ocrck_video, "en", 12.0, 0.25, True)
+    ok("같은 영상·같은 설정은 지문이 같다", _fp_a == _fp_b)
+
+    _fp_diff_fps = _checkpoint_fingerprint(_ocrck_video, "en", 2.0, 0.25, True)
+    ok("sample_fps가 다르면 지문도 다르다", _fp_a != _fp_diff_fps)
+
+    _fp_diff_lang = _checkpoint_fingerprint(_ocrck_video, "ko", 12.0, 0.25, True)
+    ok("언어가 다르면 지문도 다르다", _fp_a != _fp_diff_lang)
+
+    # 체크포인트도 메타도 없는 첫 실행 — 메타만 새로 남기고 아무것도 안 지운다.
+    _prepare_checkpoint(_ocrck_cp, _fp_a)
+    ok("첫 실행은 지문 파일을 남긴다", _ocrck_meta.is_file())
+    ok("지울 체크포인트가 없으면 에러 없이 지나간다", not _ocrck_cp.is_file())
+
+    # 끊긴 실행이 남긴 체크포인트 — 같은 지문이면 이어받게 그대로 둔다.
+    _ocrck_cp.write_text(_ocrck_json.dumps([[0, "hello", 0.9]]), encoding="utf-8")
+    _prepare_checkpoint(_ocrck_cp, _fp_a)
+    ok("지문이 같으면 체크포인트를 안 지운다(이어받는다)", _ocrck_cp.is_file())
+
+    # 설정을 바꿔 다시 부르면(예: sample_fps 변경) 옛 체크포인트를 못 믿는다.
+    _prepare_checkpoint(_ocrck_cp, _fp_diff_fps)
+    ok("지문이 다르면 체크포인트를 지운다(새로 시작)", not _ocrck_cp.is_file())
+    ok("지문 파일은 새 지문으로 갱신된다",
+       _ocrck_json.loads(_ocrck_meta.read_text(encoding="utf-8")) == _fp_diff_fps)
+
+    # 스캔이 끝까지 성공하면 흔적을 치운다 — 안 그러면 다음 실행이 "이미 다
+    # 됐다"고 오해한다(사실은 새 스캔인데 우연히 지문이 같을 수 있다).
+    _ocrck_cp.write_text("[]", encoding="utf-8")
+    _cleanup_checkpoint(_ocrck_cp)
+    ok("성공하면 체크포인트를 지운다", not _ocrck_cp.is_file())
+    ok("성공하면 지문 파일도 지운다", not _ocrck_meta.is_file())
+    _cleanup_checkpoint(_ocrck_cp)  # 이미 없어도 에러 없이 지나간다
+    ok("이미 지워졌어도 다시 불러도 안전하다(멱등)", not _ocrck_cp.is_file())
 
 
 # --- 결과 ---------------------------------------------------------------
