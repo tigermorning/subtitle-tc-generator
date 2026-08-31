@@ -235,12 +235,19 @@ def stats_for(events: list[Event], lang: str, weights: dict | None = None) -> di
     0.5자, 영어는 전부 1자다. 가중치 없이 센 값끼리는 언어를 넘어 비교할 수 없다."""
     import statistics as st
     dur = [e.duration_ms for e in events]
-    chars, cps, lines, gaps = [], [], [], []
+    chars, cue_chars, cps, lines, gaps = [], [], [], [], []
     for k, e in enumerate(events):
         t = bare(e.text)
         ls = [ln for ln in t.split("\n") if ln.strip()]
         if ls:
             chars.append(max(count_chars(ln, weights) for ln in ls))
+            # 줄당(chars_per_line)과 다르다 — 자막 한 장 전체(모든 줄 합)의
+            # 글자 수다. resplit.py가 자를 때 실제로 쓰는 상한(per_line*
+            # max_lines)과 같은 단위라야 학습값을 그 알고리즘에 바로 견줄 수
+            # 있다(2026-09-01, T14 — `chars_per_line`만으로는 줄 수 분포를
+            # 다시 곱해 유도해야 하는데, 실측해 보니 그렇게 유도한 값이 실제
+            # cue 단위 실측값보다 낮게 나와 부정확했다).
+            cue_chars.append(sum(count_chars(ln, weights) for ln in ls))
             lines.append(len(ls))
         if t and e.duration_ms:
             cps.append(chars_per_second(e.text, e.duration_ms, weights))
@@ -254,6 +261,8 @@ def stats_for(events: list[Event], lang: str, weights: dict | None = None) -> di
                         "최소": min(dur), "최대": max(dur)},
         "chars_per_line": {"중앙값": st.median(chars), "95%": q(chars, 95),
                            "최대": max(chars)} if chars else {},
+        "chars_per_cue": {"중앙값": st.median(cue_chars), "95%": q(cue_chars, 95),
+                          "최대": max(cue_chars)} if cue_chars else {},
         "cps": {"중앙값": round(st.median(cps), 1), "95%": q(cps, 95)} if cps else {},
         "lines": {"한 줄": lines.count(1), "두 줄": lines.count(2),
                   "세 줄 이상": sum(1 for v in lines if v > 2)},
