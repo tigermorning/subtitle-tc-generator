@@ -547,12 +547,16 @@ torch DLL이 걸린다. 어젯밤(2026-08-27)엔 됐다가 다음날 안 됐다 
     먼저 재 보니(사용자 확인 순서) 드라마B `--against` 결과 평균 +8%·방향도 안
     일관 — 규칙11의 2750/1752(57%) 예시는 낡았다(`LEADS` 튜닝이 이미 메움).
     대신 chars_per_cue(자막 한 장 글자 수)가 4회차 전부 일관되게 15~20%
-    짧았다 — `resplit.py`가 대상. 오늘은 지표 준비까지만 함(`corpus_build.py`
-    에 `chars_per_cue` 추가, `rules/learned/disney/ko-sdh.yaml` 재추출 —
-    `netflix`는 원본 영상 삭제돼 재추출 불가). `resplit.py` 연결은 아직
-    안 함 — `corpus_build.py` 실측값(11.0)과 `--against` eval.json의
-    truth_median(14~15)이 안 맞는 게 남아 있어 그것부터 가려야 한다.
-    상세: `docs/BACKLOG.md` T14.
+    짧았다 — `resplit.py`가 대상. `corpus_build.py`에 `chars_per_cue`
+    추가, `rules/learned/disney/ko-sdh.yaml` 재추출(`netflix`는 원본 영상
+    삭제돼 불가). **그 값(11.0)이 `--against` eval.json의 truth_median
+    (14~15)과 안 맞아 보였는데 — 실측 차이가 아니라 버그였다.**
+    `checker/evaluate.py`가 `chars_per_cue`를 `count_chars()` 가중치 없이
+    (전부 1.0) 재고 있었다(`_evaluate_mode`가 프로파일을 아예 안 불러옴)
+    — 한국어 대상 모든 과거 `--against` 실행에 있던 버그다. 고치고 재검증
+    (E02~05): truth_median 11.5~12.5로 학습값과 정확히 맞아떨어짐. 이제
+    `resplit.py` 연결로 바로 들어갈 수 있다 — 상세·다음 단계 제안은
+    `docs/BACKLOG.md` T14·§6.
 - **영어(그 외 언어) 2차·3차 검수가 없다 — 필요도를 실측해 보니 언어마다
   다르다(2026-08-31 조사, 구현은 안 함).** `checker/revise.py`는 한국어
   전용이다. 만들기 전에 "정말 필요한가"부터 실측했다 — 영화A 프랑스어·영화B

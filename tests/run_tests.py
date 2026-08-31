@@ -3337,6 +3337,21 @@ ok("요약에도 순수 유사도가 들어간다(1.0 초과 없음)",
 ok("BLEU·ROUGE 필드는 없다(독립 검토 결과 걷어냈다)",
    "bleu" not in stats and "rouge_l" not in stats)
 
+# **`chars_per_cue`가 프로파일의 char_weights를 실제로 쓰는지**(2026-09-01
+# 회귀 — `_evaluate_mode`가 프로파일을 안 불러와 이 값을 항상 가중치 없이
+# (전부 1.0) 재고 있었다. 한국어는 CJK 1.0·기타 0.5라 결과가 계속 부풀려져
+# 나왔다). "안녕 hi"는 CJK 2자 + 공백·라틴 3자 — 가중치 없으면 5.0, 한국어
+# 가중치(cjk 1.0/other 0.5)면 3.5여야 한다.
+cmp_cw = compare([_EvalEvent(1, 0, 3000, "안녕 hi")], [_EvalEvent(1, 0, 3000, "안녕 hi")])
+stats_no_weights = summarize(cmp_cw)
+stats_ko_weights = summarize(cmp_cw, char_weights={"cjk": 1.0, "other": 0.5})
+ok("char_weights 없으면 기존처럼 전부 1.0으로 센다",
+   stats_no_weights["chars_per_cue"]["ours_median"] == 5.0,
+   str(stats_no_weights["chars_per_cue"]))
+ok("char_weights를 주면 한국어 가중치가 실제로 반영된다",
+   stats_ko_weights["chars_per_cue"]["ours_median"] == 3.5,
+   str(stats_ko_weights["chars_per_cue"]))
+
 # 텍스트가 가장 안 맞는 자막이 리포트 개별 목록에 실제로 나오고, 안 맞는 순으로
 # 먼저 나오는지 확인한다.
 mismatched = [_EvalEvent(1, 0, 3000, "정답과 완전히 다른 말"),

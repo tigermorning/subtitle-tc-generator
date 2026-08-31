@@ -145,8 +145,18 @@ def _spread(values: list[int]) -> dict:
     }
 
 
-def summarize(comparison: Comparison, fps: float = 23.976) -> dict:
-    """무엇이 얼마나 어긋나는지. 고칠 값을 여기서 읽는다."""
+def summarize(comparison: Comparison, fps: float = 23.976,
+             char_weights: dict | None = None) -> dict:
+    """무엇이 얼마나 어긋나는지. 고칠 값을 여기서 읽는다.
+
+    `char_weights`를 안 주면(기본) `count_chars`가 모든 문자를 1.0으로 센다 —
+    한국어 자막 글자 수 규정(CJK 1자·공백/라틴/문장부호 0.5자)과 다른 값이다.
+    2026-09-01, T14로 학습값(`tools/corpus_build.py`, 가중치 적용)과 이
+    함수가 낸 `chars_per_cue`(가중치 미적용)를 견주다가 발견 — 코드 전체에서
+    글자 수를 재는 다른 자리(`resplit.py`·`checks.py`·`corpus_build.py`)는
+    전부 프로파일의 `char_weights`를 쓰는데 여기만 빠져 있었다. `_evaluate_mode`
+    (cli.py)가 프로파일을 불러와 넘긴다.
+    """
     matched = comparison.matched
     starts = [p.start_diff for p in matched if p.start_diff is not None]
     ends = [p.end_diff for p in matched if p.end_diff is not None]
@@ -176,9 +186,9 @@ def summarize(comparison: Comparison, fps: float = 23.976) -> dict:
             "truth_median": round(median(truth_dur)) if truth_dur else None,
         },
         "chars_per_cue": {
-            "ours_median": round(median([count_chars(p.ours.text) for p in matched]), 1)
+            "ours_median": round(median([count_chars(p.ours.text, char_weights) for p in matched]), 1)
             if matched else None,
-            "truth_median": round(median([count_chars(p.truth.text) for p in matched]), 1)
+            "truth_median": round(median([count_chars(p.truth.text, char_weights) for p in matched]), 1)
             if matched else None,
         },
         "text_similarity_median": round(median(text_scores), 2) if text_scores else None,
@@ -224,9 +234,10 @@ def genuine_pairs(comparison: Comparison, min_similarity: float = 0.5,
     return out
 
 
-def report(comparison: Comparison, fps: float = 23.976, show: int = 12) -> str:
+def report(comparison: Comparison, fps: float = 23.976, show: int = 12,
+          char_weights: dict | None = None) -> str:
     """사람이 읽는 대조표."""
-    stats = summarize(comparison, fps)
+    stats = summarize(comparison, fps, char_weights)
     counts = stats["counts"]
     lines = [
         f"자막 수    우리 {counts['ours']}개 / 정답 {counts['truth']}개"
@@ -298,12 +309,12 @@ def report(comparison: Comparison, fps: float = 23.976, show: int = 12) -> str:
 
 
 def save(comparison: Comparison, path: Path, fps: float = 23.976,
-         note: str = "") -> None:
+         note: str = "", char_weights: dict | None = None) -> None:
     """정답 파일이 쌓이면 학습 자료가 된다. 그때 쓰려고 남긴다."""
     data = {
         "note": note,
         "fps": fps,
-        "summary": summarize(comparison, fps),
+        "summary": summarize(comparison, fps, char_weights),
         "pairs": [
             {"truth_index": p.truth.index if p.truth else None,
              "ours_index": p.ours.index if p.ours else None,

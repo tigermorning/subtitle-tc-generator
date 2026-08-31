@@ -787,13 +787,25 @@ def _evaluate_mode(args, ap) -> int:
             print(f"[오류] {exc}")
             return 2
 
+    # 글자 수는 프로파일의 char_weights로 재야 규정(chars_per_line 등)과 같은
+    # 값이 된다 — 안 재면 count_chars가 전부 1.0으로 세어 한국어 자막 길이가
+    # 실제보다 부풀어 보인다(2026-09-01, T14로 corpus_build.py 학습값과 이
+    # eval.json의 chars_per_cue를 견주다가 발견).
+    char_weights = None
+    try:
+        char_weights = (load_profile(args.platform, args.lang, args.kind)
+                        .get("limits", {}).get("char_weights"))
+    except ProfileError:
+        pass
+
     comparison = compare(ours, truth, similarity_fn=similarity_fn)
     print(f"우리 {files[0].name}  ↔  정답 {args.against.name}   ({fps:.3f}fps)")
     print()
-    print(report(comparison, fps))
+    print(report(comparison, fps, char_weights=char_weights))
 
     if args.eval_json:
-        save(comparison, args.eval_json, fps, note=f"{files[0].name} vs {args.against.name}")
+        save(comparison, args.eval_json, fps, note=f"{files[0].name} vs {args.against.name}",
+             char_weights=char_weights)
         print(f"\n대조 결과를 남겼습니다: {args.eval_json}")
     return 0
 

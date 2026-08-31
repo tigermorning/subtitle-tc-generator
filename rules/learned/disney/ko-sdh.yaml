@@ -19,11 +19,18 @@
 # 곱해 유도하면(9.5 × 평균 줄수 1.26 ≈ 12) 실제 cue 단위 실측값보다 낮게
 # 나와 부정확했다 — 그래서 새 지표를 따로 뽑았다.
 #
-# **주의 — 다른 측정치와 안 맞을 수 있다.** `tools/corpus_build.py`(이 파일이
-# 나온 방법, `count_chars` 가중치 적용)로 잰 중앙값은 11.0인데, `--against`의
-# `eval.json`이 E02~E05만으로 잰 truth_median은 14~15였다(E01 제외, 계산
-# 방식도 다를 수 있음 — 확인 안 됨). `resplit.py`에 실제로 연결하기 전에
-# 이 차이부터 가려야 한다(다음 세션 T14 이어서).
+# **위 "다른 측정치와 안 맞음" 메모는 해소됐다(2026-09-01, 같은 세션).**
+# `checker/evaluate.py`의 `summarize()`가 `chars_per_cue`를 `count_chars()`
+# **가중치 없이**(전부 1.0) 재고 있었다 — `_evaluate_mode`(cli.py)가 애초에
+# 프로파일을 안 불러왔다. 그래서 `--against`가 낸 truth_median(14~15)이
+# 이 학습값(11.0)보다 부풀어 보였을 뿐, 실측이 서로 다른 게 아니었다.
+# `evaluate.py`가 이제 프로파일의 `char_weights`를 받는다(`summarize`/
+# `report`/`save`에 `char_weights` 매개변수 추가, `_evaluate_mode`가
+# `-p/-l/-k`로 불러와 넘긴다). 고친 뒤 재검증(E02~05, 같은 소스):
+# truth_median 11.5~12.5로 이 학습값(11.0)과 정확히 맞아떨어짐. 이 버그는
+# **한국어를 대상으로 한 모든 과거 `--against` 실행에 있었다** — 이전
+# eval.json·리포트의 "자막 길이" 수치는 전부 부풀려져 있었다는 뜻이다
+# (상대 비교 방향은 대체로 안 바뀜, 절대값만 부정확했다).
 
 schema_version: 1
 platform: disney
