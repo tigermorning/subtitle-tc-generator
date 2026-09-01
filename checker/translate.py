@@ -91,6 +91,40 @@ class Glossary:
         return missed
 
 
+# **출력 형식은 부탁하지 않고 강제한다**(2026-09-01 추가).
+#
+# 프롬프트에 "번역만 내고 설명은 붙이지 마세요"라고 적는 것은 부탁이라 확률적으로만
+# 지켜진다. 실제로 모델은 번역문을 `**...**`로 감싸고(영어 127곳·한국어 76곳),
+# 끝에 `**Notes:**` 설명을 달고(예능A 15회), `원래 → 고침` 꼴로 자기 수정을
+# 남겼다(13곳). `_strip_markdown_wrap`·`_strip_trailing_notes`·`_strip_self_revision`
+# 세 함수가 그 흔적이고, `_strip_trailing_notes`의 주석은 "지시를 프롬프트에 이미
+# 넣었지만 모델이 가끔 어긴다"라고 직접 적고 있다.
+#
+# Ollama HTTP는 `format`에 JSON 스키마를 주면 **서버가 형식을 강제한다** — 스키마에
+# 없는 꼬리 설명이나 한 칸에 든 두 값이 애초에 나올 수 없다. 부탁을 강제로 바꾼다.
+#
+# **`ollama run`(cli 경로)에는 이 자리가 없다.** WSL에서 Windows 쪽 Ollama를 부를 때
+# 유일한 길이므로 없앨 수 없다 — 그 경로는 지금까지와 똑같이 번호 매긴 평문으로 받고
+# `_parse_numbered`가 읽는다. 강제가 걸리는 경로에서만 이득을 본다.
+_TRANSLATION_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "translations": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "integer"},
+                    "text": {"type": "string"},
+                },
+                "required": ["id", "text"],
+            },
+        }
+    },
+    "required": ["translations"],
+}
+
+
 # **번역 모델 기본값은 여기 하나뿐이다.** 세 곳에 흩어져 있었고 값이 달랐다 —
 # 두 백엔드 클래스는 qwen, 설정 화면과 CLI 도움말은 exaone. 그래서 GUI가 설정을
 # 읽지 않던 동안 사용자는 exaone으로 도는 줄 알고 qwen으로 돌렸다.
@@ -151,13 +185,19 @@ class OllamaTranslator:
         with urllib.request.urlopen(f"{self.host}/api/tags", timeout=10) as res:
             return [m["name"] for m in json.load(res).get("models", [])]
 
-    def ask(self, system: str, prompt: str) -> str:
-        body = json.dumps({
+    # 이 경로는 출력 형식을 서버에 맡길 수 있다(`_TRANSLATION_SCHEMA` 주석 참고).
+    supports_schema = True
+
+    def ask(self, system: str, prompt: str, schema: dict | None = None) -> str:
+        payload = {
             "model": self.model, "system": system, "prompt": prompt,
             "stream": False,
             # 자막 번역은 창작이 아니다. 낮게 잡아 흔들림을 줄인다.
             "options": {"temperature": 0.2, "top_p": 0.9, "num_ctx": 8192},
-        }).encode("utf-8")
+        }
+        if schema:
+            payload["format"] = schema
+        body = json.dumps(payload).encode("utf-8")
         req = urllib.request.Request(f"{self.host}/api/generate", data=body,
                                      headers={"Content-Type": "application/json"})
         try:
@@ -220,7 +260,13 @@ class OllamaCliTranslator:
                              timeout=60).stdout
         return [l.split()[0] for l in out.replace("\r", "").splitlines()[1:] if l.strip()]
 
-    def ask(self, system: str, prompt: str) -> str:
+    # `ollama run`에는 출력 스키마를 주는 자리가 없다. 호출부가 이 값을 보고
+    # 프롬프트 문구를 고른다 — 강제가 안 걸리는데 JSON을 내라고 하면, 형식은
+    # 안 지켜지면서 번호 매긴 평문마저 잃는다.
+    supports_schema = False
+
+    def ask(self, system: str, prompt: str, schema: dict | None = None) -> str:
+        # `schema`는 규격을 맞추려고 받기만 하고 쓰지 않는다.
         # 시스템 지시를 프롬프트 앞에 붙인다. `ollama run`에는 시스템 지시를 따로
         # 주는 자리가 없다.
         result = subprocess.run(
@@ -561,8 +607,56 @@ def _strip_self_revision(text: str) -> str:
     return text.strip()
 
 
+def _parse_schema_reply(reply: str, expected: list[int]) -> dict[int, str] | None:
+    """스키마로 받은 JSON을 읽는다. **JSON이 아니면 `None`** — 평문 경로로 넘긴다.
+
+    빈 딕셔너리(`{}`)와 `None`은 다른 뜻이다. 앞은 "JSON은 맞는데 쓸 항목이 없다",
+    뒤는 "JSON이 아니다"이므로 평문으로 다시 읽어야 한다. 둘을 뭉개면 스키마를 못 거는
+    경로에서 번역이 통째로 빈다.
+
+    `text`는 스키마가 문자열이라고만 보장한다 — 그 **안에** 강조 표시나 꼬리 설명이
+    들어오는 것까지는 막지 못하므로 평문 경로와 같은 정제를 그대로 태운다.
+    """
+    stripped = reply.strip()
+    if not stripped.startswith("{"):
+        return None
+    try:
+        data = json.loads(stripped)
+    except json.JSONDecodeError:
+        return None
+    items = data.get("translations") if isinstance(data, dict) else None
+    if not isinstance(items, list):
+        return None
+
+    found: dict[int, str] = {}
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        try:
+            index = int(item.get("id"))
+        except (TypeError, ValueError):
+            continue
+        if index not in expected:
+            continue  # 모델이 지어낸 번호. 평문 경로와 같은 판단이다.
+        text = str(item.get("text") or "")
+        cleaned = _strip_self_revision(_strip_markdown_wrap(_strip_trailing_notes(text.strip())))
+        if cleaned:
+            found[index] = cleaned
+    return found
+
+
 def _parse_numbered(reply: str, expected: list[int]) -> dict[int, str]:
-    """`3. 번역문` 꼴을 읽는다. 모델이 어떻게 답하든 번호를 붙잡는다."""
+    """`3. 번역문` 꼴을 읽는다. 모델이 어떻게 답하든 번호를 붙잡는다.
+
+    **스키마로 받은 JSON도 여기서 읽는다**(2026-09-01). 강제가 걸리는 경로는
+    `{"translations": [{"id": 3, "text": "..."}]}`로 오고, 안 걸리는 경로(`ollama run`)는
+    예전처럼 번호 매긴 평문으로 온다. 부르는 쪽이 둘을 구분할 필요가 없도록 여기서
+    가른다 — 이 함수를 쓰는 곳이 다섯 군데라 계약을 바꾸지 않는 편이 안전하다.
+    """
+    got = _parse_schema_reply(reply, expected)
+    if got is not None:
+        return got
+
     found: dict[int, str] = {}
     current = None
     for line in reply.replace("\r\n", "\n").split("\n"):
@@ -620,12 +714,21 @@ def translate_events(events: list[Event], translator, glossary: Glossary | None 
                              for ev, (body, _) in zip(chunk, protected))
         # 이 배치의 원문에 실제로 걸리는 표현만 붙인다 — word_sense.hint 참고.
         sense_hint = word_sense.hint(" ".join(ev.text for ev in chunk))
-        prompt = (f"{before}다음 자막을 {lang_name}로 옮기세요. "
-                  f"**번호를 그대로 붙여 같은 개수로** 내세요."
+        # 형식을 서버가 강제할 수 있으면 그 형식으로 요구하고, 아니면 예전처럼
+        # 번호 매긴 평문으로 요구한다 — 강제가 안 걸리는데 JSON을 내라고 하면
+        # 형식은 안 지켜지면서 번호마저 잃는다(`_TRANSLATION_SCHEMA` 주석 참고).
+        use_schema = getattr(translator, "supports_schema", False)
+        how = ("**받은 번호를 `id`에 그대로 넣어 같은 개수로** 내세요."
+               if use_schema else "**번호를 그대로 붙여 같은 개수로** 내세요.")
+        prompt = (f"{before}다음 자막을 {lang_name}로 옮기세요. {how}"
                   f"{glossary.hint()}{sense_hint}\n\n{numbered}")
 
         say(f"번역 {start + 1}~{start + len(chunk)} / {len(events)}")
-        reply = translator.ask(system, prompt)
+        # 스키마를 안 쓸 때는 **인자를 빼고** 부른다. 이 프로젝트에는 두 인자짜리
+        # `ask`를 가진 번역기 대역이 여럿 있어(시험용 가짜 번역기 10개), 늘 세
+        # 인자로 부르면 그것들이 전부 깨진다 — 강제가 걸리는 경로만 새 규격을 쓴다.
+        reply = (translator.ask(system, prompt, _TRANSLATION_SCHEMA) if use_schema
+                 else translator.ask(system, prompt))
         got = _parse_numbered(reply, [ev.index for ev in chunk])
 
         for ev, (body, frame) in zip(chunk, protected):

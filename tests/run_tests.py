@@ -1138,7 +1138,8 @@ ok("자막 수만큼 노트를 낸다", _out.count("-->") == 2)
 # 받아 어떻게 되돌리는지**를 잡는다 — 사고는 거기서 났다.
 
 from checker.translate import (  # noqa: E402
-    Glossary, _parse_numbered, _protect, _restore, _strip_markdown_wrap,
+    Glossary, _TRANSLATION_SCHEMA, _parse_numbered, _parse_schema_reply,
+    _protect, _restore, _strip_markdown_wrap,
     _strip_trailing_notes, to_events, translate_events)
 
 body, frame = _protect("<i>She never did learn to knock.</i>")
@@ -1163,6 +1164,66 @@ ok("번호 붙은 답을 읽는다", got == {1: "진심이야?", 2: "20분이나
 ok("엉뚱한 번호는 버린다", _parse_numbered("7. 남의 자막\n", [1, 2]) == {})
 ok("이어지는 줄은 앞 번호에 붙인다",
    _parse_numbered("1. 첫 줄\n둘째 줄\n", [1]) == {1: "첫 줄\n둘째 줄"})
+
+# **출력 형식을 서버가 강제하는 경로**(2026-09-01). 프롬프트로 부탁하면 모델이
+# 마크다운으로 감싸고 꼬리 설명을 다는데(실측: 영어 127곳·한국어 76곳·설명 다수),
+# 스키마를 걸면 그런 응답 자체가 나올 수 없다. 아래가 고정하는 것은 "둘 다 읽는가"다.
+_schema_reply = _json.dumps({"translations": [
+    {"id": 1, "text": "진심이야?"}, {"id": 2, "text": "20분이나 기다렸어"}]},
+    ensure_ascii=False)
+ok("스키마로 받은 JSON을 읽는다",
+   _parse_numbered(_schema_reply, [1, 2]) == {1: "진심이야?", 2: "20분이나 기다렸어"})
+ok("JSON에서도 엉뚱한 번호는 버린다",
+   _parse_numbered(_json.dumps({"translations": [{"id": 7, "text": "남의 자막"}]}), [1, 2]) == {})
+# 스키마는 `text`가 문자열이라는 것만 보장한다 — 그 안에 강조 표시가 들어오는 것까지는
+# 못 막으므로 평문 경로와 같은 정제를 그대로 태운다.
+ok("JSON 안의 강조 표시도 벗긴다",
+   _parse_numbered(_json.dumps({"translations": [{"id": 1, "text": "**진심이야?**"}]},
+                               ensure_ascii=False), [1]) == {1: "진심이야?"})
+# **빈 딕셔너리와 None은 다른 뜻이다.** 앞은 "JSON은 맞는데 쓸 항목이 없다", 뒤는
+# "JSON이 아니다"이므로 평문으로 다시 읽어야 한다 — 뭉개면 평문 경로가 통째로 빈다.
+ok("JSON이 아니면 평문 경로로 넘긴다", _parse_schema_reply("1. 진심이야?", [1]) is None)
+ok("깨진 JSON도 평문 경로로 넘긴다", _parse_schema_reply('{"translations": [', [1]) is None)
+ok("평문 응답은 스키마 분기를 지나 그대로 읽힌다",
+   _parse_numbered("1. 진심이야?\n", [1]) == {1: "진심이야?"})
+
+
+# **강제가 걸리는 경로에서만 스키마를 요구한다.** `ollama run`(cli)에는 그 자리가
+# 없어서, 거기까지 JSON을 요구하면 형식은 안 지켜지면서 번호마저 잃는다.
+class _SchemaSpy:
+    supports_schema = True
+
+    def __init__(self):
+        self.schema = None
+        self.prompt = ""
+
+    def ask(self, system, prompt, schema=None):
+        self.schema, self.prompt = schema, prompt
+        return _json.dumps({"translations": [{"id": 1, "text": "진심이야?"}]},
+                           ensure_ascii=False)
+
+
+class _PlainSpy:
+    """스키마를 모르는 번역기. **두 인자짜리 `ask`가 깨지지 않아야 한다.**"""
+
+    def __init__(self):
+        self.prompt = ""
+
+    def ask(self, system, prompt):
+        self.prompt = prompt
+        return "1. 진심이야?\n"
+
+
+_spy = _SchemaSpy()
+_cues = translate_events([Event(1, 0, 3000, "Are you serious?")], _spy)
+ok("강제 가능한 경로에는 스키마를 실어 보낸다", _spy.schema == _TRANSLATION_SCHEMA)
+ok("스키마 경로 프롬프트는 id를 요구한다", "`id`" in _spy.prompt)
+ok("스키마 응답이 번역문이 된다", _cues[0].text == "진심이야?")
+
+_plain = _PlainSpy()
+_cues = translate_events([Event(1, 0, 3000, "Are you serious?")], _plain)
+ok("스키마를 모르는 번역기는 두 인자로 부른다", _cues[0].text == "진심이야?")
+ok("평문 경로 프롬프트는 번호를 요구한다", "번호를 그대로" in _plain.prompt)
 
 # 2인 화자 하이픈이 마크다운 강조 바깥에 있어도 벗긴다(실측: 예능A 15회
 # "-**What year did you debut?**", 2026-08-27).
