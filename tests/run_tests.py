@@ -1014,6 +1014,51 @@ out = resplit_all([Event(1, 0, 6000, "안녕하세요. 오늘 날씨가 좋습�
 ok("번호를 다시 매긴다", [e.index for e in out] == list(range(1, len(out) + 1)))
 
 
+# --- T14: 학습값(rules/learned/)이 재분할 기준 자리를 당긴다 -----------------
+# 규칙 11 — 규정이 비워 둔 자리를 실측으로 채운다. 여기서는 자막 한 장 글자
+# 수(chars_per_cue) 안에서 "어디를 자를지"만 학습값 쪽으로 당기고, 상한
+# 자체(max_chars)는 안 건드린다.
+
+from checker.profile import load_learned_chars_per_cue  # noqa: E402
+
+ok("학습값이 있으면 중앙값을 읽는다",
+   load_learned_chars_per_cue("disney", "ko", "sdh") == 11.0)
+ok("엄격 일치 — 같은 발주처라도 kind가 다르면 None",
+   load_learned_chars_per_cue("disney", "ko", "translation") is None)
+ok("엄격 일치 — 학습값 없는 발주처는 None",
+   load_learned_chars_per_cue("unknown", "ko", "sdh") is None)
+ok("platform이 없으면 None", load_learned_chars_per_cue(None, "ko", "sdh") is None)
+
+_t14_text = "안녕하세요 반갑습니다 오늘 날씨가 참 좋네요 산책이나 갈까요 저는 좋아요"
+_t14_default = split_text(_t14_text, 30, W2)
+_t14_targeted = split_text(_t14_text, 30, W2, target_chars=8)
+ok("target_chars를 주면 다르게 자른다", _t14_default != _t14_targeted,
+   str((_t14_default, _t14_targeted)))
+ok("target_chars 없으면 기존 동작과 100% 같다",
+   split_text(_t14_text, 30, W2) == _t14_default)
+
+disney_ko_sdh = load_profile("disney", "ko", "sdh")
+_t14_learned = resplit_all([Event(1, 0, 20000, _t14_text)], disney_ko_sdh)
+_t14_plain = resplit_all([Event(1, 0, 20000, _t14_text)],
+                         {**disney_ko_sdh, "platform": "unknown"})
+ok("resplit_all이 프로파일의 학습값을 저절로 찾아 쓴다",
+   [e.text for e in _t14_learned] != [e.text for e in _t14_plain],
+   str(([e.text for e in _t14_learned], [e.text for e in _t14_plain])))
+ok("학습값 없는 프로파일은 기존 동작(target_chars 없음)과 같다",
+   [e.text for e in _t14_plain] == split_text(_t14_text, 32, W2),
+   str(([e.text for e in _t14_plain], split_text(_t14_text, 32, W2))))
+
+_t14_tiny_profile = {**disney_ko_sdh,
+                     "limits": {**disney_ko_sdh.get("limits", {}),
+                                "chars_per_line": 3, "max_lines": 1,
+                                "char_weights": W2}}
+_t14_clamped = resplit_all([Event(1, 0, 6000, "안녕 반가워 오늘 날씨 좋다")],
+                           _t14_tiny_profile)
+ok("학습값이 상한(max_chars)을 넘으면 상한이 이긴다 — 조각마다 상한 안",
+   all(count_chars(e.text, W2) <= 3 for e in _t14_clamped),
+   str([e.text for e in _t14_clamped]))
+
+
 # --- 전사 읽기와 생성 파이프라인 -----------------------------------------
 # 전사 자체는 기계와 모델에 달려 있어 시험으로 붙잡을 수 없다. 전사 **결과를
 # 읽는 부분**과 그 뒤 단계를 잡는다.

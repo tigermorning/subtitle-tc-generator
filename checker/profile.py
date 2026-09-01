@@ -179,6 +179,33 @@ def _merge(parent: dict, child: dict) -> dict:
     return merged
 
 
+def load_learned_chars_per_cue(platform: str | None, language: str | None,
+                               kind: str | None) -> float | None:
+    """`rules/learned/<platform>/<language>-<kind>.yaml`에서 `chars_per_cue` 중앙값을 읽는다.
+
+    **엄격 일치만 쓴다**(사용자 확인, 2026-09-01) — platform·language·kind가 지금
+    프로파일과 정확히 같을 때만 본다. 장르·발주처를 넘어 폴백하면 그 발주처 규정이
+    아니라 다른 작품의 습관을 배우게 된다(규칙 2와 같은 결).
+
+    파일이 없거나 값이 없으면 `None`이다 — 학습값 없는 조합에서는 호출하는 쪽이
+    기존 동작(텍스트 중앙 기준 분할)을 그대로 유지해야 한다.
+    """
+    if not (platform and language and kind):
+        return None
+    path = RULES_ROOT / "learned" / platform / f"{language}-{kind}.yaml"
+    if not path.is_file():
+        return None
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except yaml.YAMLError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    observed = data.get("observed") or {}
+    value = (observed.get("chars_per_cue") or {}).get("중앙값")
+    return float(value) if isinstance(value, (int, float)) else None
+
+
 def user_root() -> Path:
     """사용자가 만든 프로파일이 놓이는 자리.
 

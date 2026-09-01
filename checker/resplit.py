@@ -29,6 +29,7 @@ from __future__ import annotations
 import re
 
 from .model import Event
+from .profile import load_learned_chars_per_cue
 from .text import count_chars
 
 SENTENCE_END = re.compile(r"(?<=[.?!。？！])\s+")
@@ -56,8 +57,14 @@ def _is_real_sentence_end(text: str, punct_pos: int) -> bool:
     return not (word and word.group(1).lower() in _ABBREVIATIONS)
 
 
-def _split_points(text: str) -> list[int]:
-    """끊을 수 있는 자리를 우선순위 순으로 돌려준다(문자 위치)."""
+def _split_points(text: str, target_chars: float | None = None) -> list[int]:
+    """끊을 수 있는 자리를 우선순위 순으로 돌려준다(문자 위치).
+
+    `target_chars`가 있으면 텍스트 가운데(`len(text) / 2`) 대신 그 글자 수에
+    가까운 자리를 우선한다 — 학습값(T14, 실무자가 실제로 고른 자막 길이)이
+    있을 때는 그 값을 향해 자른다. `None`이면 기존 동작(가운데 우선)과 100%
+    같다.
+    """
     points: list[tuple[int, int]] = []   # (우선순위, 위치)
     for m in SENTENCE_END.finditer(text):
         if not _is_real_sentence_end(text, m.start() - 1):
@@ -68,14 +75,16 @@ def _split_points(text: str) -> list[int]:
         points.append((1, m.end() - len(m.group(0)) + len(m.group(0).rstrip())))
     for m in re.finditer(r"\s+", text):
         points.append((2, m.start()))
-    points.sort(key=lambda p: (p[0], abs(p[1] - len(text) / 2)))
+    anchor = target_chars if target_chars is not None else len(text) / 2
+    points.sort(key=lambda p: (p[0], abs(p[1] - anchor)))
     return [pos for _rank, pos in points]
 
 
 def split_text(text: str, max_chars: float, weights: dict | None = None,
               force_sentence_split: bool = False,
               force_clause_split: bool = False,
-              min_piece_chars: float = 0) -> list[str]:
+              min_piece_chars: float = 0,
+              target_chars: float | None = None) -> list[str]:
     """`max_chars`를 넘지 않게 의미 단위로 자른다.
 
     가운데에 가까운 자리를 고른다 — 한쪽만 길게 남으면 다음 조각이 또 잘려야 한다.
@@ -120,19 +129,20 @@ def split_text(text: str, max_chars: float, weights: dict | None = None,
                 continue
             return ([left] if count_chars(left, weights) <= max_chars
                     else split_text(left, max_chars, weights, force_sentence_split,
-                                    force_clause_split, min_piece_chars)) + \
+                                    force_clause_split, min_piece_chars, target_chars)) + \
                    split_text(right, max_chars, weights, force_sentence_split,
-                              force_clause_split, min_piece_chars)
+                              force_clause_split, min_piece_chars, target_chars)
 
     if count_chars(text, weights) <= max_chars:
         return [text]
 
-    for pos in _split_points(text):
+    for pos in _split_points(text, target_chars):
         left, right = text[:pos].strip(), text[pos:].strip()
         if not left or not right:
             continue
         if count_chars(left, weights) <= max_chars:
-            return [left] + split_text(right, max_chars, weights, force_sentence_split)
+            return [left] + split_text(right, max_chars, weights, force_sentence_split,
+                                       target_chars=target_chars)
 
     # 끊을 자리가 없다(한 어절이 너무 길다). 자르지 않고 그대로 둔다 —
     # 억지로 글자 중간을 자르면 말이 깨진다. 검사가 길다고 잡아 줄 것이다.
@@ -183,7 +193,8 @@ def resplit(event: Event, max_chars_per_cue: float,
             force_sentence_split: bool = False,
             force_clause_split: bool = False,
             min_piece_chars: float = 0,
-            clause_split_min_duration_ms: int = 0) -> list[Event]:
+            clause_split_min_duration_ms: int = 0,
+            target_chars: float | None = None) -> list[Event]:
     """자막 하나를 여러 개로 나눈다. 나눌 필요가 없으면 그대로 돌려준다.
 
     `force_clause_split`은 `clause_split_min_duration_ms`보다 **긴** 자막에만
@@ -194,7 +205,7 @@ def resplit(event: Event, max_chars_per_cue: float,
     """
     use_clause_split = force_clause_split and event.duration_ms > clause_split_min_duration_ms
     pieces = split_text(event.text, max_chars_per_cue, weights, force_sentence_split,
-                        use_clause_split, min_piece_chars)
+                        use_clause_split, min_piece_chars, target_chars)
     if len(pieces) <= 1:
         return [event]
 
@@ -218,16 +229,27 @@ def resplit_all(events: list[Event], profile: dict,
     per_line = limits.get("chars_per_line") or 42
     max_lines = limits.get("max_lines") or 2
     weights = limits.get("char_weights")
+    max_chars_per_cue = per_line * max_lines
     timecode = profile.get("timecode") or {}
     force_sentence_split = bool(timecode.get("force_sentence_split"))
     force_clause_split = bool(timecode.get("force_clause_split"))
     min_piece_chars = float(timecode.get("min_piece_chars") or 0)
     clause_split_min_duration_ms = int(timecode.get("clause_split_min_duration_ms") or 0)
 
+    # T14: 학습값(rules/learned/)이 있으면 자를 자리를 그 글자 수 쪽으로 당긴다.
+    # 규정 상한(`max_chars_per_cue`) 자체는 안 건드린다 — 여러 합법 후보 중 어느
+    # 것을 고를지만 바꾼다. 상한을 넘는 학습값은 방어적으로 자른다(원래 없어야
+    # 하지만, 있으면 규정보다 학습값이 우선하는 것처럼 보이면 안 된다).
+    target_chars = load_learned_chars_per_cue(
+        profile.get("platform"), profile.get("language"), profile.get("kind"))
+    if target_chars is not None:
+        target_chars = min(target_chars, max_chars_per_cue)
+
     out: list[Event] = []
     for ev in events:
-        pieces = resplit(ev, per_line * max_lines, weights, speech, force_sentence_split,
-                         force_clause_split, min_piece_chars, clause_split_min_duration_ms)
+        pieces = resplit(ev, max_chars_per_cue, weights, speech, force_sentence_split,
+                         force_clause_split, min_piece_chars, clause_split_min_duration_ms,
+                         target_chars)
         out.extend(pieces)
         if origins is not None:
             origins.extend([ev.index] * len(pieces))
