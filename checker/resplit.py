@@ -174,9 +174,30 @@ def _allocate(start_ms: int, end_ms: int, pieces: list[str],
     return spans
 
 
+# 자를 자리를 침묵 쪽으로 당길 때 **얼마나 멀리까지 당기는가**. 2026-08-12에
+# 근거 없이 들어온 값이고, 2026-09-08에 처음 실측했다(`tools/vad_sweep.py` —
+# 정답 자막의 경계가 실제로 침묵 한가운데에서 얼마나 떨어져 있는지 잰다).
+#
+#     자료                        중앙값    400ms 안에 드는 경계
+#     드라마B E02          764ms    31.5%
+#     드라마B E03          582ms    36.1%
+#     영화A(영어 애니)        1683ms    20.2%
+#
+# **즉 이 폭은 경계의 3분의 1 정도만 당긴다.** 나머지는 글자 수 비례로 나눈
+# 자리에 그대로 남는다. 넓히면 더 많이 당기겠지만 그만큼 **글자 수 비례 위치에서
+# 멀어지는** 대가를 치른다 — 어느 쪽이 정답에 가까운지는 이 숫자만으로는 모른다.
+# `--against`로 최종 TC를 견줘 봐야 알 수 있고, 그때도 규칙 12대로 최소 2편이
+# 같은 방향을 가리켜야 바꾼다. **그래서 지금은 안 바꿨다.**
+#
+# 위 거리는 **모든 정답 경계**(인점·아웃점)를 잰 값이라 이 함수가 실제로 다루는
+# 자리(자막 하나를 여러 조각으로 나눌 때 생기는 **안쪽** 경계)와 정확히 같지는
+# 않다 — 폭의 대략적 크기를 말해 주는 근사치다.
+SNAP_TOLERANCE_MS = 400
+
+
 def _snap_to_silence(spans: list[tuple[int, int]],
                      speech: list[tuple[int, int]] | None,
-                     tolerance_ms: int = 400) -> list[tuple[int, int]]:
+                     tolerance_ms: int = SNAP_TOLERANCE_MS) -> list[tuple[int, int]]:
     """조각 경계를 가까운 침묵으로 당긴다. 말 한가운데서 끊기지 않게."""
     if not speech or len(spans) < 2:
         return spans

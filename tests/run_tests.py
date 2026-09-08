@@ -4161,6 +4161,51 @@ _ak5, _akdone5 = _ak.find(Path("아무 상관 없는 영상 이름.mkv"))
 ok("기본 경로로 불러도 안전하다", _ak.warning(_ak5, _akdone5) is None)
 
 
+# --- 문턱값 상수의 근거(A-4) -------------------------------------------------
+# 값을 바꾸는 시험이 아니다. **근거를 적어 둔 상수가 실제로 쓰이는지**만 못박는다
+# — 상수와 기본값이 갈라지면 주석의 실측 기록이 코드와 다른 것을 설명하게 된다.
+
+import inspect as _a4_inspect  # noqa: E402
+from checker import vad as _a4_vad  # noqa: E402
+from checker import resplit as _a4_resplit  # noqa: E402
+
+_a4_sig = _a4_inspect.signature(_a4_vad.detect_speech)
+ok("VAD 기본값이 이름 붙은 상수와 같다",
+   (_a4_sig.parameters["threshold"].default,
+    _a4_sig.parameters["min_speech_ms"].default,
+    _a4_sig.parameters["min_silence_ms"].default)
+   == (_a4_vad.THRESHOLD, _a4_vad.MIN_SPEECH_MS, _a4_vad.MIN_SILENCE_MS))
+ok("VAD 상수가 실측 당시 값 그대로다(바꾸려면 주석의 표부터 갱신한다)",
+   (_a4_vad.THRESHOLD, _a4_vad.MIN_SPEECH_MS, _a4_vad.MIN_SILENCE_MS) == (0.5, 120, 250))
+ok("침묵 당김 폭이 이름 붙은 상수와 같다",
+   _a4_inspect.signature(_a4_resplit._snap_to_silence).parameters["tolerance_ms"].default
+   == _a4_resplit.SNAP_TOLERANCE_MS == 400)
+
+# 실측 도구가 정답지에서 **사람 말 자막만** 고르는지. 효과음·음악 자막을 섞어
+# 세면 문턱값이 엉뚱하게 낮은 쪽으로 끌린다.
+import importlib.util as _a4_iu  # noqa: E402
+_a4_spec = _a4_iu.spec_from_file_location("vad_sweep", Path("tools/vad_sweep.py"))
+_a4_sweep = _a4_iu.module_from_spec(_a4_spec)
+_a4_spec.loader.exec_module(_a4_sweep)
+
+with _tempfile.TemporaryDirectory() as _a4_tmp:
+    _a4_srt = Path(_a4_tmp) / "t.srt"
+    _a4_srt.write_text(
+        "1\n00:00:01,000 --> 00:00:02,000\n[문 열리는 소리]\n\n"
+        "2\n00:00:03,000 --> 00:00:04,000\n♪ 노래 ♪\n\n"
+        "3\n00:00:05,000 --> 00:00:06,000\n[진수] 어디 갔었어\n",
+        encoding="utf-8")
+    ok("효과음·음악만 있는 자막은 빼고 센다",
+       _a4_sweep.speech_cues(_a4_srt) == [(5000, 6000)],
+       str(_a4_sweep.speech_cues(_a4_srt)))
+
+ok("구간이 없으면 점수를 내지 않는다(빈 dict)", _a4_sweep.score([], [(0, 1000)]) == {})
+_a4_score = _a4_sweep.score([(0, 1000), (2000, 3000)], [(0, 1000), (2000, 3000)])
+ok("정답과 똑같은 구간이면 오차가 0이다",
+   _a4_score["인점중앙"] == 0 and _a4_score["아웃중앙"] == 0 and _a4_score["덮음%"] == 100.0,
+   str(_a4_score))
+
+
 # --- 결과 ---------------------------------------------------------------
 
 print(f"통과 {PASSED}건")

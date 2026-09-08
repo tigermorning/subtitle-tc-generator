@@ -31,6 +31,30 @@ WINDOW = 512          # Silero v5는 16kHz에서 512 샘플(32ms) 단위로 본�
 # ONNX를 직접 부를 때 놓치기 쉽다.
 CONTEXT = 64
 
+# 확률 열을 구간으로 자르는 값 셋. **2026-08-11 VAD를 들일 때 근거 없이 들어온
+# 값이고, 2026-09-08에 처음 실측했다**(`tools/vad_sweep.py` — 확률 열을 한 번만
+# 구해 놓고 값만 바꿔 가며 정답 자막의 인점·아웃점과 견준다).
+#
+#     자료                          지금 값(0.5/120/250)      가장 나았던 값
+#     드라마B E02(한국어 드라마)  인 158ms / 아웃 285ms   0.3/80/100 → 136 / 232
+#     드라마B E03               인 117ms / 아웃 219ms   0.3/80/100 → 102 / 183
+#     영화A(영어 애니 영화)          인 1481ms / 아웃 1487ms 0.7/80/100 → 729 / 675
+#
+# **방향이 작품마다 뒤집힌다.** 한국어 실사 드라마는 더 느슨한 쪽(0.3)이 낫고,
+# 음악이 계속 깔리는 영어 애니메이션은 더 빡빡한 쪽(0.7)이 두 배 낫다. 한 값으로
+# 둘 다 맞출 수 없다는 것이 이 실측이 말하는 전부다.
+#
+# **그래서 안 바꿨다**(규칙 12 — 최소 2편 근거. 여기서 일관되게 가리키는 것은
+# 드라마B 한 작품뿐이고, 다른 작품은 반대를 가리킨다). 값을 고치려면
+# 같은 성격의 작품이 최소 한 편 더 필요하고, 진짜 답은 아마 **장르·언어별로 다른
+# 값**(`rules/genre/`가 하는 일)이지 새 고정값 하나가 아니다.
+#
+# 구간 수가 함께 늘면 경계가 아무 데나 가까워져 오차가 낮아 보인다는 점도 같이
+# 봐야 한다(0.3/80/100은 구간이 20%쯤 많다) — 표에 `구간` 칸이 있는 이유다.
+THRESHOLD = 0.5        # 사람 말일 확률이 이보다 높으면 말하는 중으로 본다
+MIN_SPEECH_MS = 120    # 이보다 짧은 소리는 구간으로 세지 않는다
+MIN_SILENCE_MS = 250   # 이보다 짧은 침묵으로는 말을 끊지 않는다
+
 
 class VadUnavailable(Exception):
     """모델이나 실행기가 없다."""
@@ -70,8 +94,9 @@ def _read_audio(video: Path):
     return np.frombuffer(result.stdout, dtype=np.int16).astype("float32") / 32768.0
 
 
-def detect_speech(video: Path, threshold: float = 0.5,
-                  min_speech_ms: int = 120, min_silence_ms: int = 250,
+def detect_speech(video: Path, threshold: float = THRESHOLD,
+                  min_speech_ms: int = MIN_SPEECH_MS,
+                  min_silence_ms: int = MIN_SILENCE_MS,
                   pad_ms: int = 0, model: str | None = None,
                   progress=None) -> list[tuple[int, int]]:
     """말소리 구간 [(시작ms, 끝ms)]. `media.detect_speech`와 계약이 같다.
