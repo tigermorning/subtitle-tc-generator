@@ -16,6 +16,12 @@
 - `--fix`(자동 교정, 원본 불변·새 파일로 출력), `--fix-timing`, `--korean`(한국어
   교정기 레인 연동), `--terms`(용어 조사), `--characters`(캐릭터 분석 문서),
   `--backtranslate`(역번역 검증)
+- **결정표**(2026-09-08, `checker/decisions.py`): 발주처·종류·언어를 사람이 고른
+  것인지 기계가 기본값으로 채운 것인지 구분해 낸다. 안 고르면 예전과 같은 값
+  (`netflix`/`translation`)으로 채우되 경고하고, 리포트에 `decisions`로 남긴다.
+  장르 미지정과 `--translate`인데 캐스트 시트가 없는 것(인물 관계를 모른 채
+  존댓말로 통일됨)도 같이 낸다. `--generate`·`--dry-run`은 실행 앞머리에 표로
+  찍는다 — `preflight`(환경 점검)와 다른 층이다
 
 ### 자막 초벌 생성 (`--generate`)
 

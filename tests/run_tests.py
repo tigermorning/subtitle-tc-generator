@@ -3959,6 +3959,66 @@ with _ocrck_tf.TemporaryDirectory(prefix="stc-ocrck-") as _ocrck_dir:
     ok("이미 지워졌어도 다시 불러도 안전하다(멱등)", not _ocrck_cp.is_file())
 
 
+# --- 결정표: 고르지 않은 것을 고른 것처럼 보이지 않게 한다 ----------------
+
+import argparse as _dec_argparse  # noqa: E402
+from checker import decisions as _dec  # noqa: E402
+
+
+def _dec_args(**kw):
+    base = dict(platform=None, kind=None, lang=None, genre=None,
+                translate=False, cast=None, profile=None, lock_timecodes=False)
+    base.update(kw)
+    return _dec_argparse.Namespace(**base)
+
+
+_dec_empty = _dec_args()
+_dec_list = _dec.resolve(_dec_empty)
+ok("빈 칸을 예전과 같은 값으로 채운다",
+   (_dec_empty.platform, _dec_empty.kind, _dec_empty.lang) == ("netflix", "translation", "ko"),
+   f"{_dec_empty.platform}/{_dec_empty.kind}/{_dec_empty.lang}")
+_dec_by_label = {d.label: d for d in _dec_list}
+ok("채운 값은 default로 표시한다", _dec_by_label["발주처"].source == "default")
+ok("발주처를 안 고르면 확인 필요로 낸다", _dec_by_label["발주처"].warn)
+ok("종류를 안 고르면 확인 필요로 낸다", _dec_by_label["종류"].warn)
+ok("언어는 경고까지 하지는 않는다", not _dec_by_label["언어"].warn)
+ok("장르는 값을 채우지 않는다(미지정으로 남긴다)",
+   _dec_by_label["장르"].source == "none" and _dec_by_label["장르"].value == "미지정")
+
+_dec_user = _dec.resolve(_dec_args(platform="coupang", kind="sdh", lang="ko", genre="variety"))
+ok("고른 것은 user로 표시하고 경고하지 않는다",
+   all(d.source == "user" and not d.warn for d in _dec_user))
+ok("고르면 경고 목록이 빈다", _dec.warnings(_dec_user) == [])
+ok("안 고르면 경고 목록에 발주처가 들어간다",
+   any("발주처" in w for w in _dec.warnings(_dec_list)))
+
+# --profile로 파일을 직접 준 경우는 platform/kind를 안 고른 것이 정상이다.
+_dec_file = {d.label: d for d in _dec.resolve(_dec_args(profile="x.yaml"))}
+ok("--profile을 주면 발주처 미지정을 경고하지 않는다",
+   _dec_file["발주처"].source == "file" and not _dec_file["발주처"].warn)
+
+# 번역할 때만 캐스트 시트를 묻는다 — 검사만 할 때는 쓰지 않는 칸이다.
+ok("검사만 할 때는 캐스트 시트를 묻지 않는다", "캐스트 시트" not in _dec_by_label)
+_dec_tr = {d.label: d for d in _dec.resolve(_dec_args(translate=True))}
+ok("번역인데 캐스트 시트가 없으면 확인 필요로 낸다", _dec_tr["캐스트 시트"].warn)
+_dec_tr_cast = {d.label: d for d in _dec.resolve(_dec_args(translate=True, cast="c.tsv"))}
+ok("캐스트 시트를 주면 경고하지 않는다", not _dec_tr_cast["캐스트 시트"].warn)
+
+_dec_table = _dec.table(_dec_list)
+ok("결정표에 기본값이라고 적힌다", "기본값" in _dec_table and "확인 필요" in _dec_table)
+_dec_marks = ("(기본값", "(지정")
+_dec_rows = [r for r in _dec_table.splitlines()
+             if any(m in r for m in _dec_marks)]
+_dec_heads = [r[:min(r.index(m) for m in _dec_marks if m in r)] for r in _dec_rows]
+ok("한글 폭을 세어 칸을 맞춘다(줄마다 여는 괄호 자리가 같다)",
+   len({_dec._width(h) for h in _dec_heads}) == 1, str(_dec_heads))
+
+ok("리포트에 남기는 형태는 JSON으로 낼 수 있는 값뿐",
+   all(set(r) == {"label", "value", "source", "note", "warn"}
+       and isinstance(r["warn"], bool)
+       for r in _dec.to_report(_dec_list)))
+
+
 # --- 결과 ---------------------------------------------------------------
 
 print(f"통과 {PASSED}건")

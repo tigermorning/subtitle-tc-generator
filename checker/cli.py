@@ -15,6 +15,7 @@ from pathlib import Path
 
 from . import available_profiles, load_profile, ProfileError
 from . import genre as _genre
+from . import decisions as _decisions
 from .profile import load_profile_file
 from .korean import CorrectorUnavailable, load_backend
 from .parsers import parse
@@ -28,6 +29,11 @@ def _format_text(report: dict, path: Path) -> str:
     out = [f"{path.name} — {report['profile']} {report['kind']}"]
     if report.get("profile_source"):
         out.append(f"  기준: {report['profile_source']}")
+    # 고르지 않아 채워진 값은 결과 바로 옆에 적는다 — 리포트만 따로 보는
+    # 사람에게는 실행할 때 stderr로 지나간 경고가 없다.
+    for d in report.get("decisions") or []:
+        if d.get("warn"):
+            out.append(f"  ⚠ {d['label']}: {d['value']} (지정하지 않음) {d['note']}".rstrip())
     if report.get("profile_warning"):
         out.append(f"  ⚠ {report['profile_warning']}")
     violations = report["violations"]
@@ -121,6 +127,11 @@ def _format_text(report: dict, path: Path) -> str:
         src = report.get("genre_source") or {}
         out.append(f"  장르: {report['genre']}"
                    + (f" ({src.get('section')} — {src.get('client', '')})" if src else ""))
+    else:
+        # **안 얹었다는 사실도 결과다.** 이 줄이 없으면 장르 관행이 적용된 것과
+        # 안 된 것이 리포트에서 똑같이 보인다(--genre variety를 두 세션 연속
+        # 빠뜨린 적이 있다 — CLAUDE.md 규칙 17).
+        out.append("  장르: 미지정 (장르 관행을 얹지 않았습니다 — --genre)")
     # **권장이지 규정이 아니다.** 위반 건수에 섞지 않는다.
     if report.get("off_recommendation"):
         off = report["off_recommendation"]
@@ -351,6 +362,10 @@ def _run_one(path: Path, profile: dict, args, backend) -> dict | None:
     report = result.extra["report"]
     report["violations"] = result.violations
     report["file"] = str(path)
+    # 화면 경고는 흘러가고 파일은 남는다. 나중에 이 리포트를 다시 볼 때
+    # "무엇을 기준으로 잰 것인지"가 리포트 안에 있어야 한다.
+    if getattr(args, "_decisions", None):
+        report["decisions"] = _decisions.to_report(args._decisions)
     if locked:
         report["timecodes_locked"] = True
     for note in result.notes:
@@ -1015,6 +1030,9 @@ def _generate_mode(args, ap) -> int:
         getattr(args, "genre", None))
     print(f"프로파일: {profile.get('platform')} {profile.get('language')} "
           f"{profile.get('kind')}")
+    # 위 한 줄은 **결과만** 말한다 — 고른 것인지 채워진 것인지는 결정표가 말한다.
+    # whisper가 10~20분 도는 경로라서, 기준이 틀렸다는 것은 여기서 알아야 한다.
+    print(_decisions.table(args._decisions))
 
     if args.dry_run:
         from . import preflight
@@ -1254,9 +1272,18 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--profile", type=Path,
                     help="프로파일 파일을 직접 지정한다(발주처 기준·템플릿 등). "
                          "--list로 이름을 확인한다")
-    ap.add_argument("-p", "--platform", default="netflix")
-    ap.add_argument("-l", "--lang", default="ko")
-    ap.add_argument("-k", "--kind", choices=["sdh", "translation"], default="translation")
+    # **기본값을 파서에 두지 않는다.** 여기 `default=`를 두면 고른 것과 채워진
+    # 것이 구분되지 않는다 — 값은 `decisions.resolve()`가 똑같이 채우고, 채웠다는
+    # 사실을 결정표에 남긴다(`checker/decisions.py`).
+    ap.add_argument("-p", "--platform", default=None,
+                    help=f"발주처. 지정하지 않으면 {_decisions.PLATFORM_FALLBACK}로 "
+                         f"채우고 경고합니다(규칙 1 ⓪ — 발주처 확인이 가장 먼저다)")
+    ap.add_argument("-l", "--lang", default=None,
+                    help=f"자막 언어(기본 {_decisions.LANG_FALLBACK})")
+    ap.add_argument("-k", "--kind", choices=["sdh", "translation"], default=None,
+                    help=f"자막 종류. 지정하지 않으면 {_decisions.KIND_FALLBACK}로 "
+                         f"채우고 경고합니다 — SDH 파일에 걸면 효과음 규칙이 "
+                         f"통째로 빠집니다")
     ap.add_argument("--children", action="store_true", help="아동 프로그램 기준 적용")
     ap.add_argument("--genre", choices=["documentary", "drama", "variety"],
                     help="장르를 플랫폼 프로파일 위에 얹는다. 호칭 규칙과 권장 표시 "
@@ -1501,6 +1528,12 @@ def main(argv: list[str] | None = None) -> int:
                           "자막에 들어간다. --ocr-lang/--ocr-sample-fps 등"
                           "세부 조정 플래그를 그대로 같이 쓴다")
     args = ap.parse_args(argv)
+
+    # **모드가 갈리기 전에** 빈 칸을 채운다. 아래 어느 갈래로 가든 발주처·종류를
+    # 보기 때문에, 한 갈래에서만 채우면 나머지가 `None`을 본다.
+    args._decisions = _decisions.resolve(args)
+    for line in _decisions.warnings(args._decisions):
+        print(f"경고: {line}", file=sys.stderr)
 
     if args.generate:
         return _generate_mode(args, ap)
