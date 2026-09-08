@@ -70,12 +70,27 @@ def lanes_of(paths: list[str]) -> dict[str, list[str]]:
 
 
 def staged_files() -> list[str]:
+    """staged 파일 목록.
+
+    **`-z`와 `core.quotepath=false`를 함께 쓴다.** 기본값에서 git은 한글 경로를
+    `"rules/sources/ì..."`처럼 8진수로 감싸 내놓는다 — 그대로 받으면
+    `rules/sources/`로 시작하지 않게 되어 이 저장소의 한글 폴더가 통째로 안 잡힌다
+    (2026-09-08, 이 검사를 붙인 첫 커밋이 실제로 조용히 지나갔다).
+    """
     try:
-        out = subprocess.run(["git", "diff", "--cached", "--name-only"],
-                             cwd=ROOT, capture_output=True, text=True, check=False)
+        out = subprocess.run(
+            ["git", "-c", "core.quotepath=false", "diff", "--cached",
+             "--name-only", "-z"],
+            cwd=ROOT, capture_output=True, check=False)
     except OSError:
         return []
-    return [line.strip() for line in out.stdout.splitlines() if line.strip()]
+    return parse_z_output(out.stdout)
+
+
+def parse_z_output(raw: bytes) -> list[str]:
+    """`-z`로 받은 NUL 구분 목록을 파일 목록으로. 한글 경로가 그대로 나와야 한다."""
+    text = raw.decode("utf-8", "replace")
+    return [piece for piece in text.split(chr(0)) if piece.strip()]
 
 
 def single_work_learned(paths: list[str]) -> list[str]:

@@ -4335,10 +4335,52 @@ ok("학습값만 있고 코드가 없으면 '최소 2편'은 말하지 않는다
    "최소 2편" not in (_ln.report(["rules/learned/coupang/ko-sdh.yaml",
                                  "rules/sources/작업자-자료/반영-계획.md"]) or ""))
 
+# **한글 경로가 그대로 나와야 한다.** git 기본값은 한글을 8진수로 감싸 내놓아
+# (`"rules/sources/ì..."`) 접두사 검사가 통째로 빗나간다 — 이 검사를
+# 붙인 첫 커밋이 실제로 그래서 조용히 지나갔다(2026-09-08).
+ok("NUL로 구분된 한글 경로를 그대로 읽는다",
+   _ln.parse_z_output(chr(0).join(["rules/sources/작업자-자료/정독-기록.yaml",
+                                 "checker/cli.py", ""])
+                      .encode("utf-8"))
+   == ["rules/sources/작업자-자료/정독-기록.yaml", "checker/cli.py"])
+ok("한글 경로도 갈래로 잡힌다",
+   "문서 정독" in _ln.lanes_of(["rules/sources/작업자-자료/정독-기록.yaml"]))
+
 _ln_lanes = _ln.lanes_of(["rules/netflix/ko-sdh.yaml", "rules/sources/x.md",
                           "corpus/pairs/a.json", "checker/cli.py", "docs/PRD.md"])
 ok("네 갈래를 각각 알아본다",
    set(_ln_lanes) == {"규정", "문서 정독", "코퍼스·학습", "코드"}, str(sorted(_ln_lanes)))
+
+
+# --- 규칙 12: 안 다룬 범위를 셀 수 있게 남긴다(정독 기록) --------------------
+
+_rp_spec = _a4_iu.spec_from_file_location("reading_progress", Path("tools/reading_progress.py"))
+_rp = _a4_iu.module_from_spec(_rp_spec)
+_rp_spec.loader.exec_module(_rp)
+
+_rp_data = _rp.load()
+ok("정독 기록이 읽힌다", isinstance(_rp_data.get("sources"), list) and _rp_data["sources"])
+_rp_text, _rp_unknown = _rp.report(_rp_data)
+ok("자료마다 상태를 적어 둔다", "반영함" in _rp_text and "안읽음" in _rp_text, _rp_text[:200])
+# 지금 저장소의 실제 상태 — 작업 기본 원칙 48장 중 30장이 어느 기록에도 없다.
+# 이 숫자가 줄면(정독하면) 여기도 함께 고친다. 늘면 기록이 사라진 것이다.
+ok("미확인이 실제로 세어진다", _rp_unknown == 30, str(_rp_unknown))
+ok("미확인 id를 짚어 준다", "WORK-001" in _rp_text, _rp_text[:400])
+
+_rp_one = {"total": 4, "records": [{"state": "반영함", "ids": ["A-1", "A-2"]},
+                                   {"state": "안읽음", "count": 1}]}
+_rp_res = _rp.tally(_rp_one)
+ok("id와 개수를 섞어 적어도 센다",
+   _rp_res["counts"] == {"반영함": 2, "안읽음": 1} and _rp_res["unknown"] == 1,
+   str(_rp_res))
+ok("모르는 상태는 문제로 낸다",
+   _rp.tally({"total": 1, "records": [{"state": "대충봄", "count": 1}]})["problems"],
+   "모르는 상태를 그냥 통과시키면 안 된다")
+ok("같은 id가 두 번 적히면 문제로 낸다",
+   _rp.tally({"total": 2, "records": [{"state": "반영함", "ids": ["A-1"]},
+                                      {"state": "정독함", "ids": ["A-1"]}]})["problems"])
+ok("적힌 수가 전체보다 많으면 문제로 낸다",
+   _rp.tally({"total": 1, "records": [{"state": "반영함", "count": 5}]})["problems"])
 
 
 # --- 결과 ---------------------------------------------------------------
