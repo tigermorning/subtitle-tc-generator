@@ -4058,6 +4058,94 @@ ok("리포트에 남기는 형태는 JSON으로 낼 수 있는 값뿐",
        for r in _dec.to_report(_dec_list)))
 
 
+# --- 정답지가 이미 있는지 먼저 본다(규칙 13 기계화) ------------------------
+
+from checker import answerkey as _ak  # noqa: E402
+
+ok("회차 표기를 여러 꼴에서 읽는다",
+   [_ak.episode_of(n) for n in ("A.E15.1080p.mkv", "B.15회.mkv", "C.S02E07.mkv",
+                                "Movie.2026.1080p.mkv")] == ["15", "15", "7", None])
+ok("시즌 표기 차이를 넘어 제목이 맞는다",
+   _ak.normalize_title("드라마C") in _ak.normalize_title(
+       "드라마C 시즌3.E06.260428.1080p.H264-F1RST"))
+# 해상도·코덱 같은 군더더기는 지운다. 배급 그룹 딱지(-GRP)까지 다 지우려 들지는
+# 않는다 — 목록에 없는 것이 남아도 폴더 제목이 부분 문자열이면 맞기 때문이다.
+ok("릴리즈 군더더기가 있어도 폴더 제목으로 맞는다",
+   _ak.normalize_title("영화A") in
+   _ak.normalize_title("영화A.2026.1080p.WEB-DL.x264-GRP"),
+   _ak.normalize_title("영화A.2026.1080p.WEB-DL.x264-GRP"))
+
+with _tempfile.TemporaryDirectory() as _aktmp:
+    _akroot = Path(_aktmp) / "truth"
+    (_akroot / "넷플릭스_시험 작품").mkdir(parents=True)
+    for _n in ("E03_한국어_SDH.srt", "E04_한국어_SDH.srt"):
+        (_akroot / "넷플릭스_시험 작품" / _n).write_text("1\n", encoding="utf-8")
+    # `_`로 시작하는 폴더는 캐시다 — 정답지로 세지 않는다.
+    (_akroot / "_whisper_cache").mkdir()
+    (_akroot / "_whisper_cache" / "시험 작품.srt").write_text("1\n", encoding="utf-8")
+
+    _akstatus = Path(_aktmp) / "corpus_status.yaml"
+    _akstatus.write_text(
+        "works:\n"
+        "  시험_작품:\n"
+        "    episodes:\n"
+        "      '3':\n"
+        "        video: '[습작]/시험 작품.E03.1080p.NF.WEB-DL.mkv'\n"
+        "        kinds:\n"
+        "          sdh:\n"
+        "            truth: truth/넷플릭스_시험 작품/E03_한국어_SDH.srt\n"
+        "            pipeline:\n"
+        "              tc_generated:\n"
+        "                done: true\n"
+        "                date: '2026-09-01'\n",
+        encoding="utf-8")
+
+    _akvideo = Path("[습작]/시험 작품.E03.1080p.NF.WEB-DL.mkv")
+    _akkeys, _akdone = _ak.find(_akvideo, truth_root=_akroot, status_file=_akstatus)
+    _akmsg = _ak.warning(_akkeys, _akdone)
+    ok("같은 회차 정답지를 찾으면 경고한다",
+       "이 영상의 정답지가 이미 있습니다" in _akmsg, str(_akmsg)[:80])
+    ok("이미 끝난 단계도 함께 알린다",
+       "tc_generated" in _akmsg and "2026-09-01" in _akmsg, str(_akmsg)[:200])
+    ok("규칙 13(학습이 먼저)을 근거로 댄다", "규칙 13" in _akmsg)
+    ok("캐시 폴더(_로 시작)는 정답지로 세지 않는다",
+       all("_whisper_cache" not in str(k.path) for k in _akkeys))
+
+    # 같은 작품 다른 회차뿐일 때 — 있는 것을 없다고 하지도, 있다고 단정하지도 않는다.
+    _ak2, _akdone2 = _ak.find(Path("시험 작품.E09.1080p.NF.WEB-DL.mkv"),
+                              truth_root=_akroot, status_file=_akstatus)
+    _akmsg2 = _ak.warning(_ak2, _akdone2)
+    ok("다른 회차만 있으면 그렇게 말한다",
+       "다른 회차" in _akmsg2 and "이 회차 것은 못 찾았습니다" in _akmsg2, str(_akmsg2)[:100])
+
+    # 상관없는 영상에는 아무 말도 하지 않는다(경고가 흔해지면 아무도 안 본다).
+    _ak3, _akdone3 = _ak.find(Path("Some.Other.Movie.2026.1080p.WEB-DL.mkv"),
+                              truth_root=_akroot, status_file=_akstatus)
+    ok("상관없는 영상에는 경고하지 않는다", _ak.warning(_ak3, _akdone3) is None)
+
+    # `truth:`는 사람이 손으로 적는 칸이라 주석이 붙어 있다. 우리가 고쳐 쓰지 않고
+    # 적힌 그대로 보여 준다.
+    _akstatus.write_text(
+        "works:\n"
+        "  시험_작품:\n"
+        "    episodes:\n"
+        "      '3':\n"
+        "        video: '시험 작품.E03.1080p.NF.WEB-DL.mkv'\n"
+        "        kinds:\n"
+        "          sdh:\n"
+        "            truth: 없는 경로/E03.srt (다른 데도 있음)\n",
+        encoding="utf-8")
+    _ak4, _akdone4 = _ak.find(Path("시험 작품.E03.1080p.NF.WEB-DL.mkv"),
+                              truth_root=_akroot, status_file=_akstatus)
+    ok("찾을 수 없는 truth는 적힌 그대로 보여 준다",
+       any(k.shown == "없는 경로/E03.srt (다른 데도 있음)" for k in _ak4),
+       str([k.shown for k in _ak4]))
+
+# 실제 저장소 경로로 불러도 터지지 않는다(정답지 폴더가 없는 설치본 포함).
+_ak5, _akdone5 = _ak.find(Path("아무 상관 없는 영상 이름.mkv"))
+ok("기본 경로로 불러도 안전하다", _ak.warning(_ak5, _akdone5) is None)
+
+
 # --- 결과 ---------------------------------------------------------------
 
 print(f"통과 {PASSED}건")

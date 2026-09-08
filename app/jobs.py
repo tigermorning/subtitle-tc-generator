@@ -67,6 +67,17 @@ class GenerateJob(Job):
     def run(self) -> None:
         def work():
             from checker.generate import generate
+
+            # **전사를 시작하기 전에** 이 영상의 정답지가 이미 있는지 본다
+            # (규칙 13 — 정답지가 있으면 학습이 먼저다). CLI의 `--generate`와
+            # 같은 확인이다: 한쪽에만 두면 입구마다 다르게 동작한다.
+            from checker import answerkey
+            keys, done = answerkey.find(self.video)
+            note = answerkey.warning(keys, done)
+            if note:
+                for line in note.splitlines():
+                    self.say(line)
+
             translator = None
             if self.translate:
                 from checker.translate import ensure_server, make_translator

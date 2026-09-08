@@ -1022,6 +1022,15 @@ def _generate_mode(args, ap) -> int:
         print("      이미 있는 자막이 정답일 수 있다 — whisper로 새로 만들기 전에"
               " `정답지-학습` 스킬로 먼저 추출해 확인하는 것을 권합니다.", file=sys.stderr)
 
+    # 위가 영상 **안**을 봤다면 이쪽은 영상 **밖**이다 — 우리가 이미 추출해 둔
+    # 정답지가 있는지 본다(규칙 13: 정답지가 있으면 학습이 먼저다). 사고 5번은
+    # 정확히 이 확인을 안 해서 났다(`docs/AGENT_INCIDENTS.md`).
+    from . import answerkey as _answerkey
+    _keys, _done = _answerkey.find(args.video)
+    _note = _answerkey.warning(_keys, _done)
+    if _note:
+        print(_note, file=sys.stderr)
+
     profile = _genre.apply(
         (load_profile_file(args.profile) if args.profile
          else load_profile(args.platform, args.lang, args.kind)),
