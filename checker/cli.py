@@ -814,7 +814,26 @@ def _evaluate_mode(args, ap) -> int:
     comparison = compare(ours, truth, similarity_fn=similarity_fn)
     print(f"우리 {files[0].name}  ↔  정답 {args.against.name}   ({fps:.3f}fps)")
     print()
-    print(report(comparison, fps, char_weights=char_weights))
+    if getattr(args, "text_diff", False):
+        # 순서를 지키라고 막는 자리가 아니라 **다시 묻는 자리**다. 넘어갈 때를
+        # 정하는 것은 사람이지 기계가 아니다(규칙 4).
+        print("텍스트 목록까지 냅니다 — TC(자막 수·인점·아웃점)가 정답과 "
+              "맞아떨어진 뒤인지 확인하세요(규칙 15).")
+        # 원장에 기록이 있으면 그것으로 한 번 더 짚는다. **모른다와 안 끝났다는
+        # 다르다**(규칙 3) — 코퍼스 밖 자료로 대조하는 일도 흔해서, 못 찾으면
+        # 아무 말도 하지 않는다.
+        from .answerkey import tc_state
+        state = tc_state(args.against)
+        if state and not state[0]:
+            print(f"경고: 원장에 이 회차의 TC 검증(tc_verified)이 아직 "
+                  f"'끝남'으로 적혀 있지 않습니다 — {state[1]}.")
+            print("      TC를 먼저 맞추고 그 사실을 docs/corpus_status.yaml에 "
+                  "남긴 뒤에 텍스트로 넘어갑니다(규칙 15).")
+        elif state:
+            print(f"원장 확인: TC 검증이 끝난 회차입니다 — {state[1]}.")
+        print()
+    print(report(comparison, fps, char_weights=char_weights,
+                 text_diff=getattr(args, "text_diff", False)))
 
     if args.eval_json:
         save(comparison, args.eval_json, fps, note=f"{files[0].name} vs {args.against.name}",
@@ -1443,6 +1462,10 @@ def main(argv: list[str] | None = None) -> int:
                          "어긋나는지 재서, 감이 아니라 값으로 고칠 수 있게 한다")
     ap.add_argument("--eval-json", type=Path,
                     help="대조 결과를 JSON으로 남긴다(정답 파일이 쌓이면 학습 자료가 된다)")
+    ap.add_argument("--text-diff", action="store_true",
+                    help="텍스트가 가장 안 맞는 자막 목록까지 낸다. **TC를 먼저 "
+                         "맞춘 뒤에 본다**(규칙 15) — 자막 단위가 정답과 어긋난 "
+                         "상태에서 이 목록을 보면 TC 문제를 번역 문제로 오판한다")
     ap.add_argument("--semantic", action="store_true",
                     help="--against의 짝짓기·유사도를 글자 겹침 대신 임베딩(bge-m3, "
                          "Ollama 필요)으로 잰다. 의역이라 글자는 안 겹쳐도 뜻이 같은 "

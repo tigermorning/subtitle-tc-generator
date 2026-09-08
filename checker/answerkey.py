@@ -178,6 +178,43 @@ def find(video: Path, truth_root: Path | None = None,
     return keys, done
 
 
+def tc_state(truth: Path, status_file: Path | None = None) -> tuple[bool, str] | None:
+    """이 정답지의 TC 검증(`tc_verified`)이 원장에 기록됐는지.
+
+    `(끝났는가, 라벨)`. 원장에서 이 정답지를 못 찾으면 `None` — **모른다와 안
+    끝났다는 다르다**(규칙 3). 코퍼스 밖 자료로 대조하는 일도 흔하다.
+
+    규칙 15("TC를 먼저 100% 맞춘 뒤에 자막 텍스트")를 확인하는 자리에서 쓴다.
+    """
+    status_file = STATUS_FILE if status_file is None else status_file
+    if not status_file.is_file():
+        return None
+    try:
+        import yaml
+    except ImportError:
+        return None
+    try:
+        data = yaml.safe_load(status_file.read_text(encoding="utf-8"))
+    except (OSError, ValueError, yaml.YAMLError):
+        return None
+    if not isinstance(data, dict):
+        return None
+
+    want = truth.name.lower()
+    for work, wdata in (data.get("works") or {}).items():
+        for ep, edata in ((wdata or {}).get("episodes") or {}).items():
+            for kind, kdata in ((edata or {}).get("kinds") or {}).items():
+                raw = (kdata or {}).get("truth")
+                if not raw:
+                    continue
+                path, _ = _truth_path(raw)
+                if path.name.lower() != want:
+                    continue
+                stage = ((kdata or {}).get("pipeline") or {}).get("tc_verified") or {}
+                return bool(stage.get("done")), f"{work} {ep}회 {kind}"
+    return None
+
+
 def warning(keys: list[AnswerKey], done: list[str]) -> str | None:
     """사람에게 낼 경고. 찾은 게 없으면 `None`."""
     if not keys and not done:

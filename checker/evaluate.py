@@ -235,8 +235,20 @@ def genuine_pairs(comparison: Comparison, min_similarity: float = 0.5,
 
 
 def report(comparison: Comparison, fps: float = 23.976, show: int = 12,
-          char_weights: dict | None = None) -> str:
-    """사람이 읽는 대조표."""
+          char_weights: dict | None = None, text_diff: bool = False) -> str:
+    """사람이 읽는 대조표.
+
+    **`text_diff`가 켜져야 텍스트 목록을 낸다**(규칙 15 — TC를 먼저 맞추고 그다음
+    자막 텍스트다). 기본값에서 이 목록을 함께 내면, 자막 단위 자체가 정답과 어긋난
+    상태에서 "번역이 어색하다"로 오판하게 된다 — 실측(2026-08-27, 예능A 15회
+    영어 번역 1453개 전수 대조)에서 텍스트가 안 맞아 보인 자리의 상당수가 사실
+    `regroup.py`가 화자 교체를 못 보고 이어 붙인 TC 문제였다. TC를 나중에 고치면
+    경계가 새로 생겨 텍스트 교정을 두 번 하게 된다.
+
+    **판정하지 않는다.** "TC가 충분히 맞았다"를 기계가 문턱값으로 정하지 않는다
+    (규칙 4 — 추정으로 자동 판정하지 않는다). 순서를 지키게 할 뿐이고, 넘어갈
+    때를 정하는 것은 사람이다.
+    """
     stats = summarize(comparison, fps, char_weights)
     counts = stats["counts"]
     lines = [
@@ -284,7 +296,14 @@ def report(comparison: Comparison, fps: float = 23.976, show: int = 12,
     # 하나를 내는 것이 아니다). 정답 텍스트에 이미 들어 있는 화면자막·SDH 표시까지
     # 함께 대조되므로 번역·SDH 어느 작업에도 쓸 수 있다.
     worst_text = sorted(comparison.matched, key=lambda p: p.text_similarity)[:show]
-    if worst_text:
+    if worst_text and not text_diff:
+        lines.append("")
+        lines.append("텍스트가 어긋난 자막 목록은 `--text-diff`로 따로 냅니다 — "
+                     "TC(재분할·스포팅)를")
+        lines.append("먼저 맞춘 뒤에 봅니다(규칙 15). 위 '자막 수'와 '인점·아웃점'이 "
+                     "정답과 구조적으로")
+        lines.append("어긋난 상태라면 텍스트 차이의 상당수가 사실 TC 문제입니다.")
+    if worst_text and text_diff:
         lines.append("")
         lines.append("텍스트가 가장 안 맞는 자막")
         for p in worst_text:

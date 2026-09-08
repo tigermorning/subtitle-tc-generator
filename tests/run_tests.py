@@ -3542,14 +3542,29 @@ truth2 = [_EvalEvent(1, 0, 3000, "여기는 딴 소리를 한다"),
 comparison3 = compare(mismatched, truth2)
 by_similarity = sorted(comparison3.matched, key=lambda p: p.text_similarity)
 worst_pair, best_pair = by_similarity[0], by_similarity[-1]
-txt = report(comparison3)
-ok("리포트에 텍스트 불일치 개별 목록이 있다", "텍스트가 가장 안 맞는 자막" in txt, txt)
+# **기본값에서는 텍스트 목록을 안 낸다**(규칙 15 — TC를 먼저 맞추고 그다음
+# 텍스트다). 자막 단위가 정답과 어긋난 상태에서 이 목록을 보면 TC 문제를
+# 번역 문제로 오판한다(2026-08-27 예능A 15회 실측이 그랬다).
+txt_default = report(comparison3)
+ok("기본값에서는 텍스트 목록을 내지 않는다",
+   "텍스트가 가장 안 맞는 자막" not in txt_default, txt_default)
+ok("대신 왜 안 내는지와 어떻게 보는지를 말한다",
+   "--text-diff" in txt_default and "규칙 15" in txt_default, txt_default)
+ok("TC 쪽(자막 수·인점·아웃점)은 기본값에서도 그대로 낸다",
+   "자막 수" in txt_default and "인점" in txt_default, txt_default)
+
+txt = report(comparison3, text_diff=True)
+ok("--text-diff면 텍스트 불일치 개별 목록이 나온다",
+   "텍스트가 가장 안 맞는 자막" in txt, txt)
 # 리포트에는 타이밍 기준 "가장 많이 어긋난 자막" 목록도 따로 있으므로, 새로 넣은
 # 텍스트 목록 구간만 잘라서 순서를 확인한다.
 text_section = txt[txt.index("텍스트가 가장 안 맞는 자막"):]
 ok("가장 안 맞는 자막이 잘 맞는 자막보다 먼저 나온다",
    text_section.index(f"#{worst_pair.truth.index:>3}")
    < text_section.index(f"#{best_pair.truth.index:>3}"), text_section)
+# 유사도 가운데값은 기본값에서도 낸다 — 숫자 하나는 "얼마나 먼가"를 가늠하게
+# 해 줄 뿐, 자막을 하나씩 손보게 만들지 않는다.
+ok("유사도 가운데값은 기본값에서도 낸다", "텍스트 유사도" in txt_default, txt_default)
 
 
 # --- 미리 점검(--dry-run) --------------------------------------------------
@@ -4257,6 +4272,38 @@ with _tempfile.TemporaryDirectory() as _dc_tmp:
         ok("옆 리포 경로는 낡음으로 세지 않는다", _dc.check_paths(["d.md"]) == [])
     finally:
         _dc.ROOT = _dc_root
+
+
+# --- 규칙 15: TC를 먼저 맞추고 그다음 텍스트 --------------------------------
+# 원장(docs/corpus_status.yaml)에 TC 검증이 끝났다고 적혀 있는지 본다.
+# **모른다와 안 끝났다는 다르다**(규칙 3) — 코퍼스 밖 자료로 대조하는 일도 흔하다.
+
+from checker.answerkey import tc_state as _tc_state  # noqa: E402
+
+with _tempfile.TemporaryDirectory() as _tc_tmp:
+    _tc_status = Path(_tc_tmp) / "corpus_status.yaml"
+    _tc_status.write_text(
+        "works:\n"
+        "  시험_작품:\n"
+        "    episodes:\n"
+        "      '1':\n"
+        "        kinds:\n"
+        "          sdh:\n"
+        "            truth: truth/E01_한국어_SDH.srt\n"
+        "            pipeline:\n"
+        "              tc_generated: {done: true}\n"
+        "          translation:\n"
+        "            truth: truth/E01_영어_번역.srt\n"
+        "            pipeline:\n"
+        "              tc_verified: {done: true}\n",
+        encoding="utf-8")
+    ok("TC 검증이 안 끝났으면 그렇게 말한다",
+       _tc_state(Path("E01_한국어_SDH.srt"), _tc_status) == (False, "시험_작품 1회 sdh"),
+       str(_tc_state(Path("E01_한국어_SDH.srt"), _tc_status)))
+    ok("TC 검증이 끝났으면 끝났다고 말한다",
+       _tc_state(Path("E01_영어_번역.srt"), _tc_status)[0] is True)
+    ok("원장에 없는 정답지는 None(모른다 ≠ 안 끝났다)",
+       _tc_state(Path("코퍼스밖.srt"), _tc_status) is None)
 
 
 # --- 결과 ---------------------------------------------------------------
