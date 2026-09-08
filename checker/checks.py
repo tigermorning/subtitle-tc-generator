@@ -315,7 +315,8 @@ def excerpt(event: Event, line_no: int | None, limit: int = 60) -> str:
 def run_checks(events: list[Event], profile: dict, children: bool = False,
                fps: float | None = None,
                busy_spans: list[tuple[int, int]] | None = None,
-               job_rules=None, cast: dict[str, str] | None = None):
+               job_rules=None, cast: dict[str, str] | None = None,
+               cast_pairs: dict[str, dict[str, str]] | None = None):
     """프로파일이 지정한 검사를 이벤트마다 돌린다.
 
     반환: (violations, unimplemented_check_names, skipped_reasons)
@@ -327,6 +328,9 @@ def run_checks(events: list[Event], profile: dict, children: bool = False,
            "job_rules": job_rules,
            # 캐릭터 시트의 `이름 -> 정한 말투`. 없으면 T17이 돌지 않는다.
            "cast": cast or {},
+           # 상대별 말투(말하는 이 -> 듣는 이 -> 말투). `cast`와 따로 두는 이유는
+           # 옛 호출부(플러그인·GUI)가 `cast` 하나만 넘기기 때문이다.
+           "cast_pairs": cast_pairs or {},
            # **자료가 없어 못 돈 검사.** 구현은 돼 있는데 입력이 없어 건너뛴 것들이다.
            # 미구현과 다르지만, 조용히 빠지면 똑같이 "통과"로 보인다(규칙 9).
            "skipped": []}
@@ -694,7 +698,18 @@ def _formality_inconsistent(events: list[Event], ctx: dict):
             " — 관계를 모르는 채 말투 혼용을 지적하면 오답이 됩니다")
         return []
 
+    from .characters import addressee
     from .formality import level_of
+
+    # **상대별 말투가 있으면 그쪽이 우선이다.** 실무 KNP의 `존반` 탭은 인물 × 인물
+    # 행렬이라 방향을 갖는다(피비→로스와 로스→피비가 다를 수 있다, 작업자 자료
+    # WORK-048). 상대를 못 가리는 줄에서는 예전처럼 `말투 지정` 한 칸을 쓴다 —
+    # 자막에 상대가 표시되지 않는 것이 원래 이 검사가 오래 미구현이던 이유다.
+    pairs = ctx.get("cast_pairs") or {}
+    # **듣는 이 이름도 후보다.** 행렬의 열(피비 -> 로스)에만 나오는 인물은
+    # `cast`에 없을 수 있다 — 그 이름을 빼면 상대를 영영 못 가려낸다.
+    names = set(cast) | set(pairs) | {who for row in pairs.values() for who in row}
+    used_pair = 0
 
     out = []
     for ev in events:
@@ -702,14 +717,32 @@ def _formality_inconsistent(events: list[Event], ctx: dict):
             found = SPEAKER_ID_RE.match(strip_tags(line))
             if not (found and found.group(2).strip()):
                 continue                    # 화자를 모르면 누구의 말투인지 알 수 없다
-            want = cast.get(found.group(1).strip())
+            who = found.group(1).strip()
+            said = found.group(2)
+            want = cast.get(who)
+            to_whom = ""
+            if pairs.get(who):
+                to_whom = addressee(said, who, names)
+                if to_whom and pairs[who].get(to_whom):
+                    want = pairs[who][to_whom]
+                    used_pair += 1
+                else:
+                    to_whom = ""            # 짝을 못 찾았으면 사람별 값으로 돌아간다
             if not want:
                 continue                    # 정해 주지 않은 인물은 건드리지 않는다
-            got = level_of(found.group(2))
+            got = level_of(said)
             if got and got != want:
-                who = found.group(1).strip()
+                where = f"{to_whom}에게 " if to_whom else ""
                 out.append((ev.index, line_no,
-                            f"{who}{_topic(who)} {want}로 정했는데 {got}입니다"))
+                            f"{who}{_topic(who)} {where}{want}로 정했는데 {got}입니다"))
+
+    # **행렬을 받아 놓고 한 번도 못 썼으면 그렇게 말한다.** 조용히 사람별 값으로만
+    # 돌면 사용자는 행렬이 걸린 줄 안다(규칙 3 — 안 돈 것은 안 돌았다고 남긴다).
+    if pairs and not used_pair:
+        ctx.setdefault("skipped", []).append(
+            "T17 (formality_inconsistent): 상대별 말투를 받았지만 자막에서 상대를 "
+            "가려낼 수 있는 줄이 없어 '말투 지정' 한 칸으로만 봤습니다 — 상대 이름이 "
+            "대사 안에 나올 때만 짝을 씁니다")
     return out
 
 

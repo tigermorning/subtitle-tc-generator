@@ -357,6 +357,7 @@ def _run_one(path: Path, profile: dict, args, backend) -> dict | None:
         busy_spans=busy_spans,
         job_rules=rules,
         cast=getattr(args, "_cast", None),
+        cast_pairs=getattr(args, "_cast_pairs", None),
     ))
     fixed = result.events
     report = result.extra["report"]
@@ -492,6 +493,10 @@ def _run_one(path: Path, profile: dict, args, backend) -> dict | None:
                                  # 같은 시트가 T17 검사도 돌린다 — 정하고, 쓰고,
                                  # 검사하는 것이 한 자료다.
                                  cast=getattr(args, "_cast", None),
+                                 # 상대별 말투는 **검사 쪽에만** 넘긴다. 감수
+                                 # 프롬프트(`revise.cast_hint`)는 인물별 한 칸을
+                                 # 쓰고, 상대까지 넣으면 프롬프트가 관계를 추정하게
+                                 # 된다 — 상대를 못 가리는 줄이 대부분이다.
                                  target_lang=profile.get("language") or "ko",
                                  progress=say)
             translated = later.events
@@ -1681,9 +1686,13 @@ def main(argv: list[str] | None = None) -> int:
             print(f"캐릭터 시트를 읽지 못했습니다: {exc}", file=sys.stderr)
             return 2
         args._cast = {p.name: p.declared_tone for p in people if p.declared_tone}
+        # 상대별 말투(KNP `존반` 탭의 행렬). 있으면 T17이 이쪽을 먼저 본다.
+        args._cast_pairs = {p.name: dict(p.tone_to) for p in people if p.tone_to}
         # **채워지지 않았으면 그렇게 말한다.** 조용히 넘기면 T17이 돈 것처럼 보인다.
-        if args._cast:
-            print(f"캐릭터 시트: 말투를 정한 인물 {len(args._cast)}명 "
+        if args._cast or args._cast_pairs:
+            pair_note = (f", 상대별로 정한 인물 {len(args._cast_pairs)}명"
+                         if args._cast_pairs else "")
+            print(f"캐릭터 시트: 말투를 정한 인물 {len(args._cast)}명{pair_note} "
                   f"(전체 {len(people)}명)", file=sys.stderr)
         else:
             print(f"캐릭터 시트에 '말투 지정' 칸이 비어 있어 T17은 돌지 않습니다 "

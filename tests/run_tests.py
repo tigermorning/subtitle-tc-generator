@@ -4415,6 +4415,75 @@ ok("지원하지 않는 언어는 조용히 한국어로 떨어지지 않는다"
    "de" not in _ja_roles)
 
 
+# --- 상대별 말투(존반 행렬) — T17이 방향을 본다 -----------------------------
+# 실무 KNP의 `존반` 탭은 인물 × 인물 행렬이고 칸이 방향을 갖는다(피비→로스와
+# 로스→피비가 다를 수 있다, 작업자 자료 WORK-048). 캐릭터 시트 한 칸(`말투 지정`)
+# 으로는 그 방향을 담을 수 없었다.
+
+from checker.characters import Character, addressee as _ad, read_tsv as _read_cast  # noqa: E402
+from checker.characters import to_tsv as _cast_tsv  # noqa: E402
+from checker.checks import run_checks as _run_checks  # noqa: E402
+
+ok("줄 안에 상대 이름이 있으면 상대를 가려낸다",
+   _ad("로스 그거 봤어?", "피비", ["로스", "모니카", "피비"]) == "로스")
+ok("상대 이름이 없으면 모른다고 한다",
+   _ad("둘 다 와", "피비", ["로스", "모니카", "피비"]) == "")
+ok("이름이 둘이면 찍지 않는다",
+   _ad("로스랑 모니카 어디 갔어", "피비", ["로스", "모니카", "피비"]) == "")
+ok("긴 이름이 짧은 이름에 먹히지 않는다",
+   _ad("김 경위 오셨어요", "진수", ["김 경위", "경위", "진수"]) == "김 경위")
+ok("대괄호 안(효과음·화자명)은 대사가 아니라 안 본다",
+   _ad("[로스가 웃는다]", "피비", ["로스", "피비"]) == "")
+
+# 시트 왕복 — 행렬이 TSV를 통과해도 살아남아야 한다.
+_cp_people = [Character(name="피비"), Character(name="로스")]
+_cp_people[0].declared_tone = "합니다체"
+_cp_people[0].tone_to = {"로스": "반말"}
+with _tempfile.TemporaryDirectory() as _cp_tmp:
+    _cp_path = Path(_cp_tmp) / "cast.tsv"
+    _cp_path.write_text(_cast_tsv(_cp_people), encoding="utf-8-sig")
+    _cp_back = {p.name: p for p in _read_cast(_cp_path)}
+    ok("상대별 말투가 시트를 왕복해도 남는다",
+       _cp_back["피비"].tone_to == {"로스": "반말"}, str(_cp_back["피비"].tone_to))
+    ok("상대별 말투가 없는 인물은 빈 사전이다", _cp_back["로스"].tone_to == {})
+
+# T17은 넷플릭스 한국어 **번역** 프로파일에 선언돼 있다(SDH엔 없다).
+_cp_profile = load_profile("netflix", "ko", "translation")
+_cp_events = [Event(1, 0, 3000, "[피비] 로스 밥 먹었어?"),      # 로스에게 -> 반말이 맞다
+              Event(2, 3000, 6000, "[피비] 로스 식사하셨어요?"),   # 로스에게 -> 존댓말이라 어긋남
+              Event(3, 6000, 9000, "[피비] 안녕하세요")]           # 상대 모름 -> 말투 지정(합니다체)
+
+_cp_v, _, _cp_skipped = _run_checks(_cp_events, _cp_profile,
+                                    cast={"피비": "합니다체"},
+                                    cast_pairs={"피비": {"로스": "반말"}})
+_cp_t17 = [v for v in _cp_v if v.rule_id == "T17"]
+ok("상대에게 정한 말투대로면 지적하지 않는다",
+   all(v.event_index != 1 for v in _cp_t17), str(_cp_t17))
+ok("상대에게 정한 말투를 벗어나면 지적한다",
+   any(v.event_index == 2 for v in _cp_t17), str(_cp_t17))
+ok("지적에 누구에게 하는 말인지 적는다",
+   any("로스에게 반말" in v.detail for v in _cp_t17), str(_cp_t17))
+
+# 상대를 못 가리는 줄은 예전 동작(사람별 한 칸) 그대로다.
+_cp_v2, _, _ = _run_checks([Event(1, 0, 3000, "[피비] 밥 먹었어요?")], _cp_profile,
+                           cast={"피비": "합니다체"},
+                           cast_pairs={"피비": {"로스": "반말"}})
+ok("상대를 모르면 사람별 값으로 본다",
+   any(v.rule_id == "T17" for v in _cp_v2), str(_cp_v2))
+
+# 행렬을 받았는데 한 번도 못 썼으면 그 사실을 남긴다(규칙 3).
+_, _, _cp_skipped2 = _run_checks([Event(1, 0, 3000, "[피비] 밥 먹었어요?")], _cp_profile,
+                                 cast={"피비": "합니다체"},
+                                 cast_pairs={"피비": {"로스": "반말"}})
+ok("행렬을 못 쓰면 안 썼다고 남긴다",
+   any("상대별 말투를 받았지만" in s for s in _cp_skipped2), str(_cp_skipped2))
+
+# 옛 호출부(플러그인·GUI)는 cast 하나만 넘긴다 — 그때 동작이 그대로여야 한다.
+_cp_v3, _, _ = _run_checks([Event(1, 0, 3000, "[피비] 밥 먹었어요?")], _cp_profile,
+                           cast={"피비": "합니다체"})
+ok("cast만 넘겨도 예전과 같이 돈다", any(v.rule_id == "T17" for v in _cp_v3))
+
+
 # --- 결과 ---------------------------------------------------------------
 
 print(f"통과 {PASSED}건")

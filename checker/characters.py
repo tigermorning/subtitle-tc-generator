@@ -64,6 +64,11 @@ class Character:
     first_ms: int = 0                                # 처음 나온 시각
     speech: dict = field(default_factory=dict)       # 말투 집계 (formality.summary)
     calls: dict[str, list[str]] = field(default_factory=dict)   # 상대 -> 쓴 호칭
+    # **상대별 말투.** 실무 KNP의 `존반` 탭이 인물 × 인물 행렬이고(가로·세로에 인물,
+    # 칸마다 I=Informal / F=Formal), 칸이 **방향을 갖는다** — 피비→로스와 로스→피비가
+    # 다를 수 있다(작업자 자료 WORK-048, 2026-09-08 정독). `declared_tone` 한 칸으로는
+    # 그 방향을 담을 수 없다. 여기 있는 것이 `declared_tone`보다 우선한다.
+    tone_to: dict[str, str] = field(default_factory=dict)        # 듣는 이 -> 정한 말투
     mentions: dict[str, int] = field(default_factory=dict)      # 상대 -> 언급 횟수
 
     # 아래는 자막이 증명하지 못한다. 외부 조사나 사람이 채운다.
@@ -190,6 +195,26 @@ def _cross_reference(found: dict[str, Character],
                             used.append(form)
 
 
+def addressee(line: str, speaker: str, names) -> str:
+    """이 줄이 **누구에게** 하는 말인지. 모르면 빈 문자열.
+
+    **자막 안에서 확인되는 것만 본다**(규칙 4). 줄 안에 다른 인물의 이름이 실제로
+    나오는 경우만 상대로 본다 — 화면을 봐야 아는 것은 여기서 추정하지 않는다.
+    긴 이름부터 찾는다(`김 경위`가 `경위`에 먹히지 않게).
+
+    이름이 둘 이상 나오면 빈 문자열이다. 누구에게 하는 말인지 가릴 수 없으면
+    모르는 것이지, 먼저 나온 쪽으로 찍을 일이 아니다.
+    """
+    # 대괄호·소괄호 안(효과음·화자명·지시)은 대사가 아니다 — `[로스가 웃는다]`의
+    # `로스`는 부르는 말이 아니라 소리 설명이다.
+    body = _MARKUP.sub(" ", _body(line))
+    found = [n for n in sorted(names, key=len, reverse=True)
+             if n != speaker and n in body]
+    # 긴 이름이 짧은 이름을 품는 경우(`김 경위` ⊃ `경위`)는 하나로 본다.
+    found = [n for n in found if not any(n != other and n in other for other in found)]
+    return found[0] if len(found) == 1 else ""
+
+
 def research(people: list[Character], wiki: str, work_title: str = "",
              limit: int = 0, with_image: bool = True, progress=None) -> dict:
     """외부 자료에서 성격·사진을 채운다. **기본으로 돌지 않는다** — 부르는 쪽이 켠다.
@@ -249,7 +274,7 @@ def to_tsv(people: list[Character]) -> str:
     되돌아온다.
     """
     head = ["이름", "대사 수", "처음", "말투", "말투 지정", "합니다체", "해요체", "유보",
-            "부르는 호칭", "관계",
+            "부르는 호칭", "관계", "상대별 말투",
             # 아래 다섯은 작업자 자료가 이름 붙인 항목이다(성별·나이·직업·경력·성격).
             "성별", "나이", "직업", "경력", "성격",
             "사진", "사진 라이선스", "근거"]
@@ -272,6 +297,9 @@ def to_tsv(people: list[Character]) -> str:
             str(counts.get("합니다체", 0)), str(counts.get("해요체", 0)),
             str((who.speech or {}).get("undecided", 0)),
             calls, relations,
+            # `로스=반말; 모니카=합니다체` 꼴. KNP `존반` 탭의 **한 행**이 이 칸이다
+            # (그 인물이 각 상대에게 쓰는 말투). 비워 두면 `말투 지정`을 쓴다.
+            "; ".join(f"{k}={v}" for k, v in who.tone_to.items()),
             cell(who.gender), cell(who.age), cell(who.job), cell(who.career),
             cell(who.traits),
             who.photo,
@@ -388,6 +416,11 @@ def read_tsv(path: Path) -> list[Character]:
             continue
         who = Character(name=name)
         who.declared_tone = _tone_of(cell(row, "말투 지정"))
+        for pair in cell(row, "상대별 말투").split(";"):
+            other, _, tone = pair.partition("=")
+            tone = _tone_of(tone.strip())
+            if other.strip() and tone:
+                who.tone_to[other.strip()] = tone
         who.gender = cell(row, "성별")
         who.age = cell(row, "나이")
         who.job = cell(row, "직업")
