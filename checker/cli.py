@@ -1199,6 +1199,21 @@ def _generate_mode(args, ap) -> int:
                     (v["rule_id"], v["message"]), 0) + 1
             for (rule_id, message), n in sorted(counts.items(), key=lambda kv: -kv[1])[:6]:
                 print(f"    {n:>3}건  {rule_id}  {message}")
+            # **콘솔 요약(위 top 6)만 내고 끝내지 않는다.** 전에는 규정 위반이
+            # `.notes.srt`에 안 들어가 align·문맥검사·SFX note와 따로 놀았다 —
+            # 전문가가 결국 콘솔 스크롤과 notes.srt 두 곳을 다 봐야 했다
+            # (사용자 지시, 2026-09-08 — "확인 필요"만 말고 자리를 콕 집어
+            # 낼 것). `draft.notes`에 합쳐서 한 파일로 나가게 한다.
+            violation_notes: dict[int, list[str]] = {}
+            for v in left:
+                where = f" {v['line_no']}행" if v.get("line_no") else ""
+                detail = f" ({v['detail']})" if v.get("detail") else ""
+                violation_notes.setdefault(v["event_index"], []).append(
+                    f"{v['rule_id']}{where}: {v['message']}{detail}")
+            from .generate import merge_notes
+            draft.notes = merge_notes(
+                draft.notes,
+                [(i, " / ".join(texts)) for i, texts in violation_notes.items()])
         if unfixable:
             print("  자동 표시지만 기계가 못 고치는 것: " + ", ".join(unfixable))
         unimplemented = result.extra["report"].get("unimplemented_checks") or []
@@ -1217,11 +1232,15 @@ def _generate_mode(args, ap) -> int:
     print(f"\n자막을 저장했습니다: {out}  (자막 {len(events)}개)")
 
     if draft.notes:
+        from .generate import review_report
+
         notes_path = out.with_suffix(".notes.srt")
         notes_path.write_text(notes_srt(draft), encoding="utf-8")
-        print(f"봐야 할 자리 {len(draft.notes)}곳: {notes_path}")
-        print("  SE에서 초안을 연 뒤 [파일 - 원본 자막 열기]로 이 파일을 얹으면 "
-              "나란히 보입니다.")
+        review_path = out.with_suffix(".review.txt")
+        review_path.write_text(review_report(draft), encoding="utf-8")
+        print(f"봐야 할 자리 {len(draft.notes)}곳: {notes_path} / {review_path}")
+        print("  SE에서 초안을 연 뒤 [파일 - 원본 자막 열기]로 notes.srt를 얹으면 "
+              "나란히 보입니다. SE 없이 텍스트만 볼 땐 review.txt.")
 
     print("\n초안입니다. 사람이 보고 고치는 것을 전제로 만들었습니다.")
     return 0

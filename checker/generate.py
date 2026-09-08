@@ -646,3 +646,53 @@ def notes_srt(draft: Draft) -> str:
     return to_srt([Event(ev.index, ev.start_ms, ev.end_ms,
                          by_index.get(ev.index, "·"))
                    for ev in draft.events])
+
+
+def merge_notes(notes: list[tuple[int, str]],
+                additions: list[tuple[int, str]]) -> list[tuple[int, str]]:
+    """자막 번호별 note를 합친다. **같은 번호에 둘 다 있으면 이어 붙인다.**
+
+    `dict(notes + additions)`처럼 그냥 합치면 나중 것이 먼저 것을 덮어써
+    먼저 있던 note가 조용히 사라진다(예: align이 이미 "소리 못 찾음"을
+    남긴 자리에 규정 위반까지 겹치면 위반 쪽만 남고 align 쪽이 사라짐) —
+    2026-09-08, 규정 위반을 `draft.notes`에 합치는 기능을 넣으며 발견해서
+    미리 막았다.
+    """
+    merged: dict[int, str] = {}
+    order: list[int] = []
+    for index, text in notes + additions:
+        if index not in merged:
+            order.append(index)
+            merged[index] = text
+        else:
+            merged[index] = f"{merged[index]} / {text}"
+    return [(i, merged[i]) for i in order]
+
+
+def review_report(draft: Draft) -> str:
+    """봐야 할 자리를 사람이 읽는 목록으로 낸다. SE 없이 텍스트만 봐도 된다.
+
+    `notes_srt`와 같은 `draft.notes`를 쓰지만 형식이 다르다 — 자막 파일이
+    아니라 번호·타임코드·본문·이유를 한 줄씩 나열한 보고서다. 목적은
+    전문 번역가가 영상을 처음부터 다시 보는 대신 **이 목록에 있는 자리만**
+    확인하면 되게 하는 것(사용자 지시, 2026-09-08) — "사람 확인 필요"라고
+    말만 하지 않고 어디인지 항상 같이 낸다.
+
+    **여기 없는 자리는 이 도구가 확인이 필요 없다고 판단한 자리다.** 그
+    판단이 100% 맞는다는 보장은 이 함수 하나로는 못 한다 — 놓친 사례가
+    나올 때마다 그 원인 모듈에 새 검사·note를 추가해 `draft.notes`로
+    들어오게 하는 것이 이 프로젝트가 계속 해 온 방식이다(규칙13 B층
+    대조 루프와 같은 원리).
+    """
+    from .writers import to_timecode
+    by_index = dict(draft.notes)
+    lines = [f"봐야 할 자리 {len(draft.notes)}곳"]
+    for ev in draft.events:
+        note = by_index.get(ev.index)
+        if not note:
+            continue
+        lines.append("")
+        lines.append(f"#{ev.index}  {to_timecode(ev.start_ms)} --> {to_timecode(ev.end_ms)}")
+        lines.append(f"  {ev.text}")
+        lines.append(f"  -> {note}")
+    return "\n".join(lines)

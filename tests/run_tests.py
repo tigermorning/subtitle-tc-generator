@@ -1064,7 +1064,8 @@ ok("학습값이 상한(max_chars)을 넘으면 상한이 이긴다 — 조각�
 # 읽는 부분**과 그 뒤 단계를 잡는다.
 
 from checker.transcribe import _parse_srt  # noqa: E402
-from checker.generate import Draft, _to_events, notes_srt, read_script  # noqa: E402
+from checker.generate import (Draft, _to_events, merge_notes, notes_srt,  # noqa: E402
+                              read_script, review_report)
 
 SAMPLE_SRT = """1
 00:00:00,000 --> 00:00:04,560
@@ -1131,6 +1132,26 @@ ok("노트에 봐야 할 이유가 들어간다", "스크립트에 없는" in _o
 ok("깨끗한 줄은 조용히 채운다", "·" in _out)
 # 번호가 어긋나면 SE에서 짝이 맞지 않는다.
 ok("자막 수만큼 노트를 낸다", _out.count("-->") == 2)
+
+# **merge_notes — 같은 번호에 겹치면 이어 붙인다, 덮어쓰지 않는다.**
+# dict(notes + additions)로 그냥 합치면 나중 것이 먼저 것을 지운다 —
+# 2026-09-08, 규정 위반을 draft.notes에 합치는 기능을 넣으며 미리 막았다.
+_merged = merge_notes([(1, "align 노트"), (2, "sfx 노트")], [(1, "규정 위반")])
+ok("겹치는 번호는 이어 붙인다", dict(_merged)[1] == "align 노트 / 규정 위반")
+ok("안 겹치는 번호는 그대로 남는다", dict(_merged)[2] == "sfx 노트")
+ok("순서가 안 섞인다(1번이 먼저)", [i for i, _ in _merged] == [1, 2])
+ok("빈 추가 목록이면 원본과 같다",
+   merge_notes([(3, "그대로")], []) == [(3, "그대로")])
+
+# **review_report — 노트 있는 자막만, 번호·타임코드·본문·이유를 함께 낸다.**
+_review_draft = Draft(
+    [Event(1, 0, 1000, "가"), Event(2, 1000, 2500, "나")],
+    notes=[(2, "확인 필요")])
+_review = review_report(_review_draft)
+ok("노트 없는 자막은 안 나온다", "#1" not in _review)
+ok("노트 있는 자막은 번호·타임코드·본문·이유가 다 나온다",
+   "#2" in _review and "00:00:01,000" in _review and "나" in _review
+   and "확인 필요" in _review)
 
 
 # --- 번역 -----------------------------------------------------------------
