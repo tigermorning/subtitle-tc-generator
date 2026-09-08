@@ -4384,6 +4384,37 @@ ok("적힌 수가 전체보다 많으면 문제로 낸다",
    _rp.tally({"total": 1, "records": [{"state": "반영함", "count": 5}]})["problems"])
 
 
+# --- 일본어 2차·3차 검수 ----------------------------------------------------
+# 실측(정답 4작품 21,888개)이 가리킨 것: です/ます 종결 0~17%, 구두점 0%,
+# 한 자막 7~15자. 그 셋이 프롬프트에 실제로 들어 있는지 못박는다 — 문구가 사라지면
+# 일본어 결과가 다시 길고 정중해진다.
+
+from checker.revise import ROLES_BY_LANG as _ja_roles  # noqa: E402
+from checker.translate import SYSTEM_BY_LANG as _ja_system  # noqa: E402
+
+ok("일본어 2차·3차 프롬프트가 있다", set(_ja_roles.get("ja") or {}) == {"감수", "윤문"},
+   str(sorted(_ja_roles)))
+_ja_second, _ja_third = _ja_roles["ja"]["감수"], _ja_roles["ja"]["윤문"]
+ok("2차는 상체(常体)를 기본으로 못박는다", "常体" in _ja_second, _ja_second[:80])
+ok("3차는 구두점을 쓰지 말라고 한다",
+   "「。」「、」は使いません" in _ja_third, _ja_third[:120])
+ok("3차는 실측 길이(7~15자·한 줄 7~9자)를 준다",
+   "7~15字" in _ja_third and "7~9字" in _ja_third, _ja_third[:200])
+ok("3차는 です・ます를 떼라고 한다", "です・ます" in _ja_third)
+ok("2차·3차가 서로 다른 프롬프트다", _ja_second != _ja_third)
+
+# 1차도 함께 고쳤다 — 1차가 만든 です/ます를 2·3차가 되돌리게 두지 않는다.
+ok("1차 일본어 프롬프트가 상시체를 기본으로 한다",
+   "상시체" in _ja_system["ja"], _ja_system["ja"][-200:])
+ok("1차 일본어 프롬프트에 옛 '정중체로 통일'이 남아 있지 않다",
+   "정중체(です・ます체)로 통일" not in _ja_system["ja"])
+
+# 다른 언어를 건드리지 않았는지 — 한국어는 여전히 존댓말 통일이 1차 기본이다.
+ok("한국어 1차는 그대로다", "존댓말로 통일" in _ja_system["ko"])
+ok("지원하지 않는 언어는 조용히 한국어로 떨어지지 않는다",
+   "de" not in _ja_roles)
+
+
 # --- 결과 ---------------------------------------------------------------
 
 print(f"통과 {PASSED}건")
