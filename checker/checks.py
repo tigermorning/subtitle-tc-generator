@@ -952,6 +952,59 @@ def _forced_narrative_merged_with_dialogue(ev: Event, ctx: dict):
     return []
 
 
+# 비미터법 단위. **숫자가 앞에 붙은 것만 본다** — `노트`(공책·음표)·`피트` 같은 말이
+# 단위가 아닌 뜻으로 쓰이는 자리를 지적하면 오답이 쏟아진다.
+NON_METRIC = re.compile(
+    r"(?<![0-9A-Za-z가-힣])"
+    r"\d[\d,.]*\s*"
+    r"(마일|피트|인치|야드|파운드|온스|갤런|해리|노트|화씨|"
+    r"miles?|ft|feet|inch(?:es)?|yards?|lbs?|pounds?|oz|gal(?:lons?)?|"
+    r"knots?|°F)"
+    r"(?![0-9A-Za-z가-힣])")
+
+
+@check("non_metric_unit")
+def _non_metric_unit(ev: Event, ctx: dict):
+    """T12(넷플릭스 I.12 Numbers). **화면자막에만** 건다 — 대사는 말한 대로 둔다.
+
+    작업자 자료가 두 자리에서 서로 다른 것을 말한다. 모순이 아니라 **대상이
+    다르다**(2026-09-08 정독으로 확인):
+
+        대사        "화폐를 제외한 모든 단위는 환산하지 않고 화자가 말한 대로 적는다"
+                    (`작업 기본 원칙`, 이미지-정독 837행)
+        화면자막    반복되는 화면자막은 KNP `반복` 탭에 환산해서 적어 둔다 —
+                    `O miles from OO` -> `OO로부터 O km`, `OF` -> `영하 OO도`
+                    (WORK-015·047). 표기 자료도 "미터법으로 변환하되 전문 분야가
+                    비법정 단위를 쓰면 그대로 둔다"고 적는다(이미지-정독 653행)
+
+    그래서 **대사 줄은 건드리지 않고**, 화면자막으로 판별된 자막에만 확인을 건다.
+
+    **자동 교정하지 않는다**(`auto: false`). 항공·컨테이너는 `피트`, 미식축구·골프는
+    `야드`, 해양은 `해리`·`노트`를 그대로 쓴다 — 어느 분야인지는 영상을 봐야 알고,
+    우리는 모른다(규칙 4). 그래서 "확인"으로만 낸다.
+
+    통화는 여기서 안 본다. 환산 금지 대상이고 `currency_converted`(C03)의 몫이다.
+
+    마커가 안 정해졌으면(`ask`) 무엇이 화면자막인지 알 길이 없어 검사하지 않는다 —
+    `forced_narrative_merged_with_dialogue`와 같은 판단이다.
+    """
+    rules = ctx.get("job_rules")
+    if not rules or rules.marker in ("ask", "none"):
+        return []
+    if not is_forced_narrative(ev.text, ctx.get("profile"), rules):
+        return []                       # 대사는 화자가 말한 대로가 맞다
+
+    out = []
+    for i, line in enumerate(ev.lines, 1):
+        hits = [m.group(0).strip() for m in NON_METRIC.finditer(strip_tags(line))]
+        if hits:
+            out.append((i, f"화면자막에 비미터법 단위가 남아 있습니다 — "
+                           f"{', '.join(dict.fromkeys(hits))}. 미터법으로 환산하는 "
+                           f"자리인지 보세요(항공·컨테이너 피트, 미식축구·골프 야드, "
+                           f"해양 해리·노트는 그대로 씁니다)"))
+    return out
+
+
 @check("unit_composed_character")
 def _unit_composed(ev: Event, ctx: dict):
     hits = sorted({c for c in ev.text if c in UNIT_COMPOSED})

@@ -4484,6 +4484,60 @@ _cp_v3, _, _ = _run_checks([Event(1, 0, 3000, "[피비] 밥 먹었어요?")], _c
 ok("cast만 넘겨도 예전과 같이 돈다", any(v.rule_id == "T17" for v in _cp_v3))
 
 
+# --- 단위 환산: 대사와 화면자막이 다르다 -------------------------------------
+# 작업자 자료가 두 자리에서 다른 것을 말한다 — 모순이 아니라 대상이 다르다.
+#   대사      "화폐를 제외한 모든 단위는 환산하지 않고 화자가 말한 대로"(837행)
+#   화면자막   반복 화면자막은 KNP `반복` 탭에 환산해 적는다(WORK-015·047)
+
+from checker.position import JobRules as _uc_rules  # noqa: E402
+
+_uc_profile = load_profile("netflix", "ko", "translation")
+_uc_on = _uc_rules(marker="double_quote", policy="move_dialogue")
+
+
+def _uc_check(text, rules=_uc_on):
+    found, _, _ = _run_checks([Event(1, 0, 3000, text)], _uc_profile, job_rules=rules)
+    return [v for v in found if v.rule_id == "T12"]
+
+
+ok("화면자막에 비미터법 단위가 남아 있으면 확인을 건다",
+   _uc_check("\u201c차로 8마일 거리\u201d"), "화면자막은 환산하는 자리다")
+ok("대사는 건드리지 않는다(화자가 말한 대로가 맞다)",
+   _uc_check("8마일이면 멀지") == [])
+ok("미터법으로 적힌 화면자막은 지적하지 않는다",
+   _uc_check("\u201c해발 3,000m\u201d") == [])
+ok("화씨도 잡는다", _uc_check("\u201c기온 32°F\u201d"))
+ok("영문 단위도 잡는다", _uc_check("\u201c8 miles from home\u201d"))
+
+# **숫자가 붙은 것만 본다.** `노트`(공책)·`피트`(사람 이름) 같은 말을 지적하면
+# 오답이 쏟아진다.
+ok("숫자 없는 '노트'는 단위로 보지 않는다", _uc_check("\u201c노트에 적어 둬\u201d") == [])
+ok("숫자 없는 '인치'도 보지 않는다", _uc_check("\u201c인치 단위가 뭐죠\u201d") == [])
+
+# 통화는 이 검사가 아니라 C03(currency_converted)의 몫이다 — 환산 금지 대상이라
+# 성격이 반대다.
+ok("통화는 이 검사가 보지 않는다", _uc_check("\u201c15달러입니다\u201d") == [])
+
+# 마커가 안 정해졌으면 무엇이 화면자막인지 알 수 없다 — 검사하지 않는다.
+ok("표식이 미정이면 검사하지 않는다",
+   _uc_check("\u201c차로 8마일 거리\u201d", _uc_rules(marker="ask")) == [])
+
+# 같은 단위가 여러 번 나와도 한 번만 적는다.
+_uc_many = _uc_check("\u201c8마일 걷고 다시 8마일\u201d")
+ok("같은 단위를 되풀이해 적지 않는다",
+   _uc_many and _uc_many[0].detail.count("8마일") == 1, str(_uc_many))
+
+# 분야에 따라 그대로 두는 것이 맞을 수 있다는 것을 지적 문구가 말한다(규칙 4).
+ok("그대로 두는 분야가 있다는 것을 함께 알린다",
+   "해양" in _uc_check("\u201c수심 100피트\u201d")[0].detail)
+
+# 이제 미구현 목록에서 빠졌다.
+_, _uc_unimpl, _ = _run_checks([Event(1, 0, 3000, "안녕")], _uc_profile,
+                               job_rules=_uc_on)
+ok("non_metric_unit이 미구현 목록에서 빠졌다",
+   not any("non_metric" in name for name in _uc_unimpl), str(_uc_unimpl))
+
+
 # --- 결과 ---------------------------------------------------------------
 
 print(f"통과 {PASSED}건")
