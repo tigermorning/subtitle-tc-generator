@@ -403,8 +403,8 @@ kiwi를 부르면 적재에 1~2분이 걸린다. **애매하면 말하지 않는
 ## 개발
 
 ```bash
-python3 tests/run_tests.py     # 755건 (GUI 제외)
-cmd.exe /c "..\korean-subtitle-corrector\.venv\Scripts\python.exe tests\run_tests.py"   # 776건
+python3 tests/run_tests.py     # 980건 (GUI 제외)
+cmd.exe /c "..\korean-subtitle-corrector\.venv\Scripts\python.exe tests\run_tests.py"   # 1012건
 ```
 
 시스템 파이썬에는 PySide6가 없다. `app/`을 건드리면 venv 쪽으로도 돌린다.

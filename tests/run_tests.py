@@ -4206,6 +4206,59 @@ ok("정답과 똑같은 구간이면 오차가 0이다",
    str(_a4_score))
 
 
+# --- 문서가 코드보다 낡지 않게(docs_check) ----------------------------------
+# 규칙 17이 "손대기 전에 먼저 열어 보라"고 정한 파일이 낡으면 체크리스트가 오히려
+# 함정이 된다. 훅이 커밋 직전에 이 검사를 돌리므로, 검사 자체가 틀리면 안 된다.
+
+_dc_spec = _a4_iu.spec_from_file_location("docs_check", Path("tools/docs_check.py"))
+_dc = _a4_iu.module_from_spec(_dc_spec)
+_dc_spec.loader.exec_module(_dc)
+
+ok("지금 저장소 문서에 낡은 곳이 없다(경로·grep 주장)",
+   _dc.check_paths(_dc.LIVING + _dc.HISTORICAL) + _dc.check_grep_claims(_dc.LIVING) == [],
+   str(_dc.check_paths(_dc.LIVING + _dc.HISTORICAL)
+       + _dc.check_grep_claims(_dc.LIVING)))
+
+_dc_stale = _dc.check_live_counts(10 ** 9)
+ok("시험 수가 다르면 낡았다고 잡는다",
+   any("시험 수가 낡았다" in row for row in _dc_stale), str(_dc_stale))
+
+with _tempfile.TemporaryDirectory() as _dc_tmp:
+    _dc_doc = Path(_dc_tmp) / "d.md"
+    _dc_root = _dc.ROOT
+    try:
+        # 임시 저장소를 흉내 낸다 — 검사 대상 경로를 그쪽으로 돌린다.
+        _dc.ROOT = Path(_dc_tmp)
+        (Path(_dc_tmp) / "checker").mkdir()
+        (Path(_dc_tmp) / "checker" / "있는파일.py").write_text("learned\n", encoding="utf-8")
+        _dc_doc.write_text(
+            "`checker/있는파일.py`는 있고 `checker/없는파일.py`는 없다.\n"
+            "`grep -rn \"learned\" checker/*.py` 1건.\n",
+            encoding="utf-8")
+        _dc_bad = _dc.check_paths(["d.md"])
+        ok("없는 경로만 집어낸다",
+           len(_dc_bad) == 1 and "없는파일" in _dc_bad[0], str(_dc_bad))
+        ok("맞는 grep 주장은 통과시킨다", _dc.check_grep_claims(["d.md"]) == [])
+
+        _dc_doc.write_text("`grep -rn \"learned\" checker/*.py` 0건.\n", encoding="utf-8")
+        ok("틀린 grep 주장을 잡는다",
+           len(_dc.check_grep_claims(["d.md"])) == 1,
+           str(_dc.check_grep_claims(["d.md"])))
+
+        # 도망갈 구멍이 있어야 한다 — 지금은 맞는 표기인데 걸리는 경우가 있다.
+        _dc_doc.write_text(
+            "`grep -rn \"learned\" checker/*.py` 0건. <!-- docs-check: 무시 -->\n",
+            encoding="utf-8")
+        ok("`docs-check: 무시`가 붙으면 넘어간다", _dc.check_grep_claims(["d.md"]) == [])
+
+        # 옆 리포(교정기) 경로는 여기 없는 것이 정상이다(규칙 0).
+        _dc_doc.write_text("교정기의 `tools/check_public_api.py`를 부른다.\n",
+                           encoding="utf-8")
+        ok("옆 리포 경로는 낡음으로 세지 않는다", _dc.check_paths(["d.md"]) == [])
+    finally:
+        _dc.ROOT = _dc_root
+
+
 # --- 결과 ---------------------------------------------------------------
 
 print(f"통과 {PASSED}건")
