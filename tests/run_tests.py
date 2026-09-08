@@ -4306,6 +4306,41 @@ with _tempfile.TemporaryDirectory() as _tc_tmp:
        _tc_state(Path("코퍼스밖.srt"), _tc_status) is None)
 
 
+# --- 규칙 12: 갈래를 동시에 벌이지 않는다 -----------------------------------
+
+_ln_spec = _a4_iu.spec_from_file_location("lanes_check", Path("tools/lanes_check.py"))
+_ln = _a4_iu.module_from_spec(_ln_spec)
+_ln_spec.loader.exec_module(_ln)
+
+ok("한 갈래만 건드리면 아무 말도 안 한다",
+   _ln.report(["checker/cli.py", "tests/run_tests.py"]) is None)
+ok("docs/와 최상위 md는 갈래로 세지 않는다",
+   _ln.report(["docs/HANDOFF.md", "CLAUDE.md", "README.md"]) is None)
+_ln_mixed = _ln.report(["checker/cli.py", "rules/learned/coupang/ko-sdh.yaml"])
+ok("코드와 학습 자료가 섞이면 알린다",
+   _ln_mixed is not None and "갈래 2개" in _ln_mixed, str(_ln_mixed))
+ok("섞였다고 막지는 않는다(경고 문구에 그렇게 적는다)",
+   "막지 않는다" in _ln_mixed, str(_ln_mixed))
+ok("어느 파일이 어느 갈래인지 짚는다",
+   "checker/cli.py" in _ln_mixed and "rules/learned/coupang/ko-sdh.yaml" in _ln_mixed)
+
+# 규칙 12의 증거 기준 — 한 작품뿐인 학습값으로 코드를 고치는 중인지 짚는다.
+ok("근거가 한 작품뿐인 학습값을 찾아낸다",
+   _ln.single_work_learned(["rules/learned/coupang/ko-sdh.yaml"])
+   == ["rules/learned/coupang/ko-sdh.yaml"])
+ok("여러 작품이 근거인 학습값은 짚지 않는다",
+   _ln.single_work_learned(["rules/learned/netflix/ko-sdh.yaml"]) == [],
+   str(_ln.single_work_learned(["rules/learned/netflix/ko-sdh.yaml"])))
+ok("학습값만 있고 코드가 없으면 '최소 2편'은 말하지 않는다",
+   "최소 2편" not in (_ln.report(["rules/learned/coupang/ko-sdh.yaml",
+                                 "rules/sources/작업자-자료/반영-계획.md"]) or ""))
+
+_ln_lanes = _ln.lanes_of(["rules/netflix/ko-sdh.yaml", "rules/sources/x.md",
+                          "corpus/pairs/a.json", "checker/cli.py", "docs/PRD.md"])
+ok("네 갈래를 각각 알아본다",
+   set(_ln_lanes) == {"규정", "문서 정독", "코퍼스·학습", "코드"}, str(sorted(_ln_lanes)))
+
+
 # --- 결과 ---------------------------------------------------------------
 
 print(f"통과 {PASSED}건")
