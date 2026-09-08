@@ -1062,8 +1062,23 @@ from checker.profile import load_learned_chars_per_cue  # noqa: E402
 
 ok("학습값이 있으면 중앙값을 읽는다",
    load_learned_chars_per_cue("disney", "ko", "sdh") == 11.0)
+# 쿠팡은 `ko-sdh`만 학습값이 있고 `ko-translation`은 없다 — 같은 발주처·같은
+# 언어라도 kind가 다르면 빌려 쓰지 않는다(2026-09-08: 디즈니로 걸던 시험인데,
+# `disney/ko-translation`에 값이 실제로 생겨서 대상을 옮겼다).
 ok("엄격 일치 — 같은 발주처라도 kind가 다르면 None",
-   load_learned_chars_per_cue("disney", "ko", "translation") is None)
+   load_learned_chars_per_cue("coupang", "ko", "translation") is None)
+# 2026-09-08 백필: T14 경로가 디즈니 SDH 하나에서만 돌던 것을 정답지가 남아
+# 있는 조합 전부로 넓혔다. 값이 사라지면 그 조합에서 경로가 조용히 죽으므로
+# 여기서 함께 못박는다.
+ok("백필한 조합에서 학습값이 실제로 읽힌다",
+   [load_learned_chars_per_cue(*t) for t in
+    (("netflix", "ko", "sdh"), ("netflix", "ko", "translation"),
+     ("netflix", "en", "translation"), ("disney", "ko", "translation"),
+     ("coupang", "ko", "sdh"))] == [9.5, 8.5, 28.0, 17.0, 11.0],
+   str([load_learned_chars_per_cue(*t) for t in
+        (("netflix", "ko", "sdh"), ("netflix", "ko", "translation"),
+         ("netflix", "en", "translation"), ("disney", "ko", "translation"),
+         ("coupang", "ko", "sdh"))]))
 ok("엄격 일치 — 학습값 없는 발주처는 None",
    load_learned_chars_per_cue("unknown", "ko", "sdh") is None)
 ok("platform이 없으면 None", load_learned_chars_per_cue(None, "ko", "sdh") is None)
