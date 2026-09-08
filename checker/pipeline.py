@@ -531,6 +531,20 @@ def correct_and_check(events: list[Event], profile: dict, options: CorrectOption
     violations = checked.violations + korean_violations
     violations.sort(key=lambda v: (v["event_index"], v["rule_id"]))
 
+    # 프로파일을 잘못 고르면 지적이 통째로 뒤집힌다(쿠팡에서는 점 셋이 정답인데
+    # 넷플릭스 기준으로는 위반이다). **모든 어댑터가 이 함수를 부르므로 여기에
+    # 둔다** — 전에는 `cli.py`에만 있어서 SE 플러그인과 GUI는 잘못 고른 프로파일을
+    # 끝까지 몰랐다.
+    #
+    # **자동 교정 전의 `events`로 본다.** `current`(교정 뒤)로 보면 방금 고른
+    # 프로파일 쪽으로 표기를 바꿔 놓은 자기 출력물을 되읽는 꼴이라(점 셋 -> …
+    # 같은 교정이 그대로 넷플릭스 근거가 된다) 경고가 원리적으로 안 뜬다.
+    from .detect import mismatch_warning
+    warning = mismatch_warning(events, profile)
+    if warning:
+        notes.append(warning)
+        checked.extra["report"]["profile_warning"] = warning
+
     return StageResult(
         events=current,
         notes=notes,

@@ -342,7 +342,9 @@ with _tempfile.TemporaryDirectory() as tmp:
     req = {"apiVersion": 1, "responseFilePath": str(Path(tmp) / "response.json"),
            "tempDirectory": tmp, "pluginDataDirectory": tmp,
            "subtitle": {"format": "SubRip", "subRip": SAMPLE_SRT},
-           "settings": {"kind": "sdh"}}
+           # **자동 교정은 이제 기본값이 아니다**(규칙 7) — 고치는 쪽을 보려면
+           # 켜서 부른다.
+           "settings": {"kind": "sdh", "applyFixes": True}}
     resp = plugin_run(req)
     ok("정상 응답", resp["status"] == "ok", str(resp)[:80])
     ok("설정을 돌려준다(SE가 왕복시킨다)", resp["settings"]["kind"] == "sdh")
@@ -379,6 +381,43 @@ with _tempfile.TemporaryDirectory() as tmp:
     r4 = plugin_run(req4)
     ok("없는 프로파일은 오류로 알린다",
        r4["status"] == "error" and "프로파일" in r4["message"], str(r4)[:60])
+
+    # **고르지 않은 것을 고른 것처럼 보이지 않게 한다**(2026-09-08).
+    req5 = {"apiVersion": 1, "tempDirectory": tmp,
+            "subtitle": {"format": "SubRip", "subRip": SAMPLE_SRT}}
+    r5 = plugin_run(req5)
+    ok("아무것도 안 고르면 기본값으로 돌았다고 말한다",
+       "정한 적이 없어" in r5["message"], r5["message"][:120])
+    ok("아무것도 안 고르면 자막을 바꾸지 않는다", "subtitle" not in r5)
+
+    # SE는 우리가 돌려준 설정을 그대로 되돌려준다. 그것을 "사람이 골랐다"로 세면
+    # 두 번째 실행부터 알림이 사라진다 — 고른 칸 이름을 함께 왕복시켜 막는다.
+    req6 = dict(req5); req6["settings"] = r5["settings"]
+    r6 = plugin_run(req6)
+    ok("SE가 되돌려준 설정을 사람 선택으로 세지 않는다",
+       "정한 적이 없어" in r6["message"], r6["message"][:120])
+
+    req7 = dict(req5); req7["settings"] = {"platform": "coupang", "kind": "sdh"}
+    r7 = plugin_run(req7)
+    ok("고르고 나면 그 알림이 사라진다", "정한 적이 없어" not in r7["message"])
+
+    # 프로파일 어긋남 경고가 플러그인·GUI에도 온다(전에는 cli.py에만 있었다).
+    COUPANG_SRT = ("1\n00:00:01,000 --> 00:00:04,000\n(진수) 어디 갔었어\n\n"
+                   "2\n00:00:05,000 --> 00:00:08,000\n(영희) 몰라도 돼\n")
+    req8 = {"apiVersion": 1, "tempDirectory": tmp,
+            "subtitle": {"format": "SubRip", "subRip": COUPANG_SRT},
+            "settings": {"platform": "netflix", "kind": "sdh"}}
+    r8 = plugin_run(req8)
+    ok("프로파일이 어긋나면 플러그인 메시지에도 뜬다",
+       "coupang" in r8["message"], r8["message"][:160])
+
+    # config.json이 깨졌으면 무시했다고 말한다 — 조용히 기본값으로 돌지 않는다.
+    (Path(tmp) / "config.json").write_text("{깨진 json", encoding="utf-8")
+    req9 = {"apiVersion": 1, "tempDirectory": tmp, "pluginDataDirectory": tmp,
+            "subtitle": {"format": "SubRip", "subRip": SAMPLE_SRT}}
+    r9 = plugin_run(req9)
+    ok("깨진 config.json을 무시했다고 말한다",
+       "config.json" in r9["message"] and "무시" in r9["message"], r9["message"][:120])
 
 
 # --- 발주처 프로파일 --------------------------------------------------------

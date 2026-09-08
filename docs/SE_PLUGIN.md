@@ -114,7 +114,7 @@ request에 들어오는 것 중 우리가 쓰는 값:
   "language": "ko",
   "kind": "sdh",
   "children": false,
-  "applyFixes": true,
+  "applyFixes": false,
   "korean": false,
   "kscPath": "C:\\Users\\...\\korean-subtitle-corrector",
   "spacing": "principle"
@@ -123,7 +123,15 @@ request에 들어오는 것 중 우리가 쓰는 값:
 
 - `kind` — `sdh` 또는 `translation`. **이 값이 검사 기준을 가른다**(읽기 속도
   14 대 12 CPS 등). 기본값은 `translation`이다
-- `applyFixes` — `false`면 검사만 하고 자막을 건드리지 않는다
+- `applyFixes` — `false`면 검사만 하고 자막을 건드리지 않는다. **기본값이
+  `false`다**(2026-09-08). 규칙 7 — 사람이 반영을 정하기 전에는 자막을 바꾸지
+  않는다. 전에는 기본값이 `true`라, 설정을 한 번도 안 건드린 작업자가 아래
+  `platform` 기본값(netflix)으로 자기 자막이 실제로 고쳐졌다
+- 프로파일 어긋남 경고 — 자막 표기가 고른 프로파일과 다르면 `message`에 붙는다
+  (`pipeline.correct_and_check`가 낸다. **자동 교정 전 자막으로 본다** — 교정
+  뒤로 보면 방금 고른 기준대로 바꿔 놓은 자기 출력물을 되읽는 꼴이다)
+- `platform`·`kind`를 한 번도 정한 적이 없으면 그 사실이 `message`에 붙는다.
+  `config.json`이 깨져서 무시된 경우도 마찬가지다 — 조용히 기본값으로 돌지 않는다
 - `korean` — 한국어 교정기 레인. `kscPath`가 필요하다
 
 ## 결과 보기

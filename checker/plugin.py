@@ -27,39 +27,78 @@ from .writers import to_srt
 API_VERSION = 1
 SETTINGS_VERSION = 1
 
+# 설정 안에 함께 넣어 왕복시키는 칸. 값이 아니라 **어느 칸을 사람이 정했는지**를
+# 담는다. `DEFAULT_SETTINGS`에는 없다 — 설정 항목이 아니라 그 설정의 출처다.
+CHOSEN_KEY = "_chosenKeys"
+
+# **자막을 바꾸는 쪽을 기본값으로 두지 않는다**(규칙 7 — SE 플러그인은 사람이
+# 반영을 결정하기 전에는 자막을 바꾸지 않는다). 전에는 `applyFixes`가 True라,
+# 설정을 한 번도 안 건드린 쿠팡 작업자가 플러그인을 돌리면 아래 `platform`
+# 기본값(netflix)으로 **자기 자막이 실제로 바뀌었다** — 쿠팡에서는 점 셋이
+# 정답인데 …로 고쳐진다. 고를 자리가 비어 있는 것과, 비어 있는 채로 남의 파일을
+# 고치는 것은 다른 문제다.
 DEFAULT_SETTINGS = {
     "platform": "netflix",
     "language": "ko",
     "kind": "translation",
     "children": False,
-    "applyFixes": True,
+    "applyFixes": False,
     "korean": False,
     "kscPath": "",
     "spacing": "principle",
 }
 
 
-def _load_settings(request: dict) -> dict:
+def _load_settings(request: dict) -> tuple[dict, list[str]]:
     """설정은 SE가 왕복시켜 주는 값 > 플러그인 전용 폴더의 config.json > 기본값 순.
 
     `config.json`을 함께 보는 이유는 사용자가 손으로 고칠 수 있어야 하기 때문이다 —
     플러그인이 자기 창을 갖기 전까지는 그것이 유일한 설정 수단이다.
+
+    `(설정, 알림)`을 돌려준다. **어느 칸이 사람이 정한 것이고 어느 칸이 기본값인지**
+    알림에 담는다 — 값만 돌려주면 둘이 구분되지 않는다.
     """
     settings = dict(DEFAULT_SETTINGS)
+    notes: list[str] = []
+    chosen: set[str] = set()
 
     data_dir = request.get("pluginDataDirectory")
     if data_dir:
         config_path = Path(data_dir) / "config.json"
         if config_path.is_file():
             try:
-                settings.update(json.loads(config_path.read_text(encoding="utf-8")))
-            except (OSError, ValueError):
-                pass  # 손으로 고치다 깨졌더라도 검사는 돌아가야 한다
+                data = json.loads(config_path.read_text(encoding="utf-8"))
+            except (OSError, ValueError) as exc:
+                # 검사는 돌아가야 하지만 **무시했다는 사실은 말해야 한다.** 조용히
+                # 넘기면 쿠팡으로 적어 둔 설정이 쉼표 하나 때문에 통째로 사라지고
+                # 넷플릭스 기본값으로 도는데, 화면에는 아무 표시가 없다.
+                notes.append(f"config.json을 읽지 못해 무시했습니다({exc}). "
+                             f"기본값으로 검사합니다")
+            else:
+                if isinstance(data, dict):
+                    settings.update(data)
+                    chosen |= set(data)
+                else:
+                    notes.append("config.json이 객체가 아니라 무시했습니다. "
+                                 "기본값으로 검사합니다")
 
     stored = request.get("settings")
     if isinstance(stored, dict):
         settings.update(stored)
-    return settings
+        # **SE가 되돌려 주는 설정은 우리가 지난 실행에서 돌려준 것 전부다.** 그대로
+        # "사람이 고른 값"으로 세면 두 번째 실행부터는 아무것도 안 골라도 다 고른
+        # 것처럼 보인다. 그래서 고른 칸의 이름만 `CHOSEN_KEY`로 함께 왕복시킨다.
+        prior = stored.get(CHOSEN_KEY)
+        chosen |= set(prior) if isinstance(prior, list) else set(stored) - {CHOSEN_KEY}
+    settings[CHOSEN_KEY] = sorted(chosen)
+
+    unset = [name for name in ("platform", "kind") if name not in chosen]
+    if unset:
+        notes.append(
+            f"{'·'.join(unset)}을(를) 정한 적이 없어 기본값으로 검사했습니다"
+            f"({settings['platform']} {settings['language']} {settings['kind']}). "
+            f"발주처가 다르면 지적이 통째로 뒤집힙니다 — config.json에서 정하세요")
+    return settings, notes
 
 
 def _report_text(report: dict, settings: dict) -> str:
@@ -106,7 +145,7 @@ def _summary(report: dict, settings: dict, fixed_count: int, report_path: Path |
 
 
 def run(request: dict) -> dict:
-    settings = _load_settings(request)
+    settings, setting_notes = _load_settings(request)
 
     subtitle = request.get("subtitle") or {}
     srt_text = subtitle.get("subRip") or ""
@@ -137,7 +176,8 @@ def run(request: dict) -> dict:
     )
     report = result.extra["report"]
     report["violations"] = result.violations
-    notes = list(result.notes)
+    # 설정 알림이 먼저다 — 무엇을 기준으로 쟀는지가 결과보다 앞선다.
+    notes = setting_notes + list(result.notes)
     fixed_events = result.events
     fixed_count = sum(1 for a, b in zip(events, fixed_events) if a.text != b.text)
 

@@ -323,6 +323,9 @@ class MainWindow(QMainWindow):
         self._refresh_stages()
 
     NEW_PROFILE = "＋ 새 기준 만들기..."
+    # 규정 파일을 하나도 못 찾았을 때 놓는 자리. 발주처 이름이 아니라서 검사를 걸면
+    # 프로파일 오류로 막힌다 — 그것이 조용히 남의 기준으로 도는 것보다 낫다.
+    NO_PROFILE = "(규정 파일을 찾지 못했습니다)"
 
     def _reload_platforms(self) -> None:
         """쓸 수 있는 작업 기준을 목록에 채운다.
@@ -339,7 +342,12 @@ class MainWindow(QMainWindow):
                 platforms.append(profile["platform"])
         self.platform_box.blockSignals(True)
         self.platform_box.clear()
-        self.platform_box.addItems(platforms or ["netflix"])
+        # **없는 것을 있는 것처럼 넣지 않는다.** 전에는 프로파일을 하나도 못 찾으면
+        # `["netflix"]`를 끼워 넣어서, 규정 파일이 통째로 없는 상태인데도 넷플릭스
+        # 기준으로 검사되는 것처럼 보였다. 못 찾았으면 못 찾았다고 둔다 — 이 자리를
+        # 고른 채로 검사를 걸면 프로파일 오류가 그대로 뜨는 것이 맞다(조용히 다른
+        # 발주처 기준으로 도는 것보다 낫다). 새 기준 만들기는 아래에서 붙는다.
+        self.platform_box.addItems(platforms or [self.NO_PROFILE])
         # **원하는 만큼 기준을 더 만들 수 있어야 한다.** 딸려 온 셋에 갇히면
         # 다른 회사 일을 못 받는다(사용자 지적 2026-08-12).
         self.platform_box.addItem(self.NEW_PROFILE)
@@ -567,8 +575,14 @@ class MainWindow(QMainWindow):
             script = Path(path) if path else None
             self._note(f"대본: {script.name if script else '없음'}")
 
+        ocr_lang = getattr(self, "_prefs", {}).get("ocr_lang")
         job_rules = None
         if self.ocr_check.isChecked():
+            # **읽을 언어를 정한 적이 없으면 그렇게 말한다.** 화면 캡션을 어느
+            # 언어로 읽는지가 결과를 가르는데, 정하지 않으면 영어로 굳는다.
+            if not ocr_lang:
+                self._note("화면자막 OCR 언어를 정한 적이 없어 영어(en)로 읽습니다 "
+                           "— 툴바의 '작업 기준...'에서 바꿉니다")
             job_rules = self._job_rules()
             if job_rules.marker == "ask":
                 # whisper 전사를 다 돌리고 나서야 막으면 낭비다 — 실행 전에 막는다
@@ -586,7 +600,7 @@ class MainWindow(QMainWindow):
                                # 자막 경로가 없다 — 생성은 영상에서 시작한다.
                                work_beside=Path(self._video_path),
                                ocr=self.ocr_check.isChecked(),
-                               ocr_lang=getattr(self, "_prefs", {}).get("ocr_lang", "en"),
+                               ocr_lang=ocr_lang or "en",
                                job_rules=job_rules)
 
         # **어느 경로로 도는지 먼저 말한다.** 대본이 있으면 "전사가 왜 필요한가"라는

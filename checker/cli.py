@@ -407,11 +407,9 @@ def _run_one(path: Path, profile: dict, args, backend) -> dict | None:
             from .formality import summary as _formality_summary
             report["formality"] = {"prefer": prefer, **_formality_summary(fixed)}
 
-    # 프로파일을 잘못 고르면 지적이 통째로 뒤집힌다. 자막 표기로 유추해 어긋나면 알린다.
-    from .detect import mismatch_warning
-    warning = mismatch_warning(fixed, profile)
-    if warning:
-        report["profile_warning"] = warning
+    # 프로파일 어긋남 경고는 `pipeline.correct_and_check`가 낸다(모든 어댑터가
+    # 같은 경고를 받도록). 여기서 다시 부르지 않는다 — 전에는 **교정 뒤** 자막으로
+    # 봐서, 방금 고른 프로파일 쪽으로 표기를 바꿔 놓은 자기 출력물을 되읽고 있었다.
 
     # 검토용 자막은 **리포트가 설명하는 그 자막**에 지적을 얹는다.
     if getattr(args, "review_srt", False):
