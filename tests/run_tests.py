@@ -4362,10 +4362,11 @@ _rp_data = _rp.load()
 ok("정독 기록이 읽힌다", isinstance(_rp_data.get("sources"), list) and _rp_data["sources"])
 _rp_text, _rp_unknown = _rp.report(_rp_data)
 ok("자료마다 상태를 적어 둔다", "반영함" in _rp_text and "안읽음" in _rp_text, _rp_text[:200])
-# 지금 저장소의 실제 상태 — 작업 기본 원칙 48장 중 30장이 어느 기록에도 없다.
-# 이 숫자가 줄면(정독하면) 여기도 함께 고친다. 늘면 기록이 사라진 것이다.
-ok("미확인이 실제로 세어진다", _rp_unknown == 30, str(_rp_unknown))
-ok("미확인 id를 짚어 준다", "WORK-001" in _rp_text, _rp_text[:400])
+# 지금 저장소의 실제 상태 — 2026-09-08에 남은 30장을 정독해 미확인이 0이 됐다.
+# **0이 아니게 되면 자료가 늘었거나 기록이 사라진 것이다.** 어느 쪽이든 사람이 본다.
+ok("미확인이 없다(모든 자료에 상태가 적혀 있다)", _rp_unknown == 0, _rp_text)
+_rp_gap = _rp.missing_ids({"total": 3}, {"total": 3, "ids": {"A-1"}, "unknown": 2})
+ok("미확인 id를 짚어 준다", _rp_gap == ["A-2", "A-3"], str(_rp_gap))
 
 _rp_one = {"total": 4, "records": [{"state": "반영함", "ids": ["A-1", "A-2"]},
                                    {"state": "안읽음", "count": 1}]}
