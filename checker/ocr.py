@@ -159,8 +159,31 @@ def _find_ocr_python() -> Path:
         "다른 자리에 있으면 OCR_PYTHON 환경변수로 python.exe 경로를 알려주세요.")
 
 
+def _crop_filter(band: float | None = None, exclude_top: float | None = None) -> str:
+    """ffmpeg `-vf` 뒤에 붙일 자르기 구문. 순수 함수라 ffmpeg 없이 시험한다.
+
+    `band`는 화면 **아래** 그 비율만 남긴다(대사 하드섭 전용, `_extract_frames`
+    독스트링 참고). `exclude_top`은 화면 **위** 그 비율만 없앤다 — 방송 로고·
+    워터마크가 늘 화면 위쪽 구석에 고정으로 떠 있어서(2026-09-09, 시간추적자
+    설록 실측: "시간추적자 설록" 로고·"SBS Plus" 워터마크가 매 프레임 같이
+    읽혀 진짜 캡션과 한 덩어리로 뭉쳤다) 그 자리만 잘라내고 나머지(화면
+    아래 대부분)는 그대로 다 본다 — `band`처럼 위치를 좁게 고정하지 않는다,
+    예능 캡션이 뜨는 자리(인물 옆 중앙~오른쪽, 세로 중간)를 여전히 덮는다.
+    **둘은 같이 못 쓴다** — `band`(아래만 본다)와 `exclude_top`(위만 없앤다)을
+    같이 주면 자르는 기준이 겹쳐 뜻이 애매해진다.
+    """
+    if band and exclude_top:
+        raise ValueError("band와 exclude_top은 같이 줄 수 없습니다")
+    if band:
+        return f",crop=iw:ih*{band}:0:ih*{1 - band}"
+    if exclude_top:
+        return f",crop=iw:ih*{1 - exclude_top}:0:ih*{exclude_top}"
+    return ""
+
+
 def _extract_frames(video: Path, spans: list[tuple[int, int]], sample_fps: float,
-                    out_dir: Path, band: float | None = None) -> list[tuple[int, Path]]:
+                    out_dir: Path, band: float | None = None,
+                    exclude_top: float | None = None) -> list[tuple[int, Path]]:
     """구간마다 프레임을 뽑는다. [(시각ms, 파일경로)] — 시각순.
 
     `band`를 주면 화면 아래 그 비율만 잘라서 읽는다(`media.detect_bottom_text`의
@@ -169,10 +192,14 @@ def _extract_frames(video: Path, spans: list[tuple[int, int]], sample_fps: float
     읽으면 좌상단 작품명 워터마크·배경 간판 글자까지 섞여 카드 하나에 다 뭉친다
     (실측, 2026-08-31: 자르기 없이 돌렸더니 "모두가 자신의 무가치함과 싸우고
     있다" 워터마크가 대사 대신 계속 잡혔다). `--ocr-scan`/`--ocr`(예능 화면
-    캡션, 위치가 안 정해짐)에는 안 쓴다 — 거긴 여전히 전체를 본다.
+    캡션, 위치가 안 정해짐)에는 기본으로 안 쓴다 — 거긴 여전히 전체를 본다.
+
+    `exclude_top`은 그와 다른 축이다 — 위치를 좁히지 않고 **화면 위쪽 고정
+    자리만** 빼고 나머지는 그대로 다 본다(`_crop_filter` 참고). 예능 캡션처럼
+    위치가 안 정해진 자료에서 로고·워터마크 잡음만 줄이고 싶을 때 쓴다.
     """
     step_ms = int(1000 / sample_fps)
-    crop = f",crop=iw:ih*{band}:0:ih*{1 - band}" if band else ""
+    crop = _crop_filter(band, exclude_top)
     frames: list[tuple[int, Path]] = []
     for span_i, (start_ms, end_ms) in enumerate(spans):
         pattern = out_dir / f"span{span_i:03d}_%06d.png"
@@ -229,7 +256,8 @@ def _run_worker(frames: list[tuple[int, Path]], lang: str,
 
 
 def _checkpoint_fingerprint(video: Path, lang: str, sample_fps: float,
-                            band: float | None, full_scan: bool) -> dict:
+                            band: float | None, full_scan: bool,
+                            exclude_top: float | None = None) -> dict:
     """이 스캔을 다시 알아볼 수 있는 값들. 하나라도 바뀌면 예전 체크포인트를 못 믿는다.
 
     영상은 **크기+수정시각**으로 식별한다(경로만 보면 같은 이름의 다른
@@ -238,7 +266,7 @@ def _checkpoint_fingerprint(video: Path, lang: str, sample_fps: float,
     stat = video.stat()
     return {"video": str(Path(video).resolve()), "video_size": stat.st_size,
             "video_mtime": stat.st_mtime, "lang": lang, "sample_fps": sample_fps,
-            "band": band, "full_scan": full_scan}
+            "band": band, "full_scan": full_scan, "exclude_top": exclude_top}
 
 
 def _prepare_checkpoint(checkpoint_path: Path, fingerprint: dict) -> None:
@@ -362,7 +390,8 @@ def _enforce_no_overlap(captions: list[OcrCaption]) -> list[OcrCaption]:
 def detect_onscreen_captions(video: Path, lang: str = "en", sample_fps: float = 2.0,
                              min_confidence: float = 0.4, min_similarity: float = 0.6,
                              max_duration_ms: int | None = None, full_scan: bool = True,
-                             band: float | None = None, engine=None,
+                             band: float | None = None, exclude_top: float | None = None,
+                             engine=None,
                              checkpoint_path: Path | None = None) -> list[OcrCaption]:
     """화면 캡션을 읽는다. **보고용이다** — 규칙 4: 화면 글자 검출은 추정이다.
 
@@ -380,6 +409,12 @@ def detect_onscreen_captions(video: Path, lang: str = "en", sample_fps: float = 
     `band`는 **어디**(화면 안 위치)를 볼지 정한다. 대사 하드섭(`--ocr-hardsub`)
     전용 — 좌상단 워터마크·배경 간판 글자가 안 섞인다. 위치가 안 정해진 예능
     화면 캡션(`--ocr-scan`/`--ocr`)에는 기본으로 안 쓴다(`band=None`, 전체 프레임).
+
+    `exclude_top`(0~1)을 주면 화면 **위**쪽 그 비율만 빼고 나머지는 그대로
+    본다 — 방송 로고·워터마크가 항상 위쪽 구석에 고정으로 떠서 매 프레임
+    같이 읽히는 잡음을 줄인다(2026-09-09, 시간추적자 설록 실측 — 자세한
+    이유는 `_crop_filter` 참고). `band`와 달리 캡션이 뜨는 자리 자체를
+    좁히지 않는다. `band`와 동시에 줄 수 없다.
 
     **TC 정밀도가 필요하면 `sample_fps`를 올린다 — "경계만 따로 정밀화"는
     없다.** 한때 굵게 훑고 경계 근처만 따로 촘촘히 다시 seek해서 재확인하는
@@ -417,12 +452,14 @@ def detect_onscreen_captions(video: Path, lang: str = "en", sample_fps: float = 
 
     use_checkpoint = checkpoint_path is not None and engine is None
     if use_checkpoint:
-        fingerprint = _checkpoint_fingerprint(video, lang, sample_fps, band, full_scan)
+        fingerprint = _checkpoint_fingerprint(video, lang, sample_fps, band, full_scan,
+                                              exclude_top)
         _prepare_checkpoint(checkpoint_path, fingerprint)
 
     run = engine or (lambda fr, lg: _run_worker(fr, lg, checkpoint_path))
     with tempfile.TemporaryDirectory(prefix="stc-ocr-frames-") as tmp:
-        frames = _extract_frames(video, spans, sample_fps, Path(tmp), band=band)
+        frames = _extract_frames(video, spans, sample_fps, Path(tmp), band=band,
+                                 exclude_top=exclude_top)
         results = run(frames, lang)
 
     if use_checkpoint:

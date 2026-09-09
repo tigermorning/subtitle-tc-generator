@@ -867,7 +867,8 @@ def _ocr_scan_mode(args, ap) -> int:
             args.video, lang=args.ocr_lang, sample_fps=args.ocr_sample_fps or 2.0,
             min_confidence=args.ocr_min_confidence,
             min_similarity=args.ocr_min_similarity,
-            max_duration_ms=args.ocr_max_duration, full_scan=not args.ocr_fast)
+            max_duration_ms=args.ocr_max_duration, full_scan=not args.ocr_fast,
+            exclude_top=args.ocr_exclude_top)
     except (MediaToolUnavailable, OcrUnavailable) as exc:
         print(f"[오류] {exc}")
         return 2
@@ -1154,7 +1155,8 @@ def _generate_mode(args, ap) -> int:
                 args.video, lang=args.ocr_lang, sample_fps=args.ocr_sample_fps or 2.0,
                 min_confidence=args.ocr_min_confidence,
                 min_similarity=args.ocr_min_similarity,
-                max_duration_ms=args.ocr_max_duration, full_scan=not args.ocr_fast)
+                max_duration_ms=args.ocr_max_duration, full_scan=not args.ocr_fast,
+                exclude_top=args.ocr_exclude_top)
         except (MediaToolUnavailable, OcrUnavailable) as exc:
             print(f"[오류] {exc}")
             return 2
@@ -1376,6 +1378,12 @@ def main(argv: list[str] | None = None) -> int:
                          "읽으면 좌상단 작품명 워터마크·배경 간판 글자까지 섞인다"
                          "(실측). --ocr-scan/--ocr은 기본 None(전체 프레임) — "
                          "예능 화면 캡션은 위치가 안 정해져 있다")
+    ap.add_argument("--ocr-exclude-top", type=float, default=None,
+                    help="화면 위 이 비율만 빼고 나머지는 그대로 읽는다(0~1). "
+                         "--ocr-band와 달리 캡션 위치를 좁히지 않는다 — 방송 로고·"
+                         "워터마크가 늘 위쪽 구석에 고정으로 떠서 매 프레임 같이 "
+                         "읽히는 잡음만 줄인다(실측, 2026-09-09). --ocr-band와 "
+                         "동시에 줄 수 없다")
     ap.add_argument("--sfx-scan", action="store_true",
                     help="대사 없는 구간마다 오디오 분류 모델(AudioSet)로 무슨 "
                          "소리인지 짐작해 목록만 낸다(--video 필요). **보고용이다** "

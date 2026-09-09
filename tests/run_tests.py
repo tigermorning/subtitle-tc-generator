@@ -15,9 +15,9 @@ from checker.model import Event  # noqa: E402
 from checker.profile import _merge, _validate  # noqa: E402
 from checker.text import count_chars  # noqa: E402
 from checker.ocr import (  # noqa: E402
-    OcrCaption, _checkpoint_fingerprint, _cleanup_checkpoint, _enforce_no_overlap,
-    _prepare_checkpoint, captions_to_draft_srt_events, captions_to_events,
-    merge_captions, merge_frames,
+    OcrCaption, _checkpoint_fingerprint, _cleanup_checkpoint, _crop_filter,
+    _enforce_no_overlap, _prepare_checkpoint, captions_to_draft_srt_events,
+    captions_to_events, merge_captions, merge_frames,
 )
 from checker.position import JobRules, apply_marker, is_forced_narrative  # noqa: E402
 from checker.generate import _is_known_hallucination, has_vad_support  # noqa: E402
@@ -3586,6 +3586,19 @@ ok("실패 개수를 요약한다", "1건 실패" in _pf_report_fail)
 _pf_report_ok = _pf.report([_pf.Check("가짜 항목", True)])
 ok("전부 통과하면 그렇게 말하되 로직은 보장 안 한다고 밝힌다",
    "실행해 봐야" in _pf_report_ok)
+
+
+# --- OCR 자르기 구문(_crop_filter) ------------------------------------------
+
+ok("아무것도 안 주면 안 자른다", _crop_filter() == "")
+ok("band는 화면 아래만 남긴다", _crop_filter(band=0.25) == ",crop=iw:ih*0.25:0:ih*0.75")
+ok("exclude_top은 화면 위만 뺀다",
+   _crop_filter(exclude_top=0.2) == ",crop=iw:ih*0.8:0:ih*0.2")
+try:
+    _crop_filter(band=0.25, exclude_top=0.2)
+    ok("band·exclude_top 동시 지정은 막는다", False)
+except ValueError:
+    ok("band·exclude_top 동시 지정은 막는다", True)
 
 
 # --- 화면 캡션 OCR 병합(merge_frames) --------------------------------------
