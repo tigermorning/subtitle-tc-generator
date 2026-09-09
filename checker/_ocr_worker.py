@@ -121,8 +121,18 @@ def main() -> int:
         print(f"이전 실행 이어받음: {resumed}개 프레임은 다시 안 돕니다",
               file=sys.stderr)
 
+    # **GPU를 쓴다(2026-09-09) — CPU 고정으로 실측 10시간 걸린 것을 보고 확인.**
+    # `.venv-ocr`가 torch를 CPU판으로 설치받아 `gpu=False`가 박혀 있었다(이유를
+    # 설명하는 주석이 없었다 — 격리 venv를 처음 만들 때 그냥 기본 pip 설치가
+    # CPU판이었던 것으로 보인다). 이 컴퓨터엔 RTX 3060 Ti(8GB)가 있는데 안
+    # 쓰고 있었다. `.venv-ocr`에 CUDA torch를 재설치한 뒤(`pip install torch
+    # torchvision --index-url https://download.pytorch.org/whl/cu124`) `gpu=True`로
+    # 바꿨다 — 같은 모델·같은 인식 알고리즘이라 정확도 손해는 없다.
+    # **다른 환경(CUDA torch 없이 새로 설치한 경우)에서도 안전하다** — EasyOCR은
+    # `torch.cuda.is_available()`이 거짓이면 `gpu=True`를 줘도 경고만 찍고 CPU로
+    # 조용히 돌아간다(예외를 던지지 않는다, 직접 확인).
     try:
-        reader = easyocr.Reader([lang], gpu=False)
+        reader = easyocr.Reader([lang], gpu=True)
     except Exception as exc:
         print(f"OCR 모델을 불러오지 못했습니다: {exc}", file=sys.stderr)
         return 2
