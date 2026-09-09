@@ -4551,6 +4551,225 @@ ok("non_metric_unit이 미구현 목록에서 빠졌다",
    not any("non_metric" in name for name in _uc_unimpl), str(_uc_unimpl))
 
 
+# --- MQ4 에이전트(agent/) --------------------------------------------------
+# requirements-agent.txt(fastapi·claude-agent-sdk)가 없는 환경에서는 건너뛴다 —
+# PySide6와 같은 패턴(위 "독립 프로그램 화면" 절 참고). 실제 Claude Agent SDK를
+# 부르는 시험은 없다 — 비용이 들고 결정론적이지 않아 커밋 훅에 안 맞는다.
+# agent/loop.py::run_turn은 전부 스텁으로 갈아 끼운다. checker 연동
+# (agent/tools.py)은 SDK 없이 도는 순수 함수라 실제로 부른다.
+
+try:
+    from fastapi.testclient import TestClient  # noqa: F401
+    from agent import loop as _agent_loop  # noqa: F401
+except ImportError:
+    ok("agent 모듈 (fastapi/claude-agent-sdk 없어 건너뜀)", True)
+else:
+    import shutil as _agent_shutil
+    from pathlib import Path as _AP
+
+    from agent import tools as _at
+    from agent.api import app as _agent_app
+    from agent.state import (  # noqa: E402
+        PendingQuestion as _APQ, SessionState as _AState, Violation as _AV,
+        load as _aload, save as _asave, session_dir as _asession_dir,
+    )
+    from checker.model import Violation as _CV  # noqa: E402
+
+    # -- tools.py: 위치 중복 제거 (2026-09-09 실사용 코퍼스에서 발견한 버그) --
+    _grouped = _at._group_by_rule([
+        _CV(rule_id="S13", clause="II.8 Speaker IDs", event_index=1,
+            message="m1", line_no=2),
+        _CV(rule_id="S13", clause="II.8 Speaker IDs", event_index=1,
+            message="m2", line_no=2),  # 같은 큐에서 같은 규칙이 두 번(실제 있었다)
+        _CV(rule_id="S13", clause="II.8 Speaker IDs", event_index=2,
+            message="m3", line_no=5),
+    ])
+    ok("같은 큐·같은 규칙 중복은 위치를 한 번만 센다",
+       len(_grouped) == 1 and _grouped[0].locations == [2, 5] and _grouped[0].count == 2,
+       str(_grouped))
+
+    _grouped_none = _at._group_by_rule([
+        _CV(rule_id="S15", clause="continuity", event_index=3, message="m", line_no=None),
+    ])
+    ok("line_no 없으면 event_index로 폴백한다", _grouped_none[0].locations == [3])
+
+    # -- tools.py: 영상 필요 여부 분류(사용자 지적, 2026-09-09) --
+    _timing = _AV(rule_id="C01", article="General Requirements / Duration",
+                  count=1, severity="confirm", locations=[3])
+    _spacing = _AV(rule_id="DP07", article="실무 스펙 / 자막 간격",
+                   count=1, severity="confirm", locations=[2])
+    _speed = _AV(rule_id="S02", article="II.3 Reading Speed Limit",
+                 count=1, severity="confirm", locations=[5])
+    _line = _AV(rule_id="S16", article="General Requirements / Line Treatment",
+                count=1, severity="confirm", locations=[2])
+    _web, _video = _at.split_confirm_violations([_timing, _spacing, _speed, _line])
+    ok("타이밍·간격류는 영상 확인 대상으로 갈린다",
+       {v.rule_id for v in _video} == {"C01", "DP07"}, str(_video))
+    ok("글자수·형식류는 웹카드로 남는다",
+       {v.rule_id for v in _web} == {"S02", "S16"}, str(_web))
+
+    # -- tools.py: SE 북마크 왕복 (checker/bookmarks.py의 기존 read()로 되읽는다) --
+    import json as _bm_json  # noqa: E402
+    from checker.bookmarks import read as _bm_read  # noqa: E402
+
+    with __import__("tempfile").TemporaryDirectory() as _bmdir:
+        _bm_srt = _AP(_bmdir) / "sample.srt"
+        _bm_srt.write_text(
+            "1\n00:00:01,000 --> 00:00:03,000\n[진수] 안녕\n\n"
+            "2\n00:00:04,000 --> 00:00:06,000\n[영희] 그래\n", encoding="utf-8")
+        _bm_out = _at.export_bookmarks(_bm_srt, [(1, "[C01] 확인 필요"), (2, "[DP07] 확인 필요")])
+        ok("북마크 파일 이름이 SE가 찾는 그대로다(.SE.bookmarks — 예전엔 이게 틀렸다)",
+           _bm_out == _AP(str(_bm_srt) + ".SE.bookmarks"), str(_bm_out))
+        _bm_payload = _bm_json.loads(_bm_out.read_text(encoding="utf-8"))
+        ok("idx는 SE 기준 0-시작으로 보정된다",
+           [b["idx"] for b in _bm_payload["bookmarks"]] == [0, 1], str(_bm_payload))
+        ok("4.0.15(사용자 실사용 버전) 포맷은 idx·txt뿐이다 — ms·forced는 v5.2 전용이라 안 넣는다",
+           set(_bm_payload.keys()) == {"bookmarks"}
+           and all(set(b.keys()) == {"idx", "txt"} for b in _bm_payload["bookmarks"]),
+           str(_bm_payload))
+        _notes = _bm_read(_bm_out)
+        ok("SE 읽기 코드로 그대로 되읽힌다",
+           [(n.index, n.text) for n in _notes] ==
+           [(1, "[C01] 확인 필요"), (2, "[DP07] 확인 필요")], str(_notes))
+        ok("자막 파일과 짝지어 읽힌다(같은 폴더의 sample.srt)",
+           _notes[0].cue is not None and _notes[0].cue.text == "[진수] 안녕")
+
+    # -- tools.py: 실제 checker 연동, 원본 불변 --
+    _real_violations = _at.check(_AP("examples/ko-sdh-sample.srt"), "netflix", "sdh", "ko")
+    ok("실제 srt로 실제 검사를 돈다(모의 데이터 아님)", isinstance(_real_violations, list))
+
+    with __import__("tempfile").TemporaryDirectory() as _fixdir:
+        _src = _AP(_fixdir) / "in.srt"
+        _src.write_text("1\n00:00:01,000 --> 00:00:03,000\n그러니까...\n", encoding="utf-8")
+        _before = _src.read_text(encoding="utf-8")
+        _out = _AP(_fixdir) / "out.srt"
+        _result = _at.fix(_src, _out, "netflix", "sdh", "ko")
+        ok("fix()는 원본을 안 건드린다", _src.read_text(encoding="utf-8") == _before)
+        ok("새 파일로 쓴다", _out.is_file())
+        ok("적용한 규칙 이름이 돌아온다", "three_dot_ellipsis" in _result["applied"], str(_result))
+
+    try:
+        _at.check(_AP("examples/ko-sdh-sample.srt"), "amazon", "sdh", "ko")
+        ok("프로파일 없는 발주처는 CheckerToolError", False, "예외가 안 났다")
+    except _at.CheckerToolError:
+        ok("프로파일 없는 발주처는 CheckerToolError", True)
+
+    # -- state.py: 저장/복원 왕복 --
+    _tid = "f_pytest_state_roundtrip"
+    _agent_shutil.rmtree(_asession_dir(_tid), ignore_errors=True)
+    _st = _AState(file_id=_tid, status="waiting_for_user", platform="netflix",
+                  kind="sdh", language="ko", current_path="x.srt", outer_turns=2)
+    _st.violations = [_AV(rule_id="S02", article="a", count=1, severity="confirm", locations=[3])]
+    _st.pending_question = _APQ(question_id="q_1", version=1,
+                                cards=[{"rule_id": "S02", "article": "a", "cue_index": 3}],
+                                options=["승인", "거부", "직접수정"])
+    _st.dispositioned["S02:3"] = "SE로 이관"
+    _st.log("run_check", "위반 1종")
+    _asave(_st)
+    _loaded = _aload(_tid)
+    ok("세션 상태가 그대로 되읽힌다",
+       _loaded.status == "waiting_for_user" and _loaded.outer_turns == 2
+       and _loaded.violations[0].rule_id == "S02"
+       and _loaded.pending_question.question_id == "q_1"
+       and _loaded.dispositioned == {"S02:3": "SE로 이관"})
+    ok("history의 회차가 outer_turns를 따른다(예전엔 항상 0이었던 버그)",
+       _loaded.history[0]["loop"] == 2, str(_loaded.history))
+    ok("없는 세션은 None", _aload("f_없는세션") is None)
+    _agent_shutil.rmtree(_asession_dir(_tid), ignore_errors=True)
+
+    # -- loop.py: dispositioned 필터링(재확인 무한반복 방지) --
+    _rf_state = _AState(file_id="f_pytest_refresh", status="running",
+                        platform="netflix", kind="sdh", language="ko")
+    _rf_state.dispositioned["S02:3"] = "승인"
+    _rf_out = _agent_loop._refresh_violations(_rf_state, [
+        _AV(rule_id="S02", article="a", count=2, severity="confirm", locations=[3, 5]),
+        _AV(rule_id="S08", article="b", count=1, severity="auto", locations=[1]),
+    ])
+    ok("이미 판단된 위치는 걷어낸다",
+       [v.locations for v in _rf_out if v.rule_id == "S02"] == [[5]], str(_rf_out))
+    ok("auto 위반은 dispositioned와 무관하게 남는다",
+       any(v.rule_id == "S08" for v in _rf_out))
+
+    # -- api.py: HTTP 계약(loop.run_turn은 스텁으로 갈아 끼운다 — 비용 없음) --
+    async def _stub_run_turn(state, prompt):
+        state.status = "done"
+        state.result = {"fixed": 0, "remaining": 0, "loop_count": 0,
+                        "cost_usd": 0, "duration_ms": 0, "se_review": 0}
+
+    _real_run_turn = _agent_loop.run_turn
+    _agent_loop.run_turn = _stub_run_turn
+    try:
+        _client = TestClient(_agent_app)
+
+        _r = _client.post("/api/sessions", files={"file": ("x.txt", b"hi", "text/plain")},
+                          data={"platform": "netflix", "kind": "sdh", "language": "ko"})
+        ok("srt 아닌 파일은 400",
+           _r.status_code == 400 and _r.json()["detail"]["error"] == "invalid_srt")
+
+        _r = _client.post("/api/sessions", files={"file": ("x.srt", b"1\n", "text/plain")},
+                          data={"platform": "", "kind": "sdh", "language": "ko"})
+        ok("발주처 없으면 400",
+           _r.status_code == 400 and _r.json()["detail"]["error"] == "missing_platform")
+
+        _r = _client.post("/api/sessions", files={"file": ("x.srt", b"1\n", "text/plain")},
+                          data={"platform": "netflix", "kind": "sdh", "language": "ko"})
+        ok("정상 업로드는 201", _r.status_code == 201)
+        _fid = _r.json()["file_id"]
+        ok("스텁이 status를 정한다(SDK 호출 없음)", _r.json()["status"] == "done")
+
+        ok("모르는 세션은 404", _client.get("/api/sessions/f_없음").status_code == 404)
+
+        _r = _client.get(f"/api/sessions/{_fid}/result")
+        ok("완료면 result가 온다", _r.status_code == 200 and "report" in _r.json())
+
+        _r = _client.get(f"/api/sessions/{_fid}/download")
+        ok("완료면 다운로드된다", _r.status_code == 200)
+
+        _r = _client.get(f"/api/sessions/{_fid}/bookmarks")
+        ok("북마크 안 만든 세션은 404",
+           _r.status_code == 404 and _r.json()["detail"]["error"] == "no_bookmarks")
+
+        # 확인 카드 답변 계약 — pending_question을 직접 심어 둔다.
+        _qstate = _aload(_fid)
+        _qstate.status = "waiting_for_user"
+        _qstate.current_path = "examples/ko-sdh-sample.srt"
+        _qstate.pending_question = _APQ(question_id="q_1", version=1,
+                                        cards=[{"rule_id": "S02", "article": "a", "cue_index": 1}],
+                                        options=["승인", "거부", "직접수정"])
+        _asave(_qstate)
+
+        _r = _client.post(f"/api/sessions/{_fid}/answer",
+                          json={"question_id": "q_틀림", "version": 1, "answers": []})
+        ok("다른 질문ID로 답하면 409",
+           _r.status_code == 409 and _r.json()["detail"]["error"] == "no_pending_question")
+
+        _r = _client.post(f"/api/sessions/{_fid}/answer",
+                          json={"question_id": "q_1", "version": 99, "answers": []})
+        ok("낡은 버전이면 409(현재 버전을 알려준다)",
+           _r.status_code == 409 and _r.json()["detail"]["current_version"] == 1)
+
+        _r = _client.post(f"/api/sessions/{_fid}/answer",
+                          json={"question_id": "q_1", "version": 1,
+                                "answers": [{"rule_id": "S02", "cue_index": 1, "decision": "승인"}]})
+        ok("정상 응답은 200", _r.status_code == 200)
+
+        _r2 = _client.post(f"/api/sessions/{_fid}/answer",
+                           json={"question_id": "q_1", "version": 1,
+                                 "answers": [{"rule_id": "S02", "cue_index": 1, "decision": "거부"}]})
+        ok("같은 질문에 두 번 답해도 재처리 안 한다(멱등성)",
+           _r2.status_code == 200 and _r2.json()["dispositioned"].get("S02:1") == "승인")
+
+        _r = _client.get(f"/api/sessions/{_fid}/cue/1")
+        ok("큐 원문은 서버가 파일에서 직접 읽어 돌려준다(LLM 안 거침)",
+           _r.status_code == 200 and "[진수]" in _r.json()["text"], str(_r.json()))
+
+        _r = _client.get(f"/api/sessions/{_fid}/cue/9999")
+        ok("없는 큐는 404", _r.status_code == 404)
+    finally:
+        _agent_loop.run_turn = _real_run_turn
+        _agent_shutil.rmtree(_asession_dir(_fid), ignore_errors=True)
+
+
 # --- 결과 ---------------------------------------------------------------
 
 print(f"통과 {PASSED}건")

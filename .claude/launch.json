@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "mq4-agent",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "uvicorn", "agent.api:app", "--reload", "--port", "8765"],
+      "port": 8765
+    }
+  ]
+}

@@ -110,6 +110,40 @@ def read(path: Path) -> list[Note]:
     return notes
 
 
+def write(srt_path: Path, items: list[tuple[int, str]]) -> Path:
+    """SE가 실제로 읽는 사이드카를 쓴다.
+
+    **버전이 갈린다 — 사용자 실사용은 4.0.15다**(`CLAUDE.md` "SE 4.x"), 이
+    저장소가 개발 중 참고한 최신 소스는 v5.2 RC였다. 둘 다 파일명은
+    `<srt>.SE.bookmarks`로 같지만(`src/libse/Common/BookmarkPersistence.cs`
+    @4.0.15 vs `src/libuilogic/Common/SubtitleMarksPersistence.cs` @v5.2,
+    2026-09-09 직접 대조), **JSON 구조가 다르다**:
+
+        4.0.15   {"bookmarks":[{"idx":i,"txt":"..."}]}         — idx만, 0-기준
+        v5.2     {"bookmarks":[{"ms":..,"idx":i,"txt":".."}],"forced":[...]}
+
+    처음엔 파일명만 틀렸다(`.SE.bookmarks`가 아니라 `.bookmarks`로 썼다) —
+    그건 고쳤는데, 그다음 v5.2 구조(`ms`+`forced`)로 "개선"한 게 오히려
+    4.0.15엔 없는 필드였다. 4.0.15의 `DeserializeBookmarks`는
+    `s.Substring(s.IndexOf('['))`로 **첫 '[' 뒤 전부**를 잘라 파싱하는데,
+    `forced` 키가 뒤에 붙어 있으면 그 찌꺼기까지 파싱 대상에 들어가
+    깨진다 — `Load()`가 예외를 통째로 삼키므로("try/catch: return false")
+    또 "그냥 안 뜬다"로만 보인다. **그래서 4.0.15 포맷(ms·forced 없음)으로
+    되돌린다** — 사용자가 실제로 쓰는 버전에 맞추는 게 맞다.
+
+    `items`는 (자막 번호, 코멘트) 쌍이고 번호는 `checker.model.Event.index`
+    체계(1-기준, srt 파일 번호와 같다) — SE의 `idx`는 0-기준 배열 위치라
+    여기서 1을 뺀다.
+
+    원본 srt는 안 건드린다 — 같은 폴더에 새 파일만 만든다(CLAUDE.md 규칙7과
+    같은 원칙: 원본 불변)."""
+    srt_path = Path(srt_path)
+    out_path = Path(str(srt_path) + ".SE.bookmarks")
+    payload = {"bookmarks": [{"idx": idx - 1, "txt": txt} for idx, txt in items]}
+    out_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    return out_path
+
+
 def collect(folder: Path) -> list[Note]:
     """폴더 안의 북마크를 모두 모은다."""
     out: list[Note] = []

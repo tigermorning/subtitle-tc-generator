@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>자막 QC 승인 에이전트 — MQ4 데모</title>
+<style>
+  body { font-family: -apple-system, sans-serif; max-width: 720px; margin: 40px auto; padding: 0 16px; color: #222; }
+  h1 { font-size: 20px; }
+  .warn { background: #fff3cd; border: 1px solid #ffe08a; padding: 10px 14px; border-radius: 6px; font-size: 13px; margin-bottom: 20px; }
+  label { display: block; margin-top: 10px; font-size: 13px; }
+  select, input[type=file] { margin-top: 4px; }
+  button { margin-top: 14px; padding: 8px 16px; cursor: pointer; }
+  .card { border: 1px solid #ddd; border-radius: 6px; padding: 12px; margin: 10px 0; }
+  .card button { margin-right: 6px; margin-top: 8px; padding: 4px 10px; }
+  .log { font-size: 12px; color: #666; white-space: pre-wrap; margin-top: 20px; border-top: 1px solid #eee; padding-top: 10px; }
+  .status { font-weight: bold; }
+</style>
+</head>
+<body>
+<h1>자막 QC 승인 에이전트 (MQ4 데모)</h1>
+<div class="warn">
+  비밀 유지가 필요한 실제 납품 파일은 올리지 마세요 — 이 데모는 공개 가능한
+  자막에만 쓰세요. 처리 후 파일은 폐기됩니다.
+</div>
+
+<div id="upload-form">
+  <form id="f">
+    <label>srt 파일 <input type="file" name="file" accept=".srt" required></label>
+    <label>발주처
+      <select name="platform">
+        <option value="netflix">넷플릭스</option>
+        <option value="disney">디즈니+</option>
+        <option value="coupang">쿠팡플레이</option>
+      </select>
+    </label>
+    <label>종류
+      <select name="kind">
+        <option value="sdh">SDH</option>
+        <option value="translation">번역</option>
+      </select>
+    </label>
+    <label>언어
+      <select name="language">
+        <option value="ko">한국어</option>
+      </select>
+    </label>
+    <button type="submit">검사 시작</button>
+  </form>
+</div>
+
+<div id="session-view" style="display:none">
+  <p>상태: <span class="status" id="status-text"></span> (회차 <span id="loop-count"></span>)</p>
+  <div id="fix-approval" style="display:none">
+    <p>자동 교정 가능한 위반이 있습니다. 적용할까요?</p>
+    <button id="approve-fix-btn">자동 교정 적용</button>
+  </div>
+  <div id="cards"></div>
+  <div id="result" style="display:none"></div>
+  <div class="log" id="log"></div>
+</div>
+
+<script>
+const form = document.getElementById('f');
+const uploadView = document.getElementById('upload-form');
+const sessionView = document.getElementById('session-view');
+let pollTimer = null;
+
+function fileIdFromUrl() {
+  return new URLSearchParams(location.search).get('file_id');
+}
+
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const body = new FormData(form);
+  const res = await fetch('/api/sessions', { method: 'POST', body });
+  if (!res.ok) { alert('업로드 실패: ' + JSON.stringify(await res.json())); return; }
+  const { file_id } = await res.json();
+  history.pushState({}, '', `?file_id=${file_id}`);
+  startSession(file_id);
+});
+
+document.getElementById('approve-fix-btn').addEventListener('click', async () => {
+  const file_id = fileIdFromUrl();
+  await fetch(`/api/sessions/${file_id}/approve-fix`, { method: 'POST' });
+  refresh(file_id);
+});
+
+function startSession(file_id) {
+  uploadView.style.display = 'none';
+  sessionView.style.display = 'block';
+  refresh(file_id);
+}
+
+async function refresh(file_id) {
+  const res = await fetch(`/api/sessions/${file_id}`);
+  if (!res.ok) { alert('세션을 찾을 수 없습니다'); return; }
+  const state = await res.json();
+  render(state);
+}
+
+function render(state) {
+  clearTimeout(pollTimer);
+  document.getElementById('status-text').textContent = state.status;
+  document.getElementById('loop-count').textContent = state.outer_turns;
+  document.getElementById('log').textContent = state.history
+    .map(h => `[${h.loop}] ${h.tool}: ${h.summary}`).join('\n');
+
+  document.getElementById('fix-approval').style.display =
+    state.needs_fix_approval ? 'block' : 'none';
+
+  if (state.status === 'waiting_for_user' && state.pending_question) {
+    renderCards(state.file_id, state.pending_question);
+  } else {
+    document.getElementById('cards').innerHTML = '';
+  }
+
+  const resultEl = document.getElementById('result');
+  if (state.status === 'done') {
+    resultEl.style.display = 'block';
+    const seNote = state.result.se_review > 0
+      ? `<p style="color:#a15c00">영상 확인이 필요한 위반 ${state.result.se_review}건은 SE 북마크로 내보냈습니다 —
+         SubtitleEdit에서 이 srt를 열면 북마크로 표시됩니다.
+         <a href="/api/sessions/${state.file_id}/bookmarks"><button>북마크 파일 다운로드</button></a></p>`
+      : '';
+    resultEl.innerHTML = `<h3>완료</h3>
+      <p>고친 것 ${state.result.fixed}건, 남은 것 ${state.result.remaining}건, ${state.result.loop_count}회차 소요</p>
+      <p style="color:#666;font-size:13px">비용 $${state.result.cost_usd}, 소요시간 ${state.result.duration_ms}ms,
+         토큰 입력 ${state.result.input_tokens}/출력 ${state.result.output_tokens}</p>
+      ${seNote}
+      <a href="/api/sessions/${state.file_id}/download"><button>수정된 srt 다운로드</button></a>`;
+  } else {
+    resultEl.style.display = 'none';
+  }
+
+  if (state.status === 'error') {
+    alert('에러: ' + state.error);
+  }
+
+  if (state.status === 'running') {
+    pollTimer = setTimeout(() => refresh(state.file_id), 1000);
+  }
+}
+
+function escapeHtml(s) {
+  const div = document.createElement('div');
+  div.textContent = s;
+  return div.innerHTML;
+}
+
+async function renderCards(file_id, pq) {
+  const cardsEl = document.getElementById('cards');
+  cardsEl.innerHTML = '';
+  const answers = {};
+  const cardKey = c => `${c.rule_id}:${c.cue_index}`;
+
+  // 실제 대사 줄은 서버가 파일에서 직접 읽어 돌려준다 — 에이전트(LLM)는
+  // 이 요청을 절대 안 거친다. 원문 없이는 승인/거부 판단 자체가 불가능하므로
+  // 카드마다 병렬로 가져온다.
+  const texts = await Promise.all(pq.cards.map(async card => {
+    if (card.cue_index < 0) return null;
+    try {
+      const r = await fetch(`/api/sessions/${file_id}/cue/${card.cue_index}`);
+      return r.ok ? (await r.json()).text : null;
+    } catch (e) { return null; }
+  }));
+
+  pq.cards.forEach((card, i) => {
+    const div = document.createElement('div');
+    div.className = 'card';
+    const header = card.cue_index >= 0
+      ? `<b>${card.rule_id}</b> — ${card.article} (${card.cue_index}번 큐)`
+      : `<b>에이전트 질문</b> — ${card.article}`;
+    const text = texts[i];
+    const textHtml = text
+      ? `<div style="margin:6px 0;padding:8px;background:#f7f7f7;border-radius:4px;white-space:pre-wrap">${escapeHtml(text)}</div>`
+      : (card.cue_index >= 0 ? `<div style="color:#c00;font-size:12px">원문을 못 불러왔습니다</div>` : '');
+    div.innerHTML = header + textHtml;
+    pq.options.forEach(opt => {
+      const btn = document.createElement('button');
+      btn.textContent = opt;
+      btn.onclick = () => {
+        answers[cardKey(card)] = opt;
+        submitAnswers(file_id, pq, answers, pq.cards, cardKey);
+      };
+      div.appendChild(btn);
+    });
+    cardsEl.appendChild(div);
+  });
+}
+
+async function submitAnswers(file_id, pq, answers, cards, cardKey) {
+  const payload = {
+    question_id: pq.question_id,
+    version: pq.version,
+    answers: cards.filter(c => answers[cardKey(c)]).map(c => ({
+      rule_id: c.rule_id, cue_index: c.cue_index, decision: answers[cardKey(c)],
+    })),
+  };
+  if (payload.answers.length !== cards.length) return; // 전부 답할 때까지 대기
+  const res = await fetch(`/api/sessions/${file_id}/answer`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  render(await res.json());
+}
+
+const initial = fileIdFromUrl();
+if (initial) startSession(initial);
+</script>
+</body>
+</html>

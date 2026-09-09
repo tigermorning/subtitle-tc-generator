@@ -177,10 +177,14 @@ def check_live_counts(test_count: int | None) -> list[str]:
         value = int(match.group(1))
         if kind == "system" and value != test_count:
             bad.append(f"{name} 시험 수가 낡았다 — 적힌 값 {value}건, 지금 {test_count}건")
-        # GUI 시험은 훅이 못 센다(PySide6가 없다). 적어도 시스템 수보다는 커야 한다.
-        if kind == "gui" and value <= test_count:
+        # GUI 시험은 훅이 못 센다(PySide6가 없다). "더 많아야 한다"(>)가 아니라
+        # "적어도 시스템만큼은 돌아야 한다"(>=)가 진짜 불변식이다 — agent/처럼
+        # PySide6와 무관한 시험이 늘면 시스템·GUI 양쪽에 똑같이 더해지므로 둘이
+        # 같아지는 게 정상이다(2026-09-09 실제로 겪음 — 전엔 `<=`라 이 정상
+        # 상태를 오류로 잘못 잡았다).
+        if kind == "gui" and value < test_count:
             bad.append(f"{name} PySide6 시험 수가 시스템 시험 수({test_count})보다 "
-                       f"작거나 같다 — 적힌 값 {value}건. venv로 돌려 실제 수로 고친다")
+                       f"작다 — 적힌 값 {value}건. venv로 돌려 실제 수로 고친다")
     return bad
 
 
