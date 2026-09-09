@@ -57,6 +57,18 @@ cloudflared tunnel --url http://127.0.0.1:8765
 (`EVALUATION.md` 참고). 영구 URL이 필요하면 Render/Railway 같은 무료 PaaS에
 직접 배포한다 — 계정 생성이 필요해 이 세션이 대신 하지 못했다.
 
+## 화면 캡처 (제출용)
+
+공개 URL은 세션 종료 시 사라지므로, 4개 핵심 화면을 실제 실행 중인
+로컬 서버에서 캡처해 저장소에 남긴다.
+
+| 화면 | 캡처 |
+|---|---|
+| ① 업로드 | ![업로드](docs/screenshots/01_upload.png) |
+| ② 자동교정 승인 대기 + 실행로그 | ![자동교정 승인](docs/screenshots/02_fix_approval.png) |
+| ③ 확인 카드(대사 원문 포함) | ![확인 카드](docs/screenshots/03_confirm_cards.png) |
+| ④ 완료 화면(비용·토큰·다운로드) | ![완료 화면](docs/screenshots/04_done.png) |
+
 ## 평가 재현
 
 ```bash
