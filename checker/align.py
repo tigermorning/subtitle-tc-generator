@@ -49,6 +49,11 @@ class Segment:
     # whisper 필터는 이 값을 안 준다(2026-08-30 직접 확인, srt·json 둘 다 없음).
     # 없으면 None이다.
     confidence: float | None = None
+    # 단어(어절)마다 (시작ms, 끝ms, 글자). faster-whisper 백엔드만 채운다
+    # (`word_timestamps=True`). 재분할(`resplit.py`)이 조각 경계를 글자 수
+    # 비례가 아니라 **실제 단어가 끝난 자리**에 놓는 데 쓴다(2026-09-11).
+    # 없으면 None — 그때 재분할은 예전처럼 비례로 나눈다.
+    words: list[tuple[int, int, str]] | None = None
 
 
 @dataclass

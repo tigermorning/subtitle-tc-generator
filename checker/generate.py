@@ -473,7 +473,13 @@ def generate(video: Path, profile: dict, script: Path | None = None,
             stats["revision_stopped_because"] = later.extra["stopped_because"]
 
     before, origins = len(events), []
-    events = resplit_all(events, profile, speech, origins)
+    # 단어 시각(faster-whisper)이 있으면 재분할 경계를 거기에 놓는다. 번역·대본
+    # 경로처럼 텍스트가 바뀐 자리는 `resplit._allocate_by_words`가 글자 수로
+    # 알아채고 비례로 돌아간다.
+    word_times = [w for s in segments for w in (s.words or [])]
+    if word_times:
+        say(f"단어 시각 {len(word_times)}개 — 재분할 경계를 단어가 끝난 자리에 놓습니다")
+    events = resplit_all(events, profile, speech, origins, words=word_times or None)
     say(f"자막 {before}개를 의미 단위로 다시 나눠 {len(events)}개")
 
     # 번호가 다시 매겨졌다. 표시해 둔 자리를 새 번호로 옮긴다 — 안 하면 노트가

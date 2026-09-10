@@ -170,6 +170,36 @@ def _ascii_model_path(model_path: Path, work: Path) -> str:
     return link.name
 
 
+def _words_sidecar(cache: Path) -> Path:
+    """단어 시각은 SRT에 못 담는다 — 캐시 옆에 `<캐시>.words.json`으로 둔다."""
+    return cache.with_name(cache.name + ".words.json")
+
+
+def _write_words_sidecar(cache: Path, segments: list[Segment]) -> None:
+    import json
+    _words_sidecar(cache).write_text(json.dumps(
+        [s.words or [] for s in segments], ensure_ascii=False), encoding="utf-8")
+
+
+def _load_words_sidecar(cache: Path, segments: list[Segment], say) -> None:
+    """캐시 SRT 옆의 단어 시각을 세그먼트에 붙인다. 없거나 개수가 안 맞으면 안 붙인다
+    — 옛 캐시(단어 없음)로도 생성은 되어야 한다. 그때 재분할은 비례로 돌아간다."""
+    import json
+    side = _words_sidecar(cache)
+    if not side.is_file():
+        say("  (캐시에 단어 시각이 없습니다 — 재분할 경계는 글자 수 비례로 놓습니다)")
+        return
+    try:
+        rows = json.loads(side.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return
+    if len(rows) != len(segments):
+        say(f"  (단어 시각 {len(rows)}개가 세그먼트 {len(segments)}개와 안 맞아 안 씁니다)")
+        return
+    for seg, words in zip(segments, rows):
+        seg.words = [tuple(w) for w in words] or None
+
+
 def _ms_to_srt(ms: int) -> str:
     h, rem = divmod(ms, 3600_000)
     m, rem = divmod(rem, 60_000)
@@ -239,9 +269,12 @@ def _faster_whisper_transcribe(video: Path, language: str, use_gpu: bool,
         out = []
         for seg in raw_segments:
             text = seg.text.strip()
-            if text:
-                out.append(Segment(int(seg.start * 1000), int(seg.end * 1000),
-                                   text, confidence=seg.avg_logprob))
+            if not text:
+                continue
+            words = [(int(w.start * 1000), int(w.end * 1000), w.word.strip())
+                     for w in (seg.words or []) if w.word.strip()]
+            out.append(Segment(int(seg.start * 1000), int(seg.end * 1000),
+                               text, confidence=seg.avg_logprob, words=words or None))
         return out
     except Exception as exc:  # noqa: BLE001
         say(f"faster-whisper 전사가 실패했습니다({exc}) — 기존 방식으로 돌립니다")
@@ -275,7 +308,9 @@ def transcribe(video: Path, language: str = "auto", model: str | None = None,
 
     if cache and Path(cache).is_file():
         say(f"전사 캐시를 재사용합니다 — {cache}")
-        return _parse_srt(Path(cache).read_text(encoding="utf-8", errors="replace"))
+        segments = _parse_srt(Path(cache).read_text(encoding="utf-8", errors="replace"))
+        _load_words_sidecar(Path(cache), segments, say)
+        return segments
 
     fw_segments = _faster_whisper_transcribe(video, language, use_gpu, say)
     if fw_segments is not None:
@@ -289,6 +324,7 @@ def transcribe(video: Path, language: str = "auto", model: str | None = None,
             if cache:
                 Path(cache).parent.mkdir(parents=True, exist_ok=True)
                 Path(cache).write_text(srt_text, encoding="utf-8")
+                _write_words_sidecar(Path(cache), fw_segments)
         return fw_segments
 
     model_path = find_model(model)

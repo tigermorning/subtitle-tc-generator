@@ -30,7 +30,7 @@ import re
 
 from .model import Event
 from .profile import load_learned_chars_per_cue
-from .text import count_chars
+from .text import count_chars, strip_tags
 
 SENTENCE_END = re.compile(r"(?<=[.?!。？！])\s+")
 # 파이썬 정규식의 lookbehind는 길이가 같아야 한다. 어미 목록은 길이가 제각각이라
@@ -195,6 +195,69 @@ def _allocate(start_ms: int, end_ms: int, pieces: list[str],
 SNAP_TOLERANCE_MS = 400
 
 
+_CONTENT = re.compile(r"[\w가-힣]", re.UNICODE)
+
+
+def _content(text: str) -> str:
+    """글자 맞추기용 — 공백·문장부호·태그를 뺀 알맹이만."""
+    return "".join(_CONTENT.findall(strip_tags(text)))
+
+
+def _allocate_by_words(start_ms: int, end_ms: int, pieces: list[str],
+                       words: list[tuple[int, int, str]]) -> list[tuple[int, int]] | None:
+    """조각 경계를 **단어가 실제로 끝난 자리**에 놓는다. 못 맞추면 None.
+
+    글자 수 비례(`_allocate`)는 말의 빠르기가 고르다고 가정한다 — 사람은
+    그렇게 말하지 않는다. 정답지 대조(2026-09-11, 드라마B E02·E03)에서
+    인점이 100ms 안에 든 것이 38%뿐이었고, 그 경계 대부분이 비례로 놓인 자리였다.
+    faster-whisper가 단어마다 시각을 주므로(오차 100ms 안팎이 문헌값 — MFA 같은
+    forced aligner는 15ms대. 다음 후보) 조각 텍스트를 단어 열에 맞춰 걷고,
+    조각이 끝난 단어의 끝과 다음 단어의 시작 **한가운데**를 경계로 삼는다.
+
+    맞추는 방법은 글자 세기다: 조각의 알맹이 글자 수만큼 단어를 소비한다.
+    단어 열의 알맹이가 자막 텍스트와 10% 넘게 다르면(번역·화자명·환각 정리로
+    텍스트가 바뀐 자리) None을 돌려주고 비례로 돌아간다 — 틀린 자리에 억지로
+    맞추느니 예전 방식이 낫다(규칙 4).
+    """
+    if not words or len(pieces) < 2:
+        return None
+    inside = [w for w in words if start_ms - 50 <= (w[0] + w[1]) // 2 <= end_ms + 50]
+    if not inside:
+        return None
+    word_chars = sum(len(_content(w[2])) for w in inside)
+    text_chars = sum(len(_content(p)) for p in pieces)
+    if not word_chars or not text_chars or abs(word_chars - text_chars) > max(2, text_chars * 0.10):
+        return None
+
+    spans: list[tuple[int, int]] = []
+    cursor = start_ms
+    wi = 0
+    consumed = 0        # 지금 단어에서 이미 쓴 글자 수
+    for k, piece in enumerate(pieces):
+        need = len(_content(piece))
+        if k == len(pieces) - 1:
+            spans.append((cursor, end_ms))
+            break
+        while need > 0 and wi < len(inside):
+            avail = len(_content(inside[wi][2])) - consumed
+            if avail <= need:
+                need -= avail
+                wi += 1
+                consumed = 0
+            else:
+                consumed += need
+                need = 0
+        if wi >= len(inside):
+            return None
+        last_end = inside[wi - 1][1] if consumed == 0 and wi > 0 else inside[wi][1]
+        next_start = inside[wi][0] if consumed == 0 else inside[wi][1]
+        boundary = (last_end + next_start) // 2 if next_start > last_end else last_end
+        boundary = max(cursor + 1, min(boundary, end_ms - 1))
+        spans.append((cursor, boundary))
+        cursor = boundary
+    return spans if len(spans) == len(pieces) else None
+
+
 def _snap_to_silence(spans: list[tuple[int, int]],
                      speech: list[tuple[int, int]] | None,
                      tolerance_ms: int = SNAP_TOLERANCE_MS) -> list[tuple[int, int]]:
@@ -225,8 +288,12 @@ def resplit(event: Event, max_chars_per_cue: float,
             force_clause_split: bool = False,
             min_piece_chars: float = 0,
             clause_split_min_duration_ms: int = 0,
-            target_chars: float | None = None) -> list[Event]:
+            target_chars: float | None = None,
+            words: list[tuple[int, int, str]] | None = None) -> list[Event]:
     """자막 하나를 여러 개로 나눈다. 나눌 필요가 없으면 그대로 돌려준다.
+
+    `words`(단어 시각)가 있으면 조각 경계를 단어가 끝난 자리에 놓는다
+    (`_allocate_by_words`). 없거나 못 맞추면 글자 수 비례(`_allocate`).
 
     `force_clause_split`은 `clause_split_min_duration_ms`보다 **긴** 자막에만
     켠다(2026-08-30, 드라마B E01 재검증 — 짧은 자막까지 무조건 절
@@ -240,14 +307,17 @@ def resplit(event: Event, max_chars_per_cue: float,
     if len(pieces) <= 1:
         return [event]
 
-    spans = _snap_to_silence(_allocate(event.start_ms, event.end_ms, pieces, weights),
-                             speech)
+    spans = _allocate_by_words(event.start_ms, event.end_ms, pieces, words) if words else None
+    if spans is None:
+        spans = _allocate(event.start_ms, event.end_ms, pieces, weights)
+    spans = _snap_to_silence(spans, speech)
     return [Event(event.index, s, e, text) for (s, e), text in zip(spans, pieces)]
 
 
 def resplit_all(events: list[Event], profile: dict,
                 speech: list[tuple[int, int]] | None = None,
-                origins: list[int] | None = None) -> list[Event]:
+                origins: list[int] | None = None,
+                words: list[tuple[int, int, str]] | None = None) -> list[Event]:
     """전체를 다시 나누고 번호를 다시 매긴다.
 
     한 자막이 담을 수 있는 글자 수는 **한 줄 한계 × 줄 수**다. 줄바꿈은 이 뒤에
@@ -280,7 +350,7 @@ def resplit_all(events: list[Event], profile: dict,
     for ev in events:
         pieces = resplit(ev, max_chars_per_cue, weights, speech, force_sentence_split,
                          force_clause_split, min_piece_chars, clause_split_min_duration_ms,
-                         target_chars)
+                         target_chars, words=words)
         out.extend(pieces)
         if origins is not None:
             origins.extend([ev.index] * len(pieces))

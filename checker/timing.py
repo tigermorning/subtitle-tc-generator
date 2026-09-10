@@ -175,6 +175,10 @@ def converge(events: list[Event], limits: TimingLimits, rounds: int = 3) -> Timi
 #   아웃점: 보이스 끝난 후 0.2~0.3초 이내(6~9프레임)
 #   음성이 겹치면 다음 화자의 인점 우선
 #   아웃점 규칙보다 Minimum Duration이 우선
+# "한 칸 = 0.1초"는 SE 화면 실측으로 확인했다(2026-09-11, 배율 무관 초당 10칸).
+# "3프레임"은 30fps 환산이다 — 24fps면 2.4, 25fps면 2.5, 60fps면 6프레임. 규정은
+# **시간**이 기준이고 프레임 수는 fps에 딸린 표기다(fps별 표는
+# rules/private/sources/작업자-자료/이미지-정독.md "스포팅·장면전환").
 # **여유 값은 검출기에 딸린 값이다.** 작업자 기준(인점은 목소리 시작 2~3프레임 전,
 # 아웃점은 끝난 뒤 6~9프레임)은 *사람이 듣는 말의 경계*를 기준으로 한 것이고,
 # 검출기가 그 경계를 어디로 잡느냐는 방법마다 다르다. 같은 규정을 지키려면 검출기가
@@ -192,6 +196,13 @@ def converge(events: list[Event], limits: TimingLimits, rounds: int = 3) -> Timi
 #
 # 음량 쪽 값은 그대로 둔다 — 그 값으로 잰 결과가 이미 있고, 검출기가 다르면 근거도
 # 다시 세워야 한다.
+#
+# **이 프레임 수는 23.976fps 기준이다**(위 스윕 커밋 77dffbf가 "한 프레임 42ms"로
+# 쟀다). 영상 fps가 다르면 프레임 수를 그대로 쓰지 않고 **ms로 환산해 적용한다**
+# (2026-09-11) — 안 그러면 25fps에서는 같은 3프레임이 120ms, 60fps에서는 50ms가
+# 돼 규정(시간 기준)에서 벗어난다. 사람이 읽는 제안 문구에는 그 영상 fps로 다시
+# 환산한 프레임 수를 적는다.
+LEADS_REF_FPS = 23.976
 LEADS = {
     "loudness": {"in": (2, 3), "out": (6, 9), "tail": 6},
     "vad": {"in": (1, 2), "out": (3, 4), "tail": 0},
@@ -200,6 +211,21 @@ LEADS = {
 LEAD_IN_FRAMES = LEADS["loudness"]["in"]
 LEAD_OUT_FRAMES = LEADS["loudness"]["out"]
 SPEECH_TAIL_FRAMES = LEADS["loudness"]["tail"]
+
+
+def leads_ms(detector: str = "loudness") -> dict:
+    """LEADS의 프레임 값을 기준 fps(23.976)로 ms 환산해 돌려준다.
+
+    영상 fps와 무관하게 같은 시간 여유를 쓰기 위한 것이다. 반환:
+    ``{"in": (lo_ms, hi_ms), "out": (lo_ms, hi_ms), "tail": ms}``.
+    """
+    leads = LEADS.get(detector, LEADS["loudness"])
+    f = 1000.0 / LEADS_REF_FPS
+    return {
+        "in": (leads["in"][0] * f, leads["in"][1] * f),
+        "out": (leads["out"][0] * f, leads["out"][1] * f),
+        "tail": leads["tail"] * f,
+    }
 
 
 @dataclass
@@ -286,10 +312,15 @@ def suggest_spotting(events: list[Event], speech: list[tuple[int, int]], fps: fl
     """
     if not speech:
         return []
-    leads = LEADS.get(detector, LEADS["loudness"])
+    # 여유는 ms로 쓴다(23.976fps 실측값을 시간으로 고정) — 영상 fps가 달라도
+    # 같은 시간만큼 두기 위해서다. 문구에 적는 프레임 수만 이 영상 fps로 환산한다.
+    leads = leads_ms(detector)
     lead_in, lead_out, tail = leads["in"], leads["out"], leads["tail"]
     frame = 1000.0 / fps
     tolerance = tolerance_frames * frame
+
+    def _fr(ms: float) -> str:
+        return f"{ms / frame:.1f}".rstrip("0").rstrip(".")
     out: list[SpotSuggestion] = []
 
     ordered = sorted(events, key=lambda e: e.start_ms)
@@ -311,6 +342,23 @@ def suggest_spotting(events: list[Event], speech: list[tuple[int, int]], fps: fl
 
         # 이 자막과 겹치는 말소리 구간
         overlapping = [(s, e) for s, e in speech if e > ev.start_ms and s < ev.end_ms]
+        # **자막 밖으로 더 많이 뻗은 앞자락·뒷자락은 이웃 말의 꼬리다 — 뺀다.**
+        # whisper 세그먼트가 실제 말보다 몇백 ms~1초 일찍 시작해 **직전 말의 끝
+        # 구간**에 걸치면, 위 `min(s)`가 그 앞 구간의 시작을 "이 자막의 말소리
+        # 시작"으로 잡고 직전 아웃점에 걸려 멈춘다 — 정작 이 자막의 진짜 온셋은
+        # 그 뒤 구간에 있는데. 정답 대조(2026-09-11, 드라마B E02·E03 진짜 짝
+        # 370개): VAD 온셋은 정답 인점의 +80ms 안팎(100ms 안 42~54%)에 있었는데
+        # 우리 인점은 정답보다 가운데 -373/-475ms 일렀다(100ms 안 19~23%).
+        # 구간이 자막 안쪽보다 바깥쪽에 더 많이 걸쳐 있으면 이웃 말로 본다 —
+        # 하나뿐인 구간은 안 뺀다(자막이 그 말 위에 있는 것이 확실하다).
+        def _inside(s: int, e: int) -> int:
+            return max(0, min(e, ev.end_ms) - max(s, ev.start_ms))
+        while (len(overlapping) > 1 and overlapping[0][0] < ev.start_ms
+               and ev.start_ms - overlapping[0][0] > _inside(*overlapping[0])):
+            overlapping.pop(0)
+        while (len(overlapping) > 1 and overlapping[-1][1] > ev.end_ms
+               and overlapping[-1][1] - ev.end_ms > _inside(*overlapping[-1])):
+            overlapping.pop()
         if not overlapping:
             out.append(SpotSuggestion(ev.index, "start_ms", ev.start_ms, ev.start_ms,
                                       "이 구간에서 말소리를 찾지 못했습니다"
@@ -324,14 +372,15 @@ def suggest_spotting(events: list[Event], speech: list[tuple[int, int]], fps: fl
         if next_start is not None:
             voice_end = min(voice_end, next_start)
 
-        want_start = voice_start - lead_in[1] * frame
+        want_start = voice_start - lead_in[1]
         start_shift = abs(ev.start_ms - want_start)
         if tolerance < start_shift <= max_shift_ms:
             out.append(SpotSuggestion(
                 ev.index, "start_ms", ev.start_ms, int(round(want_start)),
-                f"말소리 시작 {voice_start}ms의 {lead_in[0]}~{lead_in[1]}프레임 앞"))
+                f"말소리 시작 {voice_start}ms의 {_fr(lead_in[0])}~{_fr(lead_in[1])}프레임"
+                f"({lead_in[0]:.0f}~{lead_in[1]:.0f}ms) 앞"))
 
-        want_end = voice_end + (tail + lead_out[0]) * frame
+        want_end = voice_end + tail + lead_out[0]
         if next_start is not None:
             # 여유 프레임을 더한 뒤에도 다음 인점을 넘지 않게 한다.
             # 간격 확보는 converge()가 따로 본다.
@@ -340,7 +389,8 @@ def suggest_spotting(events: list[Event], speech: list[tuple[int, int]], fps: fl
         if tolerance < end_shift <= max_shift_ms:
             out.append(SpotSuggestion(
                 ev.index, "end_ms", ev.end_ms, int(round(want_end)),
-                f"말소리 끝 {voice_end}ms의 {lead_out[0]}~{lead_out[1]}프레임 뒤"))
+                f"말소리 끝 {voice_end}ms의 {_fr(lead_out[0])}~{_fr(lead_out[1])}프레임"
+                f"({lead_out[0]:.0f}~{lead_out[1]:.0f}ms) 뒤"))
 
     return out
 

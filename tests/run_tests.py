@@ -921,9 +921,40 @@ ok("말소리가 없으면 그렇다고 알린다",
 ok("말소리 구간이 없으면 아무 말도 하지 않는다",
    suggest_spotting([Event(1, 0, 2000, "대사")], [], fps) == [])
 
+# whisper 세그먼트가 직전 말의 꼬리에 걸쳐 일찍 시작했을 때 — 앞자락 구간(자막
+# 밖으로 더 많이 뻗은 것)은 이웃 말로 보고 빼야 이 자막의 진짜 온셋(두 번째
+# 구간)으로 인점을 낸다(2026-09-11, 드라마B E02·E03 정답 대조).
+_tail_speech = [(1000, 3200), (4400, 6000)]          # 앞 말 1.0~3.2s, 이 말 4.4~6.0s
+_tail_sug = {s.field_name: s for s in
+             suggest_spotting([Event(1, 3000, 6000, "이 대사")], _tail_speech, fps)}
+ok("앞 말의 꼬리에 걸친 인점은 그 앞 구간이 아니라 진짜 온셋으로 낸다",
+   "start_ms" in _tail_sug and abs(_tail_sug["start_ms"].suggested - (4400 - 3 * frame)) < 2,
+   str(_tail_sug))
+_only_sug = {s.field_name: s for s in
+             suggest_spotting([Event(1, 3000, 3500, "짧은 대사")], [(1000, 3200)], fps)}
+ok("겹치는 구간이 하나뿐이면 밖으로 뻗어 있어도 안 뺀다(그 구간 끝 3200 기준으로 아웃점을 낸다)",
+   "end_ms" in _only_sug and "3200ms" in _only_sug["end_ms"].reason, str(_only_sug))
+
 original = Event(1, 3000, 5000, "대사")
 suggest_spotting([original], speech, fps)
 ok("제안은 원본을 바꾸지 않는다", original.start_ms == 3000 and original.end_ms == 5000)
+
+# **여유는 시간 기준이다 — fps가 달라도 같은 ms를 둔다**(2026-09-11). LEADS의
+# 프레임 수는 23.976fps로 잰 값이라, 60fps 영상에 프레임 그대로 적용하면 여유가
+# 절반 아래(3프레임=50ms)로 줄어 규정(인점 0.1초 이내·아웃점 0.2~0.3초)에서
+# 벗어난다. 작업자 자료의 "3프레임"도 30fps 환산일 뿐 기준은 0.1초다.
+from checker.timing import leads_ms  # noqa: E402
+
+_ref = suggest_spotting([Event(1, 3000, 5500, "대사")], speech, 23.976)
+_hi = suggest_spotting([Event(1, 3000, 5500, "대사")], speech, 60.0)
+_ref_by = {s.field_name: s.suggested for s in _ref}
+_hi_by = {s.field_name: s.suggested for s in _hi}
+ok("60fps에서도 인점 제안값이 23.976fps와 같다(ms 기준)",
+   _ref_by.get("start_ms") == _hi_by.get("start_ms"), f"{_ref_by} vs {_hi_by}")
+ok("60fps에서도 아웃점 제안값이 23.976fps와 같다(ms 기준)",
+   _ref_by.get("end_ms") == _hi_by.get("end_ms"), f"{_ref_by} vs {_hi_by}")
+ok("leads_ms는 23.976fps 프레임값을 ms로 환산한다(인점 상한 3프레임 ≈ 125ms)",
+   abs(leads_ms()["in"][1] - 3 * 1000 / 23.976) < 0.01)
 
 # **인점이 이전 자막 끝보다 앞으로 끌려가지 않는다.** 대칭인 상한(다음 인점을
 # 안 넘는 것)은 있었는데 하한이 없었다 — 예능처럼 끊김 없이 오래 이어지는
@@ -1077,6 +1108,20 @@ speech = [(0, 1800), (2600, 6000)]
 out = resplit(Event(1, 0, 6000, "안녕하세요. 오늘 날씨가 참 좋습니다."), 12, W2, speech)
 ok("침묵 자리로 경계를 당긴다", 1800 <= out[0].end_ms <= 2600,
    str([(e.start_ms, e.end_ms) for e in out]))
+
+# 단어 시각이 있으면 조각 경계를 단어가 끝난 자리에 놓는다(2026-09-11) — 글자 수
+# 비례는 말 빠르기가 고르다고 가정하는데 사람은 그렇게 말하지 않는다.
+from checker.resplit import _allocate_by_words
+_wd = [(0, 400, "안녕하세요"), (500, 800, "오늘"), (1200, 1500, "날씨가"), (1600, 2000, "좋네요")]
+ok("단어 시각으로 나누면 경계가 두 단어 사이 한가운데다",
+   _allocate_by_words(0, 2000, ["안녕하세요 오늘", "날씨가 좋네요"], _wd) == [(0, 1000), (1000, 2000)],
+   str(_allocate_by_words(0, 2000, ["안녕하세요 오늘", "날씨가 좋네요"], _wd)))
+ok("단어 열이 텍스트와 안 맞으면(글자 수 10% 넘게 차이) 포기한다 — 비례로 돌아간다",
+   _allocate_by_words(0, 2000, ["안녕하세요 오늘 날씨가", "좋네요 정말 너무 많이 더"], _wd) is None)
+_wd_ev = resplit(Event(1, 0, 2000, "안녕하세요 오늘 날씨가 좋네요"), 8, None, None, words=_wd)
+ok("resplit이 단어 시각을 받으면 비례(1000 근처가 아닌 글자 비례 자리) 대신 단어 경계를 쓴다",
+   [e.start_ms for e in _wd_ev] == [0, 1000] and [e.end_ms for e in _wd_ev] == [1000, 2000],
+   str([(e.start_ms, e.end_ms, e.text) for e in _wd_ev]))
 
 out = resplit_all([Event(1, 0, 6000, "안녕하세요. 오늘 날씨가 좋습니다."),
                    Event(2, 7000, 9000, "짧은 줄")], ko_sdh)
