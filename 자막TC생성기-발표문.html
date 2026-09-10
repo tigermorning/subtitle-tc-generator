@@ -66,9 +66,7 @@ svg{width:100%;height:auto;display:block;min-width:620px;
 .lbs{font-size:12px;fill:var(--ink-soft)}
 .lg{font-size:12px;fill:var(--ink-soft)}
 .cap{font-size:12px;fill:var(--ink-soft)}
-.cap-goal{font-size:12px;font-weight:600;fill:var(--accent)}
 .ar{stroke:var(--arrow);stroke-width:1.4;fill:none}
-.dash{stroke:var(--arrow);stroke-width:1.4;fill:none;stroke-dasharray:4 4}
 .qa{margin-top:52px}
 .qa h2{font-family:"Gowun Batang",serif;font-size:24px;font-weight:700;margin:0 0 6px}
 .qa .lede{margin:0 0 26px;color:var(--ink-soft);font-size:15px}
@@ -125,106 +123,91 @@ td em{font-style:normal;color:var(--ink-soft)}
   <div class="say">
     <figure class="figure">
     <figcaption>PIPELINE</figcaption>
-    <svg viewBox="0 0 680 718" role="img" aria-labelledby="plt pld">
+    <svg viewBox="0 0 680 700" role="img" aria-labelledby="plt pld">
       <title id="plt">자막 및 TC 생성기 작업 구조</title>
-      <desc id="pld">발주를 확인하는 것이 맨 앞이다. 어느 OTT 규정을 따르는지와 함께, 어느 작업을 맡는 발주인지가 이 시점에 정해진다. 그 아래로 세 갈래가 나란히 선다. TC 작업은 전사, 대조, 스포팅으로 자막이 뜨고 지는 자리를 잡는다. 번역 자막 작업은 번역, 재분할, 글자 수 검사로 가고 장면전환을 넣지 않는다. SDH 자막 작업은 화자명과 효과음, 장면전환, 글자 수 검사로 간다. 세 갈래는 각각 독립된 발주라 TC만 의뢰가 들어오기도 하고, 필요하면 TC를 끝낸 뒤 번역이나 SDH로 이어서 하기도 한다. 갈래마다 전문 분야가 다른 데다, 미디어 일이라 납기가 촉박해 여러 사람이 동시에 붙어야 제때 완성품이 나오기 때문에 지금까지 따로 발주돼 왔다. 이 도구의 목표는 한 사람이 TC와 SDH, 또는 TC와 번역을 통째로 맡는 것이다. 만드는 일은 도구가 하고, 그 사람이 하는 일은 도구가 낸 결과를 감수하는 것뿐이다.</desc>
+      <desc id="pld">발주처 확인 뒤 TC 작업(전사, 대조, 스포팅)이 오고, 거기서 번역 자막 작업(번역, 재분할, 글자 수 검사)과 SDH 자막 작업(화자명·효과음, 장면전환, 글자 수 검사)으로 갈라진다. 세 작업은 각각 따로 발주된다.</desc>
       <defs><marker id="ar" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>
 
       <g class="n-rule">
-        <rect x="200" y="36" width="280" height="62" rx="6"/>
-        <text class="t" x="340" y="58" text-anchor="middle" dominant-baseline="central">발주 확인</text>
-        <text class="s" x="340" y="79" text-anchor="middle" dominant-baseline="central">어느 OTT 규정인지 · 어느 작업 발주인지</text>
+        <rect x="240" y="40" width="200" height="56" rx="6"/>
+        <text class="t" x="340" y="58" text-anchor="middle" dominant-baseline="central">발주처 확인</text>
+        <text class="s" x="340" y="76" text-anchor="middle" dominant-baseline="central">어느 OTT 규정인지</text>
       </g>
-      <line class="ar" x1="340" y1="98" x2="340" y2="122"/>
-      <line class="ar" x1="123" y1="122" x2="557" y2="122"/>
-      <line class="ar" x1="123" y1="122" x2="123" y2="150" marker-end="url(#ar)"/>
-      <line class="ar" x1="340" y1="122" x2="340" y2="150" marker-end="url(#ar)"/>
-      <line class="ar" x1="557" y1="122" x2="557" y2="150" marker-end="url(#ar)"/>
+      <line class="ar" x1="340" y1="96" x2="340" y2="126" marker-end="url(#ar)"/>
 
-      <rect class="lane" x="20" y="160" width="206" height="262" rx="10"/>
-      <text class="lb" x="38" y="186" dominant-baseline="central">TC 작업</text>
-      <text class="lbs" x="38" y="206" dominant-baseline="central">내용을 몰라도 된다</text>
+      <rect class="lane" x="40" y="136" width="600" height="120" rx="10"/>
+      <text class="lb" x="60" y="158" dominant-baseline="central">TC 작업</text>
+      <text class="lbs" x="142" y="159" dominant-baseline="central">내용을 몰라도 되는 작업</text>
       <g class="n-ai">
-        <rect x="38" y="226" width="170" height="52" rx="6"/>
-        <text class="t" x="123" y="244" text-anchor="middle" dominant-baseline="central">전사</text>
-        <text class="s" x="123" y="262" text-anchor="middle" dominant-baseline="central">whisper로 받아쓰기</text>
+        <rect x="60" y="176" width="160" height="56" rx="6"/>
+        <text class="t" x="140" y="194" text-anchor="middle" dominant-baseline="central">전사</text>
+        <text class="s" x="140" y="212" text-anchor="middle" dominant-baseline="central">whisper로 받아쓰기</text>
       </g>
-      <line class="ar" x1="123" y1="278" x2="123" y2="288" marker-end="url(#ar)"/>
       <g class="n-rule">
-        <rect x="38" y="288" width="170" height="52" rx="6"/>
-        <text class="t" x="123" y="306" text-anchor="middle" dominant-baseline="central">대조</text>
-        <text class="s" x="123" y="324" text-anchor="middle" dominant-baseline="central">대본과 맞춰 표시</text>
+        <rect x="260" y="176" width="160" height="56" rx="6"/>
+        <text class="t" x="340" y="194" text-anchor="middle" dominant-baseline="central">대조</text>
+        <text class="s" x="340" y="212" text-anchor="middle" dominant-baseline="central">대본과 맞춰 표시</text>
       </g>
-      <line class="ar" x1="123" y1="340" x2="123" y2="350" marker-end="url(#ar)"/>
       <g class="n-rule">
-        <rect x="38" y="350" width="170" height="52" rx="6"/>
-        <text class="t" x="123" y="368" text-anchor="middle" dominant-baseline="central">스포팅</text>
-        <text class="s" x="123" y="386" text-anchor="middle" dominant-baseline="central">인·아웃점 확정</text>
+        <rect x="460" y="176" width="160" height="56" rx="6"/>
+        <text class="t" x="540" y="194" text-anchor="middle" dominant-baseline="central">스포팅</text>
+        <text class="s" x="540" y="212" text-anchor="middle" dominant-baseline="central">인·아웃점 확정</text>
       </g>
+      <line class="ar" x1="228" y1="204" x2="252" y2="204" marker-end="url(#ar)"/>
+      <line class="ar" x1="428" y1="204" x2="452" y2="204" marker-end="url(#ar)"/>
 
-      <rect class="lane" x="237" y="160" width="206" height="262" rx="10"/>
-      <text class="lb" x="255" y="186" dominant-baseline="central">번역 자막 작업</text>
-      <text class="lbs" x="255" y="206" dominant-baseline="central">장면전환 안 넣음</text>
+      <line class="ar" x1="340" y1="256" x2="340" y2="284"/>
+      <line class="ar" x1="180" y1="284" x2="500" y2="284"/>
+      <line class="ar" x1="180" y1="284" x2="180" y2="312" marker-end="url(#ar)"/>
+      <line class="ar" x1="500" y1="284" x2="500" y2="312" marker-end="url(#ar)"/>
+
+      <rect class="lane" x="40" y="322" width="280" height="310" rx="10"/>
+      <text class="lb" x="60" y="348" dominant-baseline="central">번역 자막 작업</text>
+      <text class="lbs" x="60" y="368" dominant-baseline="central">장면전환 안 넣음</text>
       <g class="n-ai">
-        <rect x="255" y="226" width="170" height="52" rx="6"/>
-        <text class="t" x="340" y="244" text-anchor="middle" dominant-baseline="central">번역</text>
-        <text class="s" x="340" y="262" text-anchor="middle" dominant-baseline="central">로컬 Ollama로</text>
+        <rect x="60" y="384" width="240" height="56" rx="6"/>
+        <text class="t" x="180" y="402" text-anchor="middle" dominant-baseline="central">번역</text>
+        <text class="s" x="180" y="420" text-anchor="middle" dominant-baseline="central">로컬 Ollama로</text>
       </g>
-      <line class="ar" x1="340" y1="278" x2="340" y2="288" marker-end="url(#ar)"/>
+      <line class="ar" x1="180" y1="444" x2="180" y2="460" marker-end="url(#ar)"/>
       <g class="n-rule">
-        <rect x="255" y="288" width="170" height="52" rx="6"/>
-        <text class="t" x="340" y="306" text-anchor="middle" dominant-baseline="central">재분할</text>
-        <text class="s" x="340" y="324" text-anchor="middle" dominant-baseline="central">의미 단위로 끊기</text>
+        <rect x="60" y="470" width="240" height="56" rx="6"/>
+        <text class="t" x="180" y="488" text-anchor="middle" dominant-baseline="central">재분할</text>
+        <text class="s" x="180" y="506" text-anchor="middle" dominant-baseline="central">의미 단위로 끊기</text>
       </g>
-      <line class="ar" x1="340" y1="340" x2="340" y2="350" marker-end="url(#ar)"/>
+      <line class="ar" x1="180" y1="530" x2="180" y2="546" marker-end="url(#ar)"/>
       <g class="n-rule">
-        <rect x="255" y="350" width="170" height="52" rx="6"/>
-        <text class="t" x="340" y="368" text-anchor="middle" dominant-baseline="central">글자 수 검사</text>
-        <text class="s" x="340" y="386" text-anchor="middle" dominant-baseline="central">읽기 속도·줄 수</text>
+        <rect x="60" y="556" width="240" height="56" rx="6"/>
+        <text class="t" x="180" y="574" text-anchor="middle" dominant-baseline="central">글자 수 검사</text>
+        <text class="s" x="180" y="592" text-anchor="middle" dominant-baseline="central">읽기 속도·줄 수</text>
       </g>
 
-      <rect class="lane" x="454" y="160" width="206" height="262" rx="10"/>
-      <text class="lb" x="472" y="186" dominant-baseline="central">SDH 자막 작업</text>
-      <text class="lbs" x="472" y="206" dominant-baseline="central">장면전환 넣음</text>
+      <rect class="lane" x="360" y="322" width="280" height="310" rx="10"/>
+      <text class="lb" x="380" y="348" dominant-baseline="central">SDH 자막 작업</text>
+      <text class="lbs" x="380" y="368" dominant-baseline="central">장면전환 넣음</text>
       <g class="n-ai">
-        <rect x="472" y="226" width="170" height="52" rx="6"/>
-        <text class="t" x="557" y="244" text-anchor="middle" dominant-baseline="central">화자명·효과음</text>
-        <text class="s" x="557" y="262" text-anchor="middle" dominant-baseline="central">짐작해 후보만 냄</text>
+        <rect x="380" y="384" width="240" height="56" rx="6"/>
+        <text class="t" x="500" y="402" text-anchor="middle" dominant-baseline="central">화자명·효과음</text>
+        <text class="s" x="500" y="420" text-anchor="middle" dominant-baseline="central">짐작해 후보만 냄</text>
       </g>
-      <line class="ar" x1="557" y1="278" x2="557" y2="288" marker-end="url(#ar)"/>
+      <line class="ar" x1="500" y1="444" x2="500" y2="460" marker-end="url(#ar)"/>
       <g class="n-rule">
-        <rect x="472" y="288" width="170" height="52" rx="6"/>
-        <text class="t" x="557" y="306" text-anchor="middle" dominant-baseline="central">장면전환</text>
-        <text class="s" x="557" y="324" text-anchor="middle" dominant-baseline="central">SDH에만 넣는다</text>
+        <rect x="380" y="470" width="240" height="56" rx="6"/>
+        <text class="t" x="500" y="488" text-anchor="middle" dominant-baseline="central">장면전환</text>
+        <text class="s" x="500" y="506" text-anchor="middle" dominant-baseline="central">SDH에만 넣는다</text>
       </g>
-      <line class="ar" x1="557" y1="340" x2="557" y2="350" marker-end="url(#ar)"/>
+      <line class="ar" x1="500" y1="530" x2="500" y2="546" marker-end="url(#ar)"/>
       <g class="n-rule">
-        <rect x="472" y="350" width="170" height="52" rx="6"/>
-        <text class="t" x="557" y="368" text-anchor="middle" dominant-baseline="central">글자 수 검사</text>
-        <text class="s" x="557" y="386" text-anchor="middle" dominant-baseline="central">읽기 속도·줄 수</text>
+        <rect x="380" y="556" width="240" height="56" rx="6"/>
+        <text class="t" x="500" y="574" text-anchor="middle" dominant-baseline="central">글자 수 검사</text>
+        <text class="s" x="500" y="592" text-anchor="middle" dominant-baseline="central">읽기 속도·줄 수</text>
       </g>
 
-      <text class="lbs" x="40" y="448" dominant-baseline="central">세 갈래는 각각 따로 발주된다 — TC만 의뢰가 들어오기도 하고, 필요하면 이어서 한다</text>
-      <g class="n-rule"><rect x="40" y="484" width="130" height="32" rx="6"/>
-        <text class="t" x="105" y="501" text-anchor="middle" dominant-baseline="central">TC 작업</text></g>
-      <line class="dash" x1="170" y1="500" x2="206" y2="500"/>
-      <line class="dash" x1="206" y1="482" x2="206" y2="518"/>
-      <line class="dash" x1="206" y1="482" x2="246" y2="482" marker-end="url(#ar)"/>
-      <line class="dash" x1="206" y1="518" x2="246" y2="518" marker-end="url(#ar)"/>
-      <g class="n-rule"><rect x="250" y="466" width="160" height="32" rx="6"/>
-        <text class="t" x="330" y="483" text-anchor="middle" dominant-baseline="central">번역 자막 작업</text></g>
-      <g class="n-rule"><rect x="250" y="502" width="160" height="32" rx="6"/>
-        <text class="t" x="330" y="519" text-anchor="middle" dominant-baseline="central">SDH 자막 작업</text></g>
-
-      <g class="n-ai"><rect x="40" y="566" width="12" height="12" rx="2"/></g>
-      <text class="lg" x="60" y="572" dominant-baseline="central">AI 모델이 하는 일</text>
-      <g class="n-rule"><rect x="192" y="566" width="12" height="12" rx="2"/></g>
-      <text class="lg" x="212" y="572" dominant-baseline="central">규칙·알고리즘이 하는 일</text>
-      <text class="cap" x="40" y="602" dominant-baseline="central">번역이냐 SDH냐는 TC를 끝내고 고르는 게 아니라 발주 때 이미 정해져 있다 — 아예 다른 종류의 일이다</text>
-      <text class="cap" x="40" y="624" dominant-baseline="central">따로 발주돼 온 이유 — 갈래마다 전문 분야가 다르다</text>
-      <text class="cap" x="40" y="646" dominant-baseline="central">미디어 일이라 납기가 촉박해, 완성품을 제때 내려면 여러 사람이 동시에 붙어야 했다</text>
-      <text class="cap-goal" x="40" y="672" dominant-baseline="central">이 도구의 목표 — 한 사람이 TC+SDH나 TC+번역을 통째로 맡는다</text>
-      <text class="cap-goal" x="40" y="694" dominant-baseline="central">만드는 일은 도구가 빠르고 정확하게 하고, 그 사람이 하는 일은 감수뿐이다</text>
+      <g class="n-ai"><rect x="40" y="644" width="12" height="12" rx="2"/></g>
+      <text class="lg" x="60" y="650" dominant-baseline="central">AI 모델이 하는 일</text>
+      <g class="n-rule"><rect x="192" y="644" width="12" height="12" rx="2"/></g>
+      <text class="lg" x="212" y="650" dominant-baseline="central">규칙·알고리즘이 하는 일</text>
+      <text class="cap" x="40" y="676" dominant-baseline="central">세 작업은 각각 따로 발주된다 — TC만, 번역만, SDH만 받는 경우가 모두 있다</text>
     </svg>
   </figure>
     <p>그래서 영상 하나 받으면 제일 먼저 이게 지금 어디서 상영 중인지부터 확인해요. 발주처가 정해져야 뒤에 따라야 할 규정이 정해지거든요.</p>
