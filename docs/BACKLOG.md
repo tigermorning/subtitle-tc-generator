@@ -3,9 +3,70 @@
 이 파일은 **작업을 이어받기 위해** 있다. `CLAUDE.md`가 "이미 틀렸다가 바로잡은 규칙"을
 담고, 이 파일은 **아직 안 한 것과 왜 그 순서인지**를 담는다.
 
-마지막 갱신: **2026-08-26** · 시험 755건 통과(시스템 파이썬) · 작업 트리에 커밋 대기 중인
-변경 있음(`checker/timing.py`, `rules/SCHEMA.md`, `CLAUDE.md`, 문서·스킬 신설 — 아래
-§0-C)
+마지막 갱신: **2026-09-11** · 시험 1099건 통과(시스템 파이썬) · 작업 트리 깨끗함
+(마지막 커밋 `e26de14`). **다음 세션은 §0-T부터.**
+
+## 0-T. 2026-09-11 — TC 정밀도 갈래: 끝낸 것과 내일 이어서 할 것
+
+출발 질문(사용자): "whisper 전사를 타임코드로 연결할 수 있나, 시간을 잘게 쪼개면
+되나, AI Hub 같은 데서 비슷한 데이터를 찾아 달라." 답은 **잘게 쪼개기가 아니라
+VAD 온셋 + 단어 시각 + 붙임 규칙**이었다. 하루에 인점 100ms 안 38→55%, 아웃점
+33→41%(드라마B E02·E03 진짜 짝 기준).
+
+**끝낸 것 (커밋 순)**
+
+| 커밋 | 무엇 | 근거·효과 |
+|---|---|---|
+| `bcd6c7e` | `vad.MIN_SILENCE_MS` 250→100 | Seoul Corpus 240파일 스윕(`tools/vad_sweep.py --corpus`). 95% 꼬리 2.2s→170ms |
+| `d2aaeda` | `timing.suggest_spotting` 이웃 말 꼬리 제외 + `resplit._allocate_by_words`(whisper 단어 시각, 캐시 옆 `.words.json`) | 인점 \|중앙\| 248→79ms |
+| `bb9dd6b` | 아웃점 여유 (6,9) 시도 → 되돌림 | 분포가 둘로 갈려 값 하나로 못 고침 |
+| `343ca9e` | `timing.CHAIN_SILENCE_MS=800` — 붙는 자막은 다음 인점까지 채움, `apply_spotting` 인점 먼저 | 사용자 규칙 "붙는 자막 없을 때만 0.1~0.2초 여유". 아웃점 33→41% |
+| `e26de14` | MFA forced aligner 실측·기각 | 인·아웃점에서 VAD보다 낫지 않음. `tools/mfa_probe.py` |
+
+상세 근거는 전부 `docs/HANDOFF.md` 6절(버그 3건)·8절(Seoul Corpus·MFA 표).
+메모리: `project_seoul_corpus_vad_truth`, `feedback_tc_margin_only_when_not_chained`,
+`project_mfa_aligner_rejected`.
+
+**남아 있는 것 — 이 순서로**
+
+1. **IWSLT ITV dev2025 받아 `정답지-학습` A층** (사용자 제안 순서 1번, 아직 안 함).
+   https://iwslt.org/2025/subtitling — ITV Studios 7편 ~7시간, 영어 원음 + 독일어
+   전문 자막 SRT(TC 포함). **비상업 조건** — `rules/learned/`에 넣으면 출처를 적고
+   `docs/COMMERCIALIZATION.md`에 표시. 한국어가 아니므로 언어 층은 안 옮기고 **TC
+   층만**(붙임 문턱·여유·VAD 온셋 대비) — 규칙 12의 "다른 발주처 2편째" 근거.
+   dev2026(3편)·Asharq-Bloomberg(뉴스)·YODAS(유튜브)도 같은 페이지(2026).
+2. **AI Hub 71379 방송콘텐츠 한-영 통번역 음성** 샘플 → `tools/timestamp_origin.py`.
+   JSON `원시시작`/`원시끝`이 말소리 경계인지 분할점인지(71699은 분할점이었다).
+   **로그인 필요 — 사용자가 받아 줘야 한다.** 판별 통과하면 한국어 예능·드라마 VAD
+   정답 2편째.
+3. **AI Hub 463 방송 대화체 10,000h** 데이터 설명서(로그인)로 타임스탬프 유무 확인.
+4. **문턱값 0.5 한국어 근거** — 아직 드라마B 한 작품. Seoul Corpus는 차이가 작아
+   방향을 못 줬다(0.3~0.7에서 인점 중앙 20→27ms).
+5. **오늘 고침을 다른 발주처·장르로 재검증** — 넷플릭스 예능 도라이버 15·16회는
+   영상이 이미 없다(규칙 13). 정답 영상이 남아 있는 것부터 `rules/private/corpus/
+   corpus_status.yaml`에서 찾아 `--against`. 붙임 문턱 800ms가 예능에서도 맞는지가
+   핵심 — 예능은 겹침 발화가 많아 다를 수 있다.
+6. 이른 아웃점 나머지(가운데 -41/-38ms, 100ms 안 41%) — 조건 더 가르기 전에 5번
+   먼저. 상수 만지기는 그만(스킬 §6).
+
+**이어받는 법**
+
+- 정답 대조 재실행(회차당 ~100초, 전사 캐시 재사용):
+  scratchpad는 세션이 끝나면 사라지므로 아래를 새로 쓴다 — `generate(video, profile,
+  language="ko", use_gpu=True, transcript_cache=".tmp/mik_e02_transcript_cache_v2.srt")`
+  → `to_srt` → `python -m checker <초안> --against <정답> --eval-json <out> -p disney -l ko -k sdh`.
+  진짜 짝 필터(유사도≥0.5·정답≥8자·SFX 제외)는 스킬 `정답지-대조-진단` §4.
+- 캐시: `.tmp/mik_e0{2,3}_transcript_cache_v2.srt` + `.words.json`(단어 시각 포함).
+  옛 `_cache.srt`(단어 없음)는 재분할이 비례로 돌아가므로 쓰지 않는다.
+- Seoul Corpus 스윕: `python tools/seoul_corpus_to_json.py <TextGrid폴더> <flac폴더>` →
+  `python tools/vad_sweep.py --corpus <flac폴더>`(240파일 ~11분). 자료는 저장소 밖
+  (openslr.org/113, label 57MB·sound 2.5GB) — scratchpad 사본은 사라졌다.
+- MFA: WSL Ubuntu `~/miniforge3/envs/mfa311`(python-mecab-ko 포함), 코퍼스
+  `.tmp/mfa/E0{2,3}/{corpus,aligned}`. `tools/mfa_probe.py prep|eval`. 안 붙이기로
+  했으니 지워도 된다.
+- 규칙 17대로 먼저 열 것: `docs/HANDOFF.md` 6·8절, `rules/private/corpus/
+  corpus_status.yaml`의 `disney/drama` 항목(2026-09-11 라운드 기록됨).
+
 
 ## 0-S. 2026-09-10 — 발주처 규정 비공개 분리, 그리고 남은 결정 하나
 
