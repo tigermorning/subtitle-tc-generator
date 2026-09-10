@@ -4800,6 +4800,55 @@ else:
         _agent_shutil.rmtree(_asession_dir(_fid), ignore_errors=True)
 
 
+# --- 전사 백엔드 비교 도구(tools/asr_backend_compare.py) --------------------
+# 모델을 부르는 자리는 시험하지 않는다 — GPU와 3GB 가중치가 필요해 커밋 훅에
+# 안 맞는다(agent/ 절과 같은 판단). 창을 만들고 출력을 가르는 **순수 함수**만
+# 본다. 여기가 틀리면 비교 결과 전체가 조용히 틀어진다.
+
+from tools.asr_backend_compare import (parse_srt as _abc_parse,
+                                       split_language_tag as _abc_split,
+                                       write_srt as _abc_write,
+                                       ms_to_srt as _abc_ms)
+
+_abc_srt = """1
+00:00:11,400 --> 00:00:15,380
+첫 줄
+이어지는 줄
+
+2
+00:01:02,000 --> 00:01:03,500
+둘째
+
+3
+00:02:00,000 --> 00:02:01,000
+
+"""
+_abc_cues = _abc_parse(_abc_srt)
+ok("창 파서가 시간 없는·본문 없는 블록을 버린다", len(_abc_cues) == 2, str(_abc_cues))
+ok("창 파서가 시각을 ms로 옮긴다",
+   _abc_cues[0][:2] == (11400, 15380), str(_abc_cues[0]))
+ok("여러 줄 본문을 한 줄로 잇는다",
+   _abc_cues[0][2] == "첫 줄 이어지는 줄", _abc_cues[0][2])
+ok("시각 왕복이 값을 지킨다", _abc_ms(3_723_456) == "01:02:03,456", _abc_ms(3_723_456))
+
+ok("판정 언어 태그를 본문과 가른다",
+   _abc_split("language Korean<asr_text>안녕") == ("Korean", "안녕"),
+   str(_abc_split("language Korean<asr_text>안녕")))
+ok("태그가 없으면 통째로 본문으로 둔다(조용히 자르지 않는다)",
+   _abc_split("그냥 텍스트") == ("?", "그냥 텍스트"),
+   str(_abc_split("그냥 텍스트")))
+
+_abc_tmp = Path(tempfile.mkdtemp()) / "out.srt"
+_abc_n = _abc_write(_abc_tmp, [(0, 1000, "가"), (1000, 2000, "  "), (2000, 3000, "나")])
+ok("빈 자막은 버리고 번호를 다시 매긴다", _abc_n == 2, str(_abc_n))
+ok("다시 읽으면 남긴 것만 나온다",
+   [c[2] for c in _abc_parse(_abc_tmp.read_text(encoding="utf-8"))] == ["가", "나"],
+   _abc_tmp.read_text(encoding="utf-8"))
+import shutil as _abc_shutil  # noqa: E402
+
+_abc_shutil.rmtree(_abc_tmp.parent, ignore_errors=True)
+
+
 # --- 결과 ---------------------------------------------------------------
 
 print(f"통과 {PASSED}건")
