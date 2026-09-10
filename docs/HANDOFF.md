@@ -60,8 +60,8 @@ rules/learned/<플랫폼>/ 정답 자막에서 관측한 값. source.origin: lea
 force-push만으로는 안 지워지기 때문이다**: 병합된 PR 16개가 `refs/pull/N/head`로
 옛 커밋을 붙들고 있었고(PR #11·#12·#13은 diff에 규정 파일이 그대로 보였다),
 그 ref는 GitHub이 관리해서 사람이 못 지운다. 재작성 전 상태는
-`Documents/subtitle-tc-generator-BACKUP-20260910-175236.git`(미러)와
-같은 이름 `-PRs.json`(PR 기록)에 남겼다.
+`D:ackup\subtitle-tc-generator\`에 남겼다(미러 + PR 기록 + 여는 법을 적은
+README). 자세한 것은 `docs/BACKLOG.md` 0-S절.
 
 **부르는 이름은 안 바뀌었다.** `checker/profile.py`의 `_roots()`가
 `rules/private/`를 함께 뒤진다 — `-p netflix -l ko -k sdh`도
