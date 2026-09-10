@@ -930,6 +930,22 @@ _tail_sug = {s.field_name: s for s in
 ok("앞 말의 꼬리에 걸친 인점은 그 앞 구간이 아니라 진짜 온셋으로 낸다",
    "start_ms" in _tail_sug and abs(_tail_sug["start_ms"].suggested - (4400 - 3 * frame)) < 2,
    str(_tail_sug))
+# 앞뒤에 바로 붙는 자막이 없을 때만 여유(사용자 지시 2026-09-11). 다음 말이 800ms 안에
+# 이어지면 아웃점은 여유 대신 다음 인점 자리(다음 온셋 - 인점 여유)까지 채운다.
+_chain_speech = [(1000, 3000), (3400, 5000)]        # 침묵 400ms
+_chain_sug = {s.field_name: s for s in
+              suggest_spotting([Event(1, 900, 3100, "앞"), Event(2, 3300, 5100, "뒤")],
+                               _chain_speech, fps, detector="vad") if s.event_index == 1}
+ok("다음 말이 800ms 안이면 아웃점을 다음 인점 자리까지 채운다",
+   "end_ms" in _chain_sug and abs(_chain_sug["end_ms"].suggested - (3400 - 2 * frame)) < 2,
+   str(_chain_sug))
+_far_speech = [(1000, 3000), (5000, 7000)]          # 침묵 2000ms
+_far_sug = {s.field_name: s for s in
+            suggest_spotting([Event(1, 900, 3100, "앞"), Event(2, 4900, 7100, "뒤")],
+                             _far_speech, fps, detector="vad") if s.event_index == 1}
+ok("다음 말이 멀면 아웃점은 여유(3프레임)만 둔다",
+   "end_ms" not in _far_sug or abs(_far_sug["end_ms"].suggested - (3000 + 3 * frame)) < 2,
+   str(_far_sug))
 _only_sug = {s.field_name: s for s in
              suggest_spotting([Event(1, 3000, 3500, "짧은 대사")], [(1000, 3200)], fps)}
 ok("겹치는 구간이 하나뿐이면 밖으로 뻗어 있어도 안 뺀다(그 구간 끝 3200 기준으로 아웃점을 낸다)",

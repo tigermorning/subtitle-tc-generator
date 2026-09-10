@@ -203,6 +203,15 @@ def converge(events: list[Event], limits: TimingLimits, rounds: int = 3) -> Timi
 # 돼 규정(시간 기준)에서 벗어난다. 사람이 읽는 제안 문구에는 그 영상 fps로 다시
 # 환산한 프레임 수를 적는다.
 LEADS_REF_FPS = 23.976
+# **앞뒤에 바로 붙는 자막이 없을 때만 여유를 둔다**(사용자 지시, 2026-09-11:
+# "앞뒤에 바로 연결되는 자막이 없다는 전제 하에, TC의 인점과 아웃점은 0.1~0.2초의
+# 여유를 두는 것이 관례"). 붙는 자막은 여유 대신 **다음 인점까지 채운다**.
+# 드라마B E02·E03 정답에서 확인(VAD 대비): 떨어진 자막은 인점 +97/+86ms·아웃점
+# +89/+126ms(≈0.1초, 지금 LEADS와 같다), 붙은 자막은 아웃점이 +214/+221ms —
+# 다음 자막 앞까지 늘린 값이다. 붙였는지의 기준은 **소리 사이 침묵**: 붙은 자막의
+# 95~97%가 800ms 안, 떨어진 자막은 13~14%만 그 안. 이 문턱으로 가른다.
+CHAIN_SILENCE_MS = 800
+
 LEADS = {
     "loudness": {"in": (2, 3), "out": (6, 9), "tail": 6},
     # vad out (3,4)는 **(6,9)로 바꿔 봤다가 되돌렸다**(2026-09-11, 사용자 확인 뒤
@@ -268,6 +277,10 @@ def apply_spotting(events: list[Event], suggestions: list) -> int:
     position = {e.index: i for i, e in enumerate(ordered)}
     changed = 0
 
+    # **인점을 전부 먼저 옮기고 아웃점을 옮긴다**(2026-09-11). 아웃점의 천장은
+    # 다음 자막의 인점인데, 그 인점이 아직 whisper의 이른 값이면 붙는 자막의
+    # 아웃점(다음 인점 자리까지 채우는 것)이 천장에 걸려 버려진다.
+    suggestions = sorted(suggestions, key=lambda s: 0 if s.field_name == "start_ms" else 1)
     for s in suggestions:
         event = by_index.get(s.event_index)
         if event is None or s.suggested == s.current:
@@ -390,9 +403,20 @@ def suggest_spotting(events: list[Event], speech: list[tuple[int, int]], fps: fl
 
         want_end = voice_end + tail + lead_out[0]
         if next_start is not None:
-            # 여유 프레임을 더한 뒤에도 다음 인점을 넘지 않게 한다.
-            # 간격 확보는 converge()가 따로 본다.
-            want_end = min(want_end, next_start)
+            # 다음 말이 CHAIN_SILENCE_MS 안에 이어지면 여유 대신 다음 인점 자리까지
+            # 채운다(위 CHAIN_SILENCE_MS 주석). 다음 자막의 인점은 그 말소리 온셋의
+            # lead_in 앞이 될 것이므로 그 자리를 목표로 한다 — 2프레임 간격은
+            # converge()가 뗀다.
+            next_onset = min((s for s, _ in speech if s >= voice_end), default=None)
+            if next_onset is not None and next_onset - voice_end <= CHAIN_SILENCE_MS:
+                # 다음 자막의 지금 인점(whisper 값)이 아니라 **옮겨질 인점**을 천장으로
+                # 본다 — apply_spotting이 인점을 먼저 옮기므로 그때는 맞아떨어진다.
+                want_end = max(want_end, next_onset - lead_in[1])
+                want_end = min(want_end, max(next_start, next_onset - lead_in[1]))
+            else:
+                # 여유 프레임을 더한 뒤에도 다음 인점을 넘지 않게 한다.
+                # 간격 확보는 converge()가 따로 본다.
+                want_end = min(want_end, next_start)
         end_shift = abs(ev.end_ms - want_end)
         if tolerance < end_shift <= max_shift_ms:
             out.append(SpotSuggestion(
