@@ -18,7 +18,7 @@ description: "정답 영상이 아직 남아 있을 때 --generate로 초안을 
 
 ## -1. 이 발주처+장르가 이미 성숙 판정을 받았는지 먼저 본다
 
-`docs/corpus_status.yaml`의 `genre_maturity`에서 이 영상의 발주처/장르
+`rules/private/corpus/corpus_status.yaml`의 `genre_maturity`에서 이 영상의 발주처/장르
 조합(예: `netflix/variety`)을 찾는다(CLAUDE.md 규칙 13, 2026-08-30 —
 N=3 성숙 기준).
 
@@ -113,7 +113,7 @@ python -m checker <초안.srt> --against <정답.srt> --eval-json <out.json>
 나온다 — 숫자 하나는 "얼마나 먼가"를 가늠하게 해 줄 뿐 자막을 하나씩 손보게
 만들지 않는다.
 
-`--text-diff`를 주면 원장(`docs/corpus_status.yaml`)에서 이 회차의
+`--text-diff`를 주면 원장(`rules/private/corpus/corpus_status.yaml`)에서 이 회차의
 `tc_verified`를 찾아 아직 '끝남'이 아니면 경고한다. 원장에 없는 자료면 아무
 말도 하지 않는다 — **모른다와 안 끝났다는 다르다**(규칙 3).
 
@@ -213,7 +213,7 @@ python -m checker <초안.srt> --against <정답.srt> --eval-json <out.json>
 
 ## 7. 이 영상 결과를 `genre_maturity`에 기록한다
 
-이 영상(작품·회차) 진단이 6번 기준으로 끝나면, `docs/corpus_status.yaml`의
+이 영상(작품·회차) 진단이 6번 기준으로 끝나면, `rules/private/corpus/corpus_status.yaml`의
 `genre_maturity`에서 이 발주처/장르 항목을 찾아(없으면 새로 만들어)
 `videos`에 한 줄 추가한다: 작품·회차·날짜·**이번 라운드에서 실제로 코드를
 고친 구조 버그 개수**(오탐·노이즈·개별 이상치 교정은 제외 — §3의 "여러

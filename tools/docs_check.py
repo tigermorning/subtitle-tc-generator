@@ -2,7 +2,7 @@
 
 ## 왜 필요한가
 
-규칙 17은 "손대기 전에 `docs/HANDOFF.md` 6절·`docs/corpus_status.yaml`·메모리를
+규칙 17은 "손대기 전에 `docs/HANDOFF.md` 6절·`rules/private/corpus/corpus_status.yaml`·메모리를
 먼저 열어 보라"고 정한다. **그 파일들이 낡으면 체크리스트가 오히려 함정이 된다.**
 
 2026-09-08에 실제로 그랬다. `docs/HANDOFF.md` 7절과 `docs/MVP.md`가

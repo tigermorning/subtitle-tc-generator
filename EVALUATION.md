@@ -1,6 +1,6 @@
 # 실험 & 평가 — MQ4 자막 QC 승인 에이전트
 
-`PRD_MQ4.md` "실험 & 평가" 절의 실행 기록. 평가셋은 `docs/corpus_status.yaml`이
+`PRD_MQ4.md` "실험 & 평가" 절의 실행 기록. 평가셋은 `rules/private/corpus/corpus_status.yaml`이
 가리키는 실제 정답지 코퍼스(`학습한 TC 및 자막 모음/`, 저작권 있는 정식 자막이라
 `.gitignore` 대상 — 로컬에만 있다)에서 발주처 3곳(넷플릭스·디즈니+·쿠팡플레이) ×
 종류(SDH/번역) × 언어(ko/en)를 섞어 6편 뽑았다. 전부 실제 방영작의 최종 납품

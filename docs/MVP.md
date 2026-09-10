@@ -41,7 +41,7 @@
 - **2026-08-30**: 정답지 있는 영상은 아래 코퍼스 학습부터 예외 없이 먼저 하고,
   이 대조(비용 큰 whisper 필요)는 그 뒤 필요할 때만 한다(CLAUDE.md 규칙 13).
   같은 발주처+장르 연속 3편에서 새 구조 버그가 없으면 "성숙"으로 보고 그다음부턴
-  코퍼스 학습만으로 충분할 수 있다 — `docs/corpus_status.yaml`의 `genre_maturity`가
+  코퍼스 학습만으로 충분할 수 있다 — `rules/private/corpus/corpus_status.yaml`의 `genre_maturity`가
   이 판단을 기록한다(사람 확인 전엔 자동 전환 없음)
 
 ### 코퍼스 학습 (`rules/learned/`)

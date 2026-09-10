@@ -10,7 +10,7 @@
 
 ## 무엇을 보나
 
-    코퍼스·학습   rules/learned/ · corpus/ · docs/corpus_status.yaml
+    코퍼스·학습   rules/learned/ · corpus/ · rules/private/corpus/corpus_status.yaml
     문서 정독     rules/private/sources/
     코드          checker/ · app/ · tools/ · tests/ · plugin/ · bin/
     규정          rules/private/<발주처>/ · rules/genre/  (문건 근거로만 고치는 층)
@@ -45,7 +45,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 
 LANES: dict[str, tuple[str, ...]] = {
-    "코퍼스·학습": ("rules/learned/", "corpus/", "docs/corpus_status.yaml",
+    "코퍼스·학습": ("rules/learned/", "corpus/", "rules/private/corpus/corpus_status.yaml",
                 "학습한 TC 및 자막 모음/"),
     "문서 정독": ("rules/private/sources/",),
     "규정": ("rules/genre/", "rules/private/", "rules/lexicon/"),

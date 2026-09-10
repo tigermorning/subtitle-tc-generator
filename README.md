@@ -245,7 +245,7 @@ python -m checker file.srt --against 정답.srt            # 정답 자막과 �
 [`.claude/skills/정답지-대조-진단/`](.claude/skills/정답지-대조-진단/SKILL.md)에
 코드화돼 있다. 이 진단이 매 영상 필요한 건 아니다 — 같은 발주처+장르에서 연속
 3편 새 구조 버그가 없으면 "성숙"으로 보고 그다음부턴 아래 정답지-학습만으로도
-충분할 수 있다(`docs/corpus_status.yaml`의 `genre_maturity`가 이 판단을 기록한다).
+충분할 수 있다(`rules/private/corpus/corpus_status.yaml`의 `genre_maturity`가 이 판단을 기록한다).
 
 캐릭터 문서는 KNP 시트와 **다른 문서다** — KNP는 고유명사 표기를, 이것은 말투와 인물
 관계를 통일한다. 하나의 작품을 여러 작업자가 나누어 하기 때문에 필요하다. 밖으로

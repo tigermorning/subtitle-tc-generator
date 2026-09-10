@@ -832,7 +832,7 @@ def _evaluate_mode(args, ap) -> int:
         if state and not state[0]:
             print(f"경고: 원장에 이 회차의 TC 검증(tc_verified)이 아직 "
                   f"'끝남'으로 적혀 있지 않습니다 — {state[1]}.")
-            print("      TC를 먼저 맞추고 그 사실을 docs/corpus_status.yaml에 "
+            print("      TC를 먼저 맞추고 그 사실을 rules/private/corpus/corpus_status.yaml에 "
                   "남긴 뒤에 텍스트로 넘어갑니다(규칙 15).")
         elif state:
             print(f"원장 확인: TC 검증이 끝난 회차입니다 — {state[1]}.")

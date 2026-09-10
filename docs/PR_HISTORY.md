@@ -228,7 +228,7 @@ reply = (translator.ask(system, prompt, _TRANSLATION_SCHEMA) if use_schema
 
 | 어디 | 무엇으로 맞추나 | 무엇까지 아나 |
 |---|---|---|
-| `docs/corpus_status.yaml` | `video:`에 적힌 파일 이름 | `truth:`(정답지 경로) + 이미 끝난 단계·날짜 |
+| `rules/private/corpus/corpus_status.yaml` | `video:`에 적힌 파일 이름 | `truth:`(정답지 경로) + 이미 끝난 단계·날짜 |
 | `학습한 TC 및 자막 모음/` | `<플랫폼>_<제목>/E<회차>_...srt`의 제목·회차 | 같은 회차인지 다른 회차인지 |
 
 ```
@@ -381,7 +381,7 @@ netflix ko-sdh :  ['안녕하세요 반갑습니다', '오늘 날씨가 참 좋�
 
 ## 왜
 
-규칙 17은 "손대기 전에 `docs/HANDOFF.md` 6절 · `docs/corpus_status.yaml` · 메모리를 먼저 열어 보라"고 정한다. **그 파일들이 낡으면 체크리스트가 오히려 함정이 된다.**
+규칙 17은 "손대기 전에 `docs/HANDOFF.md` 6절 · `rules/private/corpus/corpus_status.yaml` · 메모리를 먼저 열어 보라"고 정한다. **그 파일들이 낡으면 체크리스트가 오히려 함정이 된다.**
 
 바로 이번 세션에 겪었다. HANDOFF 7절과 MVP.md가
 
@@ -466,7 +466,7 @@ $ python -m checker 초안.srt --against 정답.srt
 
 - **텍스트 목록은 `--text-diff`를 줘야 나온다.** 기본값은 TC 쪽만 낸다
 - **유사도 가운데값은 기본값에서도 낸다** — 숫자 하나는 "얼마나 먼가"를 가늠하게 해 줄 뿐, 자막을 하나씩 손보게 만들지 않는다
-- `--text-diff`를 주면 원장(`docs/corpus_status.yaml`)에서 이 회차의 `tc_verified`를 찾아 아직 '끝남'이 아니면 경고한다. **원장에 없으면 아무 말도 하지 않는다** — 모른다와 안 끝났다는 다르다(규칙 3). 코퍼스 밖 자료로 대조하는 일도 흔하다
+- `--text-diff`를 주면 원장(`rules/private/corpus/corpus_status.yaml`)에서 이 회차의 `tc_verified`를 찾아 아직 '끝남'이 아니면 경고한다. **원장에 없으면 아무 말도 하지 않는다** — 모른다와 안 끝났다는 다르다(규칙 3). 코퍼스 밖 자료로 대조하는 일도 흔하다
 
 ## 막지 않는 이유
 
@@ -499,7 +499,7 @@ $ python -m checker 초안.srt --against 정답.srt
 
 | 갈래 | 경로 |
 |---|---|
-| 코퍼스·학습 | `rules/learned/` · `corpus/` · `docs/corpus_status.yaml` |
+| 코퍼스·학습 | `rules/learned/` · `corpus/` · `rules/private/corpus/corpus_status.yaml` |
 | 문서 정독 | `rules/sources/` |
 | 규정 | `rules/<발주처>/` · `rules/genre/` · `rules/lexicon/` |
 | 코드 | `checker/` · `app/` · `tools/` · `tests/` · `plugin/` · `bin/` · `examples/` |

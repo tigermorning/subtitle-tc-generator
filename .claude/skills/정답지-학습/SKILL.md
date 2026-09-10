@@ -16,11 +16,11 @@ description: "[습작] SDH+번역/ 폴더에 새 정답 영상이 들어왔을 �
 ## 0. 시작 전에 — CLAUDE.md 규칙 17
 
 이 영상(작품/회차)을 손대기 전에 `CLAUDE.md` 규칙 17의 세 곳부터 확인한다:
-`docs/HANDOFF.md` 6절, `docs/corpus_status.yaml`의 해당 항목, 이 프로젝트
-메모리(`feedback_*`). 특히 `docs/corpus_status.yaml`에 이미 항목이 있고
+`docs/HANDOFF.md` 6절, `rules/private/corpus/corpus_status.yaml`의 해당 항목, 이 프로젝트
+메모리(`feedback_*`). 특히 `rules/private/corpus/corpus_status.yaml`에 이미 항목이 있고
 `done: true`인 단계가 있으면 — 그 증거(생성 로그·`--against` 결과 등)부터
 열어보고, 정말 다시 할 이유가 없으면 재실행하지 않는다. 작업이 끝나면
-`docs/corpus_status.yaml`을 갱신한다(안 하면 다음 세션이 또 처음부터
+`rules/private/corpus/corpus_status.yaml`을 갱신한다(안 하면 다음 세션이 또 처음부터
 판단하게 된다 — 2026-08-29 예능A 15·16회에서 실제로 두 번 겪음).
 
 ## 절차
@@ -160,7 +160,7 @@ python3 tests/run_tests.py && git commit -m "..."
 `정답지-대조-진단` 스킬을 먼저 돌려서 생성기 자체의 코드 버그를 찾을 기회를
 놓치지 않는다(규칙 13 — 영상이 없으면 이 진단은 다시 못 한다).
 
-**단, 정답지-대조-진단(B)로 넘어가기 전에 `docs/corpus_status.yaml`의
+**단, 정답지-대조-진단(B)로 넘어가기 전에 `rules/private/corpus/corpus_status.yaml`의
 `genre_maturity`부터 먼저 본다**(규칙 13, 2026-08-30 — N=3 성숙 기준
 구체화). 이 영상의 발주처/장르 조합(예: `netflix/variety`) 항목을 찾는다:
 

@@ -1,8 +1,8 @@
-"""`docs/corpus_status.yaml`을 읽어 `--generate` 명령을 자동으로 조립한다.
+"""`rules/private/corpus/corpus_status.yaml`을 읽어 `--generate` 명령을 자동으로 조립한다.
 
 **왜 필요한가.** `--genre variety` 같은 플래그를 사람이 매번 손으로 타이핑하면
 빠뜨릴 수 있다 — 실제로 2026-08-28·2026-08-29 두 세션이 연속으로 이 플래그를
-빠뜨렸다(예능A 15·16회). 원장(`docs/corpus_status.yaml`)에 이미 작품의
+빠뜨렸다(예능A 15·16회). 원장(`rules/private/corpus/corpus_status.yaml`)에 이미 작품의
 platform·genre와 회차별 kind(sdh/translation)·lang이 적혀 있으니, 그걸 읽어서
 플래그를 조립하면 사람이 다시 타이핑할 일이 없어져 이 종류의 실수 자체가
 구조적으로 사라진다.
@@ -33,7 +33,10 @@ import yaml
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 ROOT = Path(__file__).resolve().parent.parent
-LEDGER = ROOT / "docs" / "corpus_status.yaml"
+# 원장은 비공개 저장소로 옮겼다(작품 제목·릴리즈명·절대 경로가 들어 있다).
+# 없으면 옛 자리를 본다.
+_LEDGER_PRIVATE = ROOT / "rules" / "private" / "corpus" / "corpus_status.yaml"
+LEDGER = _LEDGER_PRIVATE if _LEDGER_PRIVATE.is_file() else ROOT / "docs" / "corpus_status.yaml"
 
 
 def load_ledger() -> dict:
@@ -48,7 +51,7 @@ def save_ledger(data: dict) -> None:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("work", help="docs/corpus_status.yaml의 works 키 (예: 예능A)")
+    ap.add_argument("work", help="rules/private/corpus/corpus_status.yaml의 works 키 (예: 예능A)")
     ap.add_argument("episode", help="episodes 키 (예: 15)")
     ap.add_argument("kind", choices=["sdh", "translation"], help="kinds 키")
     ap.add_argument("-o", "--out", type=Path, help="출력 경로(생략하면 .tmp/최종초안/ 아래 자동 생성)")

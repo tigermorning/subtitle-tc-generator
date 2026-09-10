@@ -18,7 +18,7 @@ description: "BLEU·ROUGE·perplexity·LLM-as-judge — 번역 품질을 숫자�
 수 있다 — 여러 작품·여러 회차에서 같은 방향으로 반복돼야 코드 버그 후보다.
 
 **이 지표들의 점수 자체는 `genre_maturity`(규칙 13, 2026-08-30 — 발주처+장르
-연속 3편 무결이면 성숙) 카운트에 직접 들어가지 않는다.** `docs/corpus_status.yaml`의
+연속 3편 무결이면 성숙) 카운트에 직접 들어가지 않는다.** `rules/private/corpus/corpus_status.yaml`의
 `clean_streak`은 위 문단 기준을 통과해 **실제로 코드를 고친** 구조 버그
 개수만 센다(`정답지-대조-진단` 7절). text_similarity가 낮게 나온 자막이
 많아도, 그게 노이즈로 판명되면(오탐·개별 이상치) `clean_streak`은 그대로

@@ -4318,7 +4318,7 @@ with _tempfile.TemporaryDirectory() as _dc_tmp:
 
 
 # --- 규칙 15: TC를 먼저 맞추고 그다음 텍스트 --------------------------------
-# 원장(docs/corpus_status.yaml)에 TC 검증이 끝났다고 적혀 있는지 본다.
+# 원장(rules/private/corpus/corpus_status.yaml)에 TC 검증이 끝났다고 적혀 있는지 본다.
 # **모른다와 안 끝났다는 다르다**(규칙 3) — 코퍼스 밖 자료로 대조하는 일도 흔하다.
 
 from checker.answerkey import tc_state as _tc_state  # noqa: E402

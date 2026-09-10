@@ -12,7 +12,7 @@
     python tools/calibrate_regroup.py --genre variety # 장르 하나만
 
 정답지(`truth`)와 원본 영상(`video`)이 **둘 다** 있는 작품/회차만 대상이다 —
-`docs/corpus_status.yaml`에 이미 없는 회차는 이 도구가 스스로 찾지 않는다(정답지
+`rules/private/corpus/corpus_status.yaml`에 이미 없는 회차는 이 도구가 스스로 찾지 않는다(정답지
 학습 절차·규칙 11에 따라 사람이 원장에 먼저 등록해야 한다).
 
 **정답 언어가 발화 언어와 같은 kind만 다룬다**(예: 한국어 SDH 정답 vs 한국어
@@ -44,7 +44,10 @@ from checker.parsers import parse
 from checker.transcribe import transcribe
 from checker import genre as genre_module
 
-LEDGER = ROOT / "docs" / "corpus_status.yaml"
+# 원장은 비공개 저장소로 옮겼다(작품 제목·릴리즈명·절대 경로가 들어 있다).
+# 없으면 옛 자리를 본다.
+_LEDGER_PRIVATE = ROOT / "rules" / "private" / "corpus" / "corpus_status.yaml"
+LEDGER = _LEDGER_PRIVATE if _LEDGER_PRIVATE.is_file() else ROOT / "docs" / "corpus_status.yaml"
 CACHE_ROOT = ROOT / "학습한 TC 및 자막 모음" / "_whisper_cache"
 
 DURS = [800, 1200, 1600, 2000, 2500, 3000, 4000]
@@ -128,7 +131,7 @@ def main() -> int:
     data = load_ledger()
     targets = collect_targets(data, args.genre)
     if not targets:
-        print("정답지+영상이 둘 다 있는 작품/회차가 없습니다 — docs/corpus_status.yaml을 먼저 채우세요.")
+        print("정답지+영상이 둘 다 있는 작품/회차가 없습니다 — rules/private/corpus/corpus_status.yaml을 먼저 채우세요.")
         return 1
 
     by_genre: dict[str, list] = {}

@@ -931,7 +931,7 @@ whisper 대사 1개 + OCR 캡션 2개가 정상 병합, `“…”`로 감싸짐
 잡음 1곳만 낮은 신뢰도로 자동 표시됨.
 
 `.claude/skills/정답지-학습/SKILL.md`에 하드섭 갈래(임베디드 트랙 0개일 때
-`--ocr-hardsub`로 초안 뽑고 사람이 대조 확정) 추가. `docs/corpus_status.yaml`
+`--ocr-hardsub`로 초안 뽑고 사람이 대조 확정) 추가. `rules/private/corpus/corpus_status.yaml`
 스키마는 안 건드림(다른 항목 세 곳이 `truth:` 필드에 기대고 있어 별도 확인
 필요). `tests/run_tests.py`에 단위 테스트 추가, 849건 전부 통과.
 
@@ -1555,7 +1555,7 @@ Windows 쪽(Defender Application Control·SmartScreen 등) 설정을 봐야 한�
 
 ### ② 다음 세션을 위한 인프라
 
-- **`docs/corpus_status.yaml`(schema v2) 신설** — 작품/회차/kind(sdh·
+- **`rules/private/corpus/corpus_status.yaml`(schema v2) 신설** — 작품/회차/kind(sdh·
   translation)별 파이프라인 진행 상태 원장. 손대기 전에 이 파일부터 읽는 게
   `CLAUDE.md` 규칙 17로 못박힘. 한 작품에 kind가 여럿일 수 있다는 걸 처음엔
   놓쳐서(사고 6번) 스키마를 `episodes.<회차>.kinds.{sdh,translation}` 구조로
@@ -1613,7 +1613,7 @@ whisper 필요·비용 큼)는 A가 끝난 뒤에만, 그것도 사람에게 필
 옮겨 적은 것이었다(정정함). 그래서 새 기준을 별도로 만들었다:
 
 - **같은 발주처+장르 연속 3편(`threshold: 3`)을 B로 대조했는데 새 구조
-  버그가 0건(`clean_streak`)이면 그 조합은 "성숙" 후보.** `docs/corpus_status.yaml`의
+  버그가 0건(`clean_streak`)이면 그 조합은 "성숙" 후보.** `rules/private/corpus/corpus_status.yaml`의
   `genre_maturity`에 발주처/장르 키(`netflix/variety`, `disney/drama`
   형태)로 기록한다.
 - N=3은 안전판이 아니라 whisper 비용 대비 실용적 문턱이다 — 그래서 성숙
@@ -1639,7 +1639,7 @@ diarize `merge_cues()` 비교 버그, `REACTION_MAX_CHARS` 확장,
 그대로 0. "판정불가"를 "클린(0건)"으로 잘못 세면 검증 안 된 조합을 성숙한
 것으로 오판하게 된다.
 
-관련 커밋: `CLAUDE.md`(157c483, aa9f83c, b8cdc1d), `docs/corpus_status.yaml`
+관련 커밋: `CLAUDE.md`(157c483, aa9f83c, b8cdc1d), `rules/private/corpus/corpus_status.yaml`
 (aa9f83c, cd244d1, c50cfb4), `.claude/skills/정답지-학습/SKILL.md`(f1e4ce0),
 `.claude/skills/정답지-대조-진단/SKILL.md`(b8cdc1d),
 `.claude/skills/번역-품질-지표/SKILL.md`(4dce392), `docs/HANDOFF.md`(7ad3c5a).
@@ -1707,7 +1707,7 @@ ast-finetuned-audioset)로 대사 없는 구간의 소리 종류를 짐작한다
 영화B로 스모크 테스트: 대사 없는 639구간 중 505곳에서 확신 있는
 라벨(대부분 Music, 몇몇 Applause·Zipper 등도 정확했음).
 
-**세 갈래 전부 `docs/corpus_status.yaml`·`CORPUS_TITLES.md`·`HANDOFF.md`에
+**세 갈래 전부 `rules/private/corpus/corpus_status.yaml`·`CORPUS_TITLES.md`·`HANDOFF.md`에
 기록함**(규칙17 — 판단이 끝나면 맞는 자리에 남겨야 다음 세션이 다시 안
 찾는다). 메이드_인_코리아 항목이 corpus_status.yaml에 아예 없던 빈 자리도
 이번에 채웠다(2026-08-30 세션이 지적만 하고 안 채운 것).

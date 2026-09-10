@@ -30,7 +30,7 @@
 - `.claude/skills/정답지-대조-진단/SKILL.md`에 "0. 시작 전에" 절 추가 —
   전사·스윕부터 손대지 않고 `docs/HANDOFF.md` 6절·`rules/genre`·
   `rules/learned`를 먼저 grep하도록 못박음
-- `docs/corpus_status.yaml` 신설 — 작품/회차별 파이프라인 진행 상태를
+- `rules/private/corpus/corpus_status.yaml` 신설 — 작품/회차별 파이프라인 진행 상태를
   한 파일에 기록(아래 3번과 공유하는 인프라)
 
 **재발 방지 메커니즘**: `CLAUDE.md` 규칙 17(아래 참고)이 이 스킬 문구를
@@ -55,10 +55,10 @@
 **실제로 어떻게 고쳤나**:
 - `mcp__ccd_session_mgmt__search_session_transcripts`·`list_events`로 어젯밤
   세션의 실제 대화·명령을 직접 열어 확인 — 짐작이 아니라 원문 대조로 검증함
-- `docs/corpus_status.yaml`의 `pipeline.text_polished`·`delivered` 필드로
+- `rules/private/corpus/corpus_status.yaml`의 `pipeline.text_polished`·`delivered` 필드로
   "이 작품/회차가 어느 단계까지 끝났는지"를 파일 하나에 명시적으로 기록
 
-**재발 방지 메커니즘**: 규칙 17의 확인 목록 2번("`docs/corpus_status.yaml`에서
+**재발 방지 메커니즘**: 규칙 17의 확인 목록 2번("`rules/private/corpus/corpus_status.yaml`에서
 해당 작품/회차 — 이미 끝난 단계인가")이 이 케이스를 정확히 겨냥한다.
 
 ---
@@ -75,7 +75,7 @@
 프로세스의 결함이었다.
 
 **실제로 어떻게 고쳤나**:
-- `tools/gen_from_ledger.py` 신설 — `docs/corpus_status.yaml`에서
+- `tools/gen_from_ledger.py` 신설 — `rules/private/corpus/corpus_status.yaml`에서
   platform·lang·kind·genre를 읽어 `--generate` 명령을 **자동 조립**한다.
   사람이 플래그를 다시 타이핑할 일이 없다.
 
@@ -135,7 +135,7 @@
   수 없고, 코드 검증에 실제로 쓰인 산출물이라 완전히 무의미하진 않았음) —
   다만 앞으로 같은 상황에서 반복하지 않음
 
-**재발 방지 메커니즘**: `docs/corpus_status.yaml`에 `text_polished`·
+**재발 방지 메커니즘**: `rules/private/corpus/corpus_status.yaml`에 `text_polished`·
 `delivered` 단계가 아직 남아 있다 — 이 필드들은 **정답지가 없는 영상**
 전용으로 좁혀 써야 한다(스키마 자체를 아직 안 고쳤음, 다음에 이
 원장을 다시 쓸 때 이 구분을 필드로 명시할 것).
@@ -147,7 +147,7 @@
 **무엇을 지적받았나**: 5번 사고 직후 "예능A 15·16회는 이제 할 일
 없다"고 말했다. 사용자가 바로 반박: "확인해 보니까 영어 번역 자막이
 안 들어가 있고 한국어 SDH만 되어있던데 할 일이 없다는 건 거짓말 아니야?"
-— 맞았다. `docs/corpus_status.yaml`을 만들 때 `kind: sdh` 하나만
+— 맞았다. `rules/private/corpus/corpus_status.yaml`을 만들 때 `kind: sdh` 하나만
 모델링해서, 이미 정답지가 있던 영어 번역(`E15_영어_번역.srt`·
 `E16_영어_번역.srt`) 자체가 원장에 없었다 — 원장을 봐도 "번역은 어떻게
 됐나"를 물을 방법조차 없었다.
@@ -162,7 +162,7 @@ kind가 여러 개일 수 있다"는 걸 검토 안 하고 하나만 가정했�
 만들면서 **그 도구 자체에 검증되지 않은 가정을 심었다.**
 
 **실제로 어떻게 고쳤나 — 확인하다가 실제 코드 버그 두 개를 더 찾음**:
-- `docs/corpus_status.yaml`을 `schema_version: 2`로 바꿔 `episodes.<회차>.kinds.{sdh,translation}`
+- `rules/private/corpus/corpus_status.yaml`을 `schema_version: 2`로 바꿔 `episodes.<회차>.kinds.{sdh,translation}`
   구조로 재작성. `source_lang`(발화 언어)과 kind별 `lang`(결과물 언어)을
   분리 — 번역 kind는 이 둘이 다르다는 걸 처음엔 놓쳤다가 `tools/gen_from_ledger.py`를
   고치면서 발견해 바로잡음
@@ -220,7 +220,7 @@ v12(12차 반복한 결과)와 비교**했다. 다듬은 횟수가 다른 두 �
 
 ### 8. `gen_from_ledger.py`가 오래 걸리는 작업 도중 사람의 손 수정을 덮어씀
 
-**무엇이 있었나**: `tools/gen_from_ledger.py`가 시작할 때 `docs/corpus_status.yaml`을
+**무엇이 있었나**: `tools/gen_from_ledger.py`가 시작할 때 `rules/private/corpus/corpus_status.yaml`을
 메모리에 읽어두고, `--generate`(수 분 걸림) 끝난 뒤 **그 오래된 스냅샷을 통째로**
 다시 저장했다. 그사이(생성이 도는 동안) 다른 회차·kind의 `tc_verified`·
 `known_issues`를 손으로 고쳐 저장해 놨었는데, 도구가 끝나면서 그 수정이 전부
@@ -281,7 +281,7 @@ known_issues)은 기억을 더듬어 복구함.
    **영상 한 편 안에서 라운드를 몇 번 더 돌릴지**의 기준이었지, 장르 전체
    기준이 아니었다. 사용자가 "구조 버그 다 잡혔는지는 뭘로 판단해?"라고
    물어서 다시 확인하다가 스스로 발견함.
-2. `docs/corpus_status.yaml`의 `genre_maturity`에 예능A 15·16회의
+2. `rules/private/corpus/corpus_status.yaml`의 `genre_maturity`에 예능A 15·16회의
    `new_structural_bugs`를 각각 0·1로 적었다. 실제로는 두 회차가
    2026-08-27부터 여러 세션에 걸쳐 구조 버그 다섯 개(위 ①·9번 사고 참고 —
    다중 화자 병합 폭주·diarize `merge_cues()` 버그·`REACTION_MAX_CHARS`·
@@ -301,7 +301,7 @@ known_issues)은 기억을 더듬어 복구함.
   정의돼 있고 어떤 층위(영상 한 편 vs 장르 전체)인지 명시
 - `.claude/skills/정답지-대조-진단/SKILL.md` 6절 앞에 "이 절은 영상 한 편
   안에서의 기준이고, 장르 전체 기준은 7절이 따로 잰다"는 구분 문단 추가
-- `docs/corpus_status.yaml`의 예능A 15·16회 `new_structural_bugs`를
+- `rules/private/corpus/corpus_status.yaml`의 예능A 15·16회 `new_structural_bugs`를
   "미집계(최소 3건 이상)"로 고치고 `docs/HANDOFF.md` 6절을 근거로 남김 —
   정확한 총계를 새로 지어내지 않음(규칙 4)
 
@@ -372,7 +372,7 @@ fps별 최대 오프셋·안전 영역 표)을 보고 **"우리 코드에 대응
 1~4·6·10번은 원인이 같다: **근거가 이미 어딘가에 있는데(코드·이전 세션·
 사용자 발화·다른 kind·스킬 파일의 실제 정의 위치) 확인하지 않고 새로
 판단했다.** 그래서 `CLAUDE.md` 규칙 17로 "손대기 전에 셋을 먼저 본다"
-(`docs/HANDOFF.md` 6절 · `docs/corpus_status.yaml` · 프로젝트 메모리)는
+(`docs/HANDOFF.md` 6절 · `rules/private/corpus/corpus_status.yaml` · 프로젝트 메모리)는
 체크리스트를 만들었고, 6번을 계기로 "가볍게 확언하지 않는다"는 더 포괄적인
 규칙이 하나 더 생겼다. **10번은 그 체크리스트가 생긴 뒤에도 같은 패턴이
 반복될 수 있음을 보여준다** — 규칙이 있다고 저절로 지켜지는 게 아니라

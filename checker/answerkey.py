@@ -18,7 +18,7 @@
 
 ## 어디를 보나
 
-    docs/corpus_status.yaml   `video:` 경로가 그대로 적혀 있다. 가장 확실한 근거 —
+    rules/private/corpus/corpus_status.yaml   `video:` 경로가 그대로 적혀 있다. 가장 확실한 근거 —
                               `truth:`(정답지 경로)와 이미 끝난 단계까지 함께 안다
     학습한 TC 및 자막 모음/    `<플랫폼>_<제목>/E<회차>_<언어>_<종류>.srt`.
                               제목·회차를 파일 이름에서 맞춰 본다
@@ -41,7 +41,19 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 TRUTH_ROOT = REPO_ROOT / "학습한 TC 및 자막 모음"
-STATUS_FILE = REPO_ROOT / "docs" / "corpus_status.yaml"
+def _status_file() -> Path:
+    """원장이 놓인 자리. **비공개 쪽이 먼저다.**
+
+    원장에는 작품 제목·릴리즈 파일명·로컬 절대 경로가 그대로 적힌다. 저장소가
+    공개라 그대로 둘 수 없어 비공개 저장소(`rules/private/corpus/`)로 옮겼다
+    (`.gitignore` 참고). 없으면 옛 자리를 본다 — 없어도 이 기능은 **막지 않는다**
+    (아래 "무엇을 하지 않나").
+    """
+    private = REPO_ROOT / "rules" / "private" / "corpus" / "corpus_status.yaml"
+    return private if private.is_file() else REPO_ROOT / "docs" / "corpus_status.yaml"
+
+
+STATUS_FILE = _status_file()
 
 # 릴리즈 파일 이름의 군더더기. 제목만 남기려고 자르는 자리다.
 _JUNK = re.compile(
