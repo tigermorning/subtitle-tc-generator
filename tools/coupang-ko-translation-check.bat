@@ -2,7 +2,7 @@
 rem Coupang Play Korean translation subtitles - check only
 rem Drop subtitle files or a folder onto this icon.
 rem ASCII only - see _run.bat for why.
-set "PROFILE=rules/coupang/ko-translation.yaml"
+set "PROFILE=rules/private/coupang/ko-translation.yaml"
 set "PLATFORM="
 set "LANG=ko"
 set "KIND="

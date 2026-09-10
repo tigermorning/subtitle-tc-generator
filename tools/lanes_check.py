@@ -11,9 +11,14 @@
 ## 무엇을 보나
 
     코퍼스·학습   rules/learned/ · corpus/ · docs/corpus_status.yaml
-    문서 정독     rules/sources/
+    문서 정독     rules/private/sources/
     코드          checker/ · app/ · tools/ · tests/ · plugin/ · bin/
-    규정          rules/<발주처>/ · rules/genre/  (문건 근거로만 고치는 층)
+    규정          rules/private/<발주처>/ · rules/genre/  (문건 근거로만 고치는 층)
+
+발주처 공식 규정과 원문 발췌는 `rules/private/` 아래 비공개 저장소로 빠졌다
+(`.gitignore` 참고). 이 저장소에 staged로 올라오는 일이 없으니 그 두 갈래는
+여기서 사실상 안 걸린다 — 갈래 구분 자체는 남겨 둔다. 자리가 다시 돌아오거나
+비공개 저장소에서 같은 검사를 돌릴 때 그대로 쓰기 위해서다.
 
 두 갈래 이상이 한 커밋에 함께 들어오면 말한다. `docs/`와 최상위 `*.md`는 갈래로
 치지 않는다 — 어느 갈래든 기록은 함께 남기기 때문이다.
@@ -42,9 +47,8 @@ ROOT = Path(__file__).resolve().parent.parent
 LANES: dict[str, tuple[str, ...]] = {
     "코퍼스·학습": ("rules/learned/", "corpus/", "docs/corpus_status.yaml",
                 "학습한 TC 및 자막 모음/"),
-    "문서 정독": ("rules/sources/",),
-    "규정": ("rules/genre/", "rules/netflix/", "rules/disney/", "rules/coupang/",
-           "rules/lexicon/"),
+    "문서 정독": ("rules/private/sources/",),
+    "규정": ("rules/genre/", "rules/private/", "rules/lexicon/"),
     "코드": ("checker/", "app/", "tools/", "tests/", "plugin/", "bin/", "examples/"),
 }
 
@@ -73,8 +77,8 @@ def staged_files() -> list[str]:
     """staged 파일 목록.
 
     **`-z`와 `core.quotepath=false`를 함께 쓴다.** 기본값에서 git은 한글 경로를
-    `"rules/sources/ì..."`처럼 8진수로 감싸 내놓는다 — 그대로 받으면
-    `rules/sources/`로 시작하지 않게 되어 이 저장소의 한글 폴더가 통째로 안 잡힌다
+    `"rules/private/sources/ì..."`처럼 8진수로 감싸 내놓는다 — 그대로 받으면
+    `rules/private/sources/`로 시작하지 않게 되어 이 저장소의 한글 폴더가 통째로 안 잡힌다
     (2026-09-08, 이 검사를 붙인 첫 커밋이 실제로 조용히 지나갔다).
     """
     try:

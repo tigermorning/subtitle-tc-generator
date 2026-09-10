@@ -1,4 +1,4 @@
-# 규정(`rules/coupang/common.yaml`·`ko-sdh.yaml`)이 비워 둔 자리를 실제
+# 규정(`rules/private/coupang/common.yaml`·`ko-sdh.yaml`)이 비워 둔 자리를 실제
 # SDH 자막에서 관측한 값으로 채운다. 규칙 11 — `origin: learned`은 지우지
 # 않는다. **쿠팡플레이 첫 학습 자료다.**
 #

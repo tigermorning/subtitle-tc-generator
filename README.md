@@ -289,14 +289,35 @@ coupang-ko-translation-check.bat / -fix.bat
 ```
 rules/
   SCHEMA.md     스키마 정의와 로더 계약
-  netflix/      common / ko-sdh / ko-translation / en-translation
-  disney/       ko-sdh / ko-translation
-  coupang/      ko-sdh / ko-translation
   genre/        documentary / drama / variety
   lexicon/      효과음 사전 등
-  sources/      사람이 읽는 근거 문서 — YAML은 여기서 파생된다
   learned/      코퍼스에서 관측한 값(발주처별 버킷). 규정 파일이 아니다 — 아래 참고
+  private/      *** 이 저장소에 없다. 아래 참고 ***
+    netflix/    common / ko-sdh / ko-translation / en-translation
+    disney/     ko-sdh / ko-translation
+    coupang/    ko-sdh / ko-translation
+    sources/    사람이 읽는 근거 문서 — 위 YAML은 여기서 파생된다
 ```
+
+### 발주처 공식 규정은 별도 비공개 저장소에 있다
+
+넷플릭스·디즈니+·쿠팡플레이 규정과 그 원문 발췌는 **파트너 전용 비공개 문서**다.
+계약이 걸린 자료라 미공개 영상·대본과 같은 이유로 이 저장소에 두지 않는다
+(`CLAUDE.md` 규칙 6). `.gitignore`가 `rules/private/`를 막고 있다.
+
+받으려면 비공개 규정 저장소를 그 자리에 클론한다:
+
+```bash
+git clone git@github.com:tigermorning/subtitle-tc-rules.git rules/private
+```
+
+없어도 프로그램은 돈다 — **그 세 발주처 프로파일만 안 보인다.** `genre`·`lexicon`·
+`learned`와 사용자가 만든 프로파일은 그대로다. 로더(`checker/profile.py`의
+`_roots()`)가 `rules/private/`를 함께 뒤지므로, **부르는 이름은 예전과 같다**:
+`-p netflix -l ko -k sdh`, `extends: netflix/ko-translation.yaml`.
+
+시험도 마찬가지다. `rules/private/`가 없으면 규정 프로파일을 쓰는 시험이
+"규정 프로파일을 찾지 못했습니다"로 멈춘다 — 조용히 건너뛰지 않는다.
 
 ### 학습 계층 (`rules/learned/`)
 
@@ -329,7 +350,7 @@ learned`로 출처를 구분하고, 규정으로 승격하려면 사람 확인�
 규정은 절대적 정답이 아니라 발주처가 요구하는 틀이다.
 
 ```yaml
-extends: ../../rules/netflix/ko-translation.yaml
+extends: netflix/ko-translation.yaml   # 자리 대신 이름 — 로더가 뒤져 찾는다
 source:
   official: false
   client: "○○ 에이전시 2026년 자막 지침 v3"

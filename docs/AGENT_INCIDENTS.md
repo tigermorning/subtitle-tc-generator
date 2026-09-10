@@ -326,7 +326,7 @@ fps별 최대 오프셋·안전 영역 표)을 보고 **"우리 코드에 대응
 - `checker/timing.py`의 `SHOT_CLEARANCE_MS`·`SHOT_OUT_LEAD_FRAMES` **바로 위 주석** —
   SE 공식 소스(`BeautifyTimeCodesSettings.cs`의 `Preset.Netflix`)와 대조해 red/green
   zone은 SE만의 2단계 UI 개념이라 "여기 상수로 옮기지 않았다"고 명시.
-- `rules/sources/작업자-자료/이미지-정독.md`의 "장면전환 — SE '프로필 편집' 프레임
+- `rules/private/sources/작업자-자료/이미지-정독.md`의 "장면전환 — SE '프로필 편집' 프레임
   표" 절 — fps별 표가 SE 기능이 아니라 작성자의 손계산(`round(fps*0.5)`·
   `floor(fps*0.25)`)임까지 검증해 둠.
 

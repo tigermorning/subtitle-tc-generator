@@ -8,7 +8,7 @@ label: "다큐멘터리 / 리얼리티"
 
 source:
   official: false
-  client: "작업자 실무 자료 (rules/sources/작업자-자료/작업 기본 원칙.txt)"
+  client: "작업자 실무 자료 (rules/private/sources/작업자-자료/작업 기본 원칙.txt)"
   section: "312·590·658·659·889행"
   revision: "2026-08-12"
   verified: "2026-08-12"

@@ -56,6 +56,21 @@ ok("영어는 전부 1자", count_chars("abc ", {"cjk": 1.0, "other": 1.0}) == 4
 
 # --- 로더 계약 -----------------------------------------------------------
 
+# 발주처 공식 규정은 `rules/private/`(비공개 저장소 클론)에 있다. 자리를 직접 적으면
+# 그 자리가 바뀔 때마다 시험이 통째로 깨지므로, 로더가 쓰는 것과 같은 탐색 함수로 찾는다.
+from checker.profile import find_profile_file  # noqa: E402
+
+
+def rule_file(reference: str) -> Path:
+    path = find_profile_file(reference)
+    if path is None:
+        raise SystemExit(
+            f"규정 프로파일을 찾지 못했습니다: {reference}. "
+            "비공개 규정 저장소를 `rules/private/`로 클론했는지 확인하세요(.gitignore 참고)."
+        )
+    return path
+
+
 ko_sdh = load_profile("netflix", "ko", "sdh")
 ko_tr = load_profile("netflix", "ko", "translation")
 en_tr = load_profile("netflix", "en", "translation")
@@ -456,7 +471,7 @@ ok("겹침도 잡는다", any("겹칩니다" in v["detail"] for v in r["violatio
 ok("넷플릭스에는 간격 규정을 넣지 않았다", "min_gap_ms" not in ko_tr["limits"])
 
 try:
-    load_profile_file(Path("rules/netflix/common.yaml"))
+    load_profile_file(rule_file("netflix/common"))
     ok("common 파일은 직접 검사에 못 쓴다", False, "예외가 나지 않았다")
 except ProfileError:
     ok("common 파일은 직접 검사에 못 쓴다", True)
@@ -522,9 +537,9 @@ ok("영어에는 한국어 줄바꿈 규칙을 적용하지 않는다", "T16" no
 
 # --- 실무 자료 기반 검사·프로파일 ---------------------------------------
 
-coupang = load_profile_file(Path("rules/coupang/ko-sdh.yaml"))
-disney = load_profile_file(Path("rules/disney/ko-sdh.yaml"))
-practice = load_profile_file(Path("rules/netflix/ko-sdh-practice.yaml"))
+coupang = load_profile_file(rule_file("coupang/ko-sdh"))
+disney = load_profile_file(rule_file("disney/ko-sdh"))
+practice = load_profile_file(rule_file("netflix/ko-sdh-practice"))
 
 ok("쿠팡 프로파일이 뜬다", coupang["platform"] == "coupang" and coupang["kind"] == "sdh")
 ok("공식 문서가 아님을 밝힌다",
@@ -604,9 +619,9 @@ ok("지적에 대안이 함께 나온다", "이렇게 쓸 수 있습니다" in d
 
 # --- 스펙 표에서 읽은 값 -----------------------------------------------------
 
-coupang2 = load_profile_file(Path("rules/coupang/ko-sdh.yaml"))
-disney2 = load_profile_file(Path("rules/disney/ko-sdh.yaml"))
-practice2 = load_profile_file(Path("rules/netflix/ko-sdh-practice.yaml"))
+coupang2 = load_profile_file(rule_file("coupang/ko-sdh"))
+disney2 = load_profile_file(rule_file("disney/ko-sdh"))
+practice2 = load_profile_file(rule_file("netflix/ko-sdh-practice"))
 
 ok("쿠팡 듀레이션 상한만 6초", coupang2["limits"]["duration_ms"]["max"] == 6000
    and disney2["limits"]["duration_ms"]["max"] == 7000)
@@ -635,9 +650,9 @@ ok("공식 판에는 간격 규정을 넣지 않았다", not any(v["rule_id"] ==
 
 # --- 문장부호 표(이미지)에서 읽은 규칙 ---------------------------------------
 
-cp3 = load_profile_file(Path("rules/coupang/ko-sdh.yaml"))
-dp3 = load_profile_file(Path("rules/disney/ko-sdh.yaml"))
-pr3 = load_profile_file(Path("rules/netflix/ko-sdh-practice.yaml"))
+cp3 = load_profile_file(rule_file("coupang/ko-sdh"))
+dp3 = load_profile_file(rule_file("disney/ko-sdh"))
+pr3 = load_profile_file(rule_file("netflix/ko-sdh-practice"))
 
 r = check_events([ev("그러니까…")], cp3)
 ok("쿠팡은 전각 말줄임표를 잡는다", "CP09" in ids(r))
@@ -671,9 +686,9 @@ ok("줄 넘어간 효과음을 잡는다", "CP12" in ids(r))
 
 # --- 대사·배경음악 표(이미지)에서 읽은 규칙 ---------------------------------
 
-cp4 = load_profile_file(Path("rules/coupang/ko-sdh.yaml"))
-dp4 = load_profile_file(Path("rules/disney/ko-sdh.yaml"))
-pr4 = load_profile_file(Path("rules/netflix/ko-sdh-practice.yaml"))
+cp4 = load_profile_file(rule_file("coupang/ko-sdh"))
+dp4 = load_profile_file(rule_file("disney/ko-sdh"))
+pr4 = load_profile_file(rule_file("netflix/ko-sdh-practice"))
 
 ok("디즈니만 대괄호 안에 음표", dp4["music"]["note_inside_bracket"] is True
    and cp4["music"]["note_inside_bracket"] is False)
@@ -709,9 +724,9 @@ ok("넷플릭스·쿠팡은 표준어", pr4["korean"]["orthography"] == "standar
 
 # --- 화자명·외국어 표(이미지) -------------------------------------------------
 
-cp5 = load_profile_file(Path("rules/coupang/ko-sdh.yaml"))
-dp5 = load_profile_file(Path("rules/disney/ko-sdh.yaml"))
-pr5 = load_profile_file(Path("rules/netflix/ko-sdh-practice.yaml"))
+cp5 = load_profile_file(rule_file("coupang/ko-sdh"))
+dp5 = load_profile_file(rule_file("disney/ko-sdh"))
+pr5 = load_profile_file(rule_file("netflix/ko-sdh-practice"))
 
 ok("쿠팡만 화자명이 소괄호", cp5["speaker_id"]["enclosure"] == "()"
    and dp5["speaker_id"]["enclosure"] == "[]" and pr5["speaker_id"]["enclosure"] == "[]")
@@ -748,9 +763,9 @@ ok("넷플릭스는 한국어 복귀 표시를 넣지 않는다",
 
 # --- 노래·크레딧 표(이미지) --------------------------------------------------
 
-cp6 = load_profile_file(Path("rules/coupang/ko-sdh.yaml"))
-dp6 = load_profile_file(Path("rules/disney/ko-sdh.yaml"))
-pr6 = load_profile_file(Path("rules/netflix/ko-sdh-practice.yaml"))
+cp6 = load_profile_file(rule_file("coupang/ko-sdh"))
+dp6 = load_profile_file(rule_file("disney/ko-sdh"))
+pr6 = load_profile_file(rule_file("netflix/ko-sdh-practice"))
 
 r = check_events([ev("♪ 내 피, 땀, 눈물 ♪")], cp6)
 ok("쿠팡은 가사 쉼표를 잡는다", "CP19" in ids(r))
@@ -783,7 +798,7 @@ ok("인점을 띄우면 정상", "CP20" not in ids(r))
 
 # --- 범위·쉼표 (표기 자료 이미지) --------------------------------------------
 
-pr7 = load_profile_file(Path("rules/netflix/ko-sdh-practice.yaml"))
+pr7 = load_profile_file(rule_file("netflix/ko-sdh-practice"))
 
 for text, should in (("6만~8만 명", False), ("6만-8만 명", False),
                      ("6~8만 명", True), ("6만 ~ 8만 명", True), ("6만 - 8만 명", True)):
@@ -813,10 +828,10 @@ lim = TimingLimits.from_profile(ko_sdh, fps=23.976)
 ok("프로파일에서 한계를 읽는다",
    lim.min_duration_ms == 833 and lim.max_duration_ms == 7000 and lim.max_cps == 14)
 
-cp_lim = TimingLimits.from_profile(load_profile_file(Path("rules/coupang/ko-sdh.yaml")), fps=23.976)
+cp_lim = TimingLimits.from_profile(load_profile_file(rule_file("coupang/ko-sdh")), fps=23.976)
 ok("쿠팡은 6초·2프레임", cp_lim.max_duration_ms == 6000 and cp_lim.min_gap_ms == 83)
 ok("프레임레이트가 바뀌면 간격도 바뀐다",
-   TimingLimits.from_profile(load_profile_file(Path("rules/coupang/ko-sdh.yaml")),
+   TimingLimits.from_profile(load_profile_file(rule_file("coupang/ko-sdh")),
                              fps=59.94).min_gap_ms == 33)
 
 r = converge([Event(1, 0, 400, "짧다"), Event(2, 5000, 6000, "다음")], lim)
@@ -942,7 +957,7 @@ ok("전환 뒤에서 끝나면(자연스러운 배치) 건드리지 않는다 �
 ok("전환이 없으면 아무 말도 하지 않는다",
    suggest_shot_snap([Event(1, 0, 3000, "대사")], [], fps) == [])
 
-cp_shot = load_profile_file(Path("rules/coupang/ko-sdh.yaml"))
+cp_shot = load_profile_file(rule_file("coupang/ko-sdh"))
 ok("쿠팡은 장면 전환 비적용이라 이 검사를 부르지 않는다",
    cp_shot["shot_change"]["applied"] is False)
 
@@ -970,15 +985,15 @@ ok("근거를 남긴다", detect_platform(coupang_style)[0].evidence)
 ok("화자명이 없으면 함부로 단정하지 않는다",
    not detect_platform([Event(1, 0, 3000, "그냥 대사입니다")]))
 
-warn = mismatch_warning(coupang_style, load_profile_file(Path("rules/netflix/ko-sdh-practice.yaml")))
+warn = mismatch_warning(coupang_style, load_profile_file(rule_file("netflix/ko-sdh-practice")))
 ok("프로파일이 어긋나면 경고한다", warn and "coupang" in warn, str(warn))
 ok("경고에 근거가 들어간다", "소괄호" in warn)
 
 ok("맞는 프로파일이면 조용하다",
-   mismatch_warning(coupang_style, load_profile_file(Path("rules/coupang/ko-sdh.yaml"))) is None)
+   mismatch_warning(coupang_style, load_profile_file(rule_file("coupang/ko-sdh"))) is None)
 ok("근거가 약하면 말하지 않는다",
    mismatch_warning([Event(1, 0, 3000, "그래…")],
-                    load_profile_file(Path("rules/coupang/ko-sdh.yaml"))) is None)
+                    load_profile_file(rule_file("coupang/ko-sdh"))) is None)
 
 
 # --- 스크립트 대조 -----------------------------------------------------------
@@ -4346,20 +4361,20 @@ ok("여러 작품이 근거인 학습값은 짚지 않는다",
    str(_ln.single_work_learned(["rules/learned/netflix/ko-sdh.yaml"])))
 ok("학습값만 있고 코드가 없으면 '최소 2편'은 말하지 않는다",
    "최소 2편" not in (_ln.report(["rules/learned/coupang/ko-sdh.yaml",
-                                 "rules/sources/작업자-자료/반영-계획.md"]) or ""))
+                                 "rules/private/sources/작업자-자료/반영-계획.md"]) or ""))
 
 # **한글 경로가 그대로 나와야 한다.** git 기본값은 한글을 8진수로 감싸 내놓아
-# (`"rules/sources/ì..."`) 접두사 검사가 통째로 빗나간다 — 이 검사를
+# (`"rules/private/sources/ì..."`) 접두사 검사가 통째로 빗나간다 — 이 검사를
 # 붙인 첫 커밋이 실제로 그래서 조용히 지나갔다(2026-09-08).
 ok("NUL로 구분된 한글 경로를 그대로 읽는다",
-   _ln.parse_z_output(chr(0).join(["rules/sources/작업자-자료/정독-기록.yaml",
+   _ln.parse_z_output(chr(0).join(["rules/private/sources/작업자-자료/정독-기록.yaml",
                                  "checker/cli.py", ""])
                       .encode("utf-8"))
-   == ["rules/sources/작업자-자료/정독-기록.yaml", "checker/cli.py"])
+   == ["rules/private/sources/작업자-자료/정독-기록.yaml", "checker/cli.py"])
 ok("한글 경로도 갈래로 잡힌다",
-   "문서 정독" in _ln.lanes_of(["rules/sources/작업자-자료/정독-기록.yaml"]))
+   "문서 정독" in _ln.lanes_of(["rules/private/sources/작업자-자료/정독-기록.yaml"]))
 
-_ln_lanes = _ln.lanes_of(["rules/netflix/ko-sdh.yaml", "rules/sources/x.md",
+_ln_lanes = _ln.lanes_of(["rules/private/netflix/ko-sdh.yaml", "rules/private/sources/x.md",
                           "corpus/pairs/a.json", "checker/cli.py", "docs/PRD.md"])
 ok("네 갈래를 각각 알아본다",
    set(_ln_lanes) == {"규정", "문서 정독", "코퍼스·학습", "코드"}, str(sorted(_ln_lanes)))

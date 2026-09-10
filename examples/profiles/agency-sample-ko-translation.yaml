@@ -13,7 +13,10 @@ schema_version: 1
 platform: netflix          # 어느 플랫폼 납품인지
 language: ko
 kind: translation          # 상속하려면 부모와 같은 kind 여야 한다(섞임 방지)
-extends: ../../rules/netflix/ko-translation.yaml
+# 자리를 적지 않고 이름만 적는다 — 로더가 `rules/`와 `rules/private/`(비공개
+# 규정 저장소 클론), 사용자 프로파일 폴더를 차례로 뒤져 찾는다. 예시 파일을
+# 어디에 복사해 두든 이 줄은 그대로 통한다.
+extends: netflix/ko-translation.yaml
 status: complete
 
 source:

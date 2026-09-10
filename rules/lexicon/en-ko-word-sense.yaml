@@ -1,6 +1,6 @@
 # 영어 단어·표현 뜻풀이 사전 — 문자 그대로 옮기면 오역이 되는 자리.
 #
-# 출처: 작업자 실무 자료 `표기_맞춤법_번역.txt`(rules/sources/작업자-자료) "번역투|오역|
+# 출처: 작업자 실무 자료 `표기_맞춤법_번역.txt`(rules/private/sources/작업자-자료) "번역투|오역|
 # 윤문" 절의 "원문 의미 살리기" 소절(781~820행). 2026-08-27 사용자 확인 후 분리.
 #
 # 원칙(번역투 종결어미, 한정사/빈도부사 생략, 현재진행형 등)은 `revise.py`의
@@ -20,7 +20,7 @@ kind: lexicon
 language_pair: en-ko
 source:
   official: false
-  client: "작업자 실무 자료 (표기_맞춤법_번역.txt '원문 의미 살리기' 절, rules/sources/작업자-자료)"
+  client: "작업자 실무 자료 (표기_맞춤법_번역.txt '원문 의미 살리기' 절, rules/private/sources/작업자-자료)"
   verified: "2026-08-27"
 
 entries:

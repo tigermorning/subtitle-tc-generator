@@ -374,7 +374,7 @@ def suggest_spotting(events: list[Event], speech: list[tuple[int, int]], fps: fl
 # zone, `InCuesLeftRedZone = 7` 등)은 두 소프트/하드 임계값을 나눠 세부
 # 우선순위(연결된 자막·체이닝)를 다루는 SE만의 UI 개념이고, 넷플릭스 공식
 # 문서(위 인용)엔 그런 2단계 구분이 없다 — 그래서 여기 상수로 옮기지 않았다.
-# `rules/sources/작업자-자료/이미지-정독.md`의 "SE '프로필 편집' 프레임 표"
+# `rules/private/sources/작업자-자료/이미지-정독.md`의 "SE '프로필 편집' 프레임 표"
 # 절에 fps별 환산표와 함께 이 결론을 적어 뒀다.
 SHOT_CLEARANCE_MS = 500
 SHOT_OUT_LEAD_FRAMES = 2

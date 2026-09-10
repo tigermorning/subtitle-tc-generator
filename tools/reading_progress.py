@@ -8,7 +8,7 @@
 없었다.** 그래서 `이미지-정독.md`는 머리말에 "127장 전수 정독"이라고 적혀 있는데,
 실제로 개별 기록이 있는 것은 그보다 적다.
 
-`rules/sources/작업자-자료/정독-기록.yaml`이 그 셈을 할 수 있는 형식이고, 이
+`rules/private/sources/작업자-자료/정독-기록.yaml`이 그 셈을 할 수 있는 형식이고, 이
 도구가 센다.
 
 ## 무엇을 세나
@@ -33,7 +33,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-LEDGER = ROOT / "rules" / "sources" / "작업자-자료" / "정독-기록.yaml"
+LEDGER = ROOT / "rules" / "private" / "sources" / "작업자-자료" / "정독-기록.yaml"
 
 STATES = ("반영함", "정독함", "그룹판정", "안읽음", "보류")
 _ID = re.compile(r"^([A-Za-z]+)-?(\d+)$")

@@ -224,11 +224,21 @@ def user_root() -> Path:
 
 
 def _roots() -> list[Path]:
-    """프로파일을 찾을 자리들. **사용자 것이 먼저다** — 같은 이름이면 사람이 이긴다."""
+    """프로파일을 찾을 자리들. **사용자 것이 먼저다** — 같은 이름이면 사람이 이긴다.
+
+    `rules/private/`도 함께 본다. 발주처 공식 규정(넷플릭스·디즈니+·쿠팡플레이)은
+    파트너 전용 비공개 문서라 이 저장소에 넣지 않고 별도 비공개 저장소에 둔다
+    (`.gitignore` 참고). 클론해 놓으면 `netflix/ko-sdh`처럼 **경로가 바뀌기 전과
+    똑같은 이름으로** 찾힌다 — 부르는 쪽은 파일이 어느 자리에 있는지 몰라도 된다.
+    없으면 그 플랫폼 프로파일만 안 보일 뿐 나머지 검사는 그대로 돈다.
+    """
     roots = []
     user = user_root()
     if user.is_dir():
         roots.append(user)
+    private = RULES_ROOT / "private"
+    if private.is_dir():
+        roots.append(private)
     roots.append(RULES_ROOT)
     return roots
 

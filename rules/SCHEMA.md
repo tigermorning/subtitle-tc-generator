@@ -119,7 +119,7 @@ collision:
 
 **`collision.policy`는 확정됐다 — 미확보가 아니다.** 사용자가 준 구글독스 원본
 (작업 기본 원칙.docx 안 이미지 WORK-030)을 2026-08-14 전수 정독해서 값을 뽑았다
-(`rules/sources/작업자-자료/이미지-정독.md` 207~236행). 넷플릭스·디즈니는
+(`rules/private/sources/작업자-자료/이미지-정독.md` 207~236행). 넷플릭스·디즈니는
 `dialogue_only`(화면자막 삭제), 쿠팡은 `keep_both`(병기) — 이미
 `coupang/common.yaml`·`disney/common.yaml`·`netflix/ko-sdh-practice.yaml`에
 들어가 있다. 다시 찾을 필요 없다.

@@ -1,4 +1,4 @@
-# 규정(`rules/netflix/common.yaml`·`en-translation.yaml`)이 비워 둔 자리를
+# 규정(`rules/private/netflix/common.yaml`·`en-translation.yaml`)이 비워 둔 자리를
 # 실제 자막에서 관측한 값으로 채운다. 규칙 11 — `origin: learned`은 지우지 않는다.
 #
 # 2026-08-26: 드라마A(6부작) + 예능B(8부작) + 예능A
