@@ -4234,7 +4234,7 @@ ok("VAD 기본값이 이름 붙은 상수와 같다",
     _a4_sig.parameters["min_silence_ms"].default)
    == (_a4_vad.THRESHOLD, _a4_vad.MIN_SPEECH_MS, _a4_vad.MIN_SILENCE_MS))
 ok("VAD 상수가 실측 당시 값 그대로다(바꾸려면 주석의 표부터 갱신한다)",
-   (_a4_vad.THRESHOLD, _a4_vad.MIN_SPEECH_MS, _a4_vad.MIN_SILENCE_MS) == (0.5, 120, 250))
+   (_a4_vad.THRESHOLD, _a4_vad.MIN_SPEECH_MS, _a4_vad.MIN_SILENCE_MS) == (0.5, 120, 100))
 ok("침묵 당김 폭이 이름 붙은 상수와 같다",
    _a4_inspect.signature(_a4_resplit._snap_to_silence).parameters["tolerance_ms"].default
    == _a4_resplit.SNAP_TOLERANCE_MS == 400)
@@ -4262,6 +4262,20 @@ _a4_score = _a4_sweep.score([(0, 1000), (2000, 3000)], [(0, 1000), (2000, 3000)]
 ok("정답과 똑같은 구간이면 오차가 0이다",
    _a4_score["인점중앙"] == 0 and _a4_score["아웃중앙"] == 0 and _a4_score["덮음%"] == 100.0,
    str(_a4_score))
+
+# 코퍼스 모드(2026-09-10) — 소리는 있는데 라벨이 없는 구간(<IVER>)은 평가에서
+# 뺀다. 안 빼면 인터뷰어 자리의 VAD 구간이 오답으로 세어져 문턱값이 끌린다.
+_a4_ex = _a4_sweep.raw_errors(
+    [(0, 1000), (5000, 6000), (9000, 10000)], [(0, 1000), (5000, 6000), (9000, 10000)],
+    exclude=[(4500, 6500)])
+ok("제외 구간과 겹치는 정답은 세지 않는다", _a4_ex[3] == 2, str(_a4_ex))
+ok("제외 구간 안의 VAD 경계는 후보에서 빠진다",
+   _a4_ex[0] == [0, 0] and _a4_ex[1] == [0, 0], str(_a4_ex))
+# 옆에 침묵이 있는 경계만 잰다 — 인터뷰어 말이 붙은 아웃점은 VAD가 못 끊는 게 정상.
+_a4_pt = _a4_sweep.raw_errors(
+    [(0, 2000)], [(0, 1000), (1000, 2000)], points=([0], [2000]))
+ok("경계 목록이 오면 인점·아웃점 오차는 그 경계에서만 잰다",
+   _a4_pt[0] == [0] and _a4_pt[1] == [0] and _a4_pt[3] == 2, str(_a4_pt))
 
 
 # --- 문서가 코드보다 낡지 않게(docs_check) ----------------------------------
