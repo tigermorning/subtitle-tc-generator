@@ -150,7 +150,7 @@ def summarize(comparison: Comparison, fps: float = 23.976,
     """무엇이 얼마나 어긋나는지. 고칠 값을 여기서 읽는다.
 
     `char_weights`를 안 주면(기본) `count_chars`가 모든 문자를 1.0으로 센다 —
-    한국어 자막 글자 수 규정(CJK 1자·공백/라틴/문장부호 0.5자)과 다른 값이다.
+    한국어 자막 글자 수 규정(CJK와 그 외에 다른 가중치)과 다른 값이다.
     2026-09-01, T14로 학습값(`tools/corpus_build.py`, 가중치 적용)과 이
     함수가 낸 `chars_per_cue`(가중치 미적용)를 견주다가 발견 — 코드 전체에서
     글자 수를 재는 다른 자리(`resplit.py`·`checks.py`·`corpus_build.py`)는

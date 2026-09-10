@@ -173,7 +173,7 @@ def speech_gaps(speech: list[tuple[int, int]], duration_ms: int,
     return gaps
 
 
-# 최종 자막 하나의 상한. 정확한 값은 플랫폼마다 다르지만(디즈니 7000ms 등)
+# 최종 자막 하나의 상한. 정확한 값은 플랫폼마다 다르지만
 # 여기는 생성 파이프라인 진입 전이라 프로파일을 모른다 — 넉넉히 잡아 둔다.
 # **`converge()`가 나중에 다시 봐 주지 않는다**(2026-08-31, 코드 리뷰로
 # 발견 — sfx 병합은 `generate()`가 이미 끝난 뒤 cli.py에서 따로 돈다).

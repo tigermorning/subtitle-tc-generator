@@ -71,11 +71,13 @@ if (HasTooLongLine(p.Text.SplitToLines()) && callbacks.AllowFix(p, fixAction))
 
 `src/libse/Common/TextLengthCalculator/` 에 전략 패턴으로 13개. `CalcFactory.MakeCalculator(strategy)`로 갈아끼운다.
 
-`CalcCjk.cs`가 **넷플릭스 한국어 규칙을 이미 구현하고 있다**: 한글·CJK는 1자, 나머지(라틴·공백·문장부호)는 0.5자.
+`CalcCjk.cs`가 **넷플릭스 한국어 규칙을 이미 구현하고 있다**: 한글·CJK와 나머지(라틴·
+공백·문장부호)에 서로 다른 가중치를 더한다. 두 가중치의 실제 값은 비공개 규정
+프로파일의 `limits.char_weights`에 있다(`rules/private/`).
 
 ```csharp
-else if (... LanguageAutoDetect.Letters.Korean.Contains(ch) || IsCjk(ch)) { length++; }
-else { length += 0.5m; }
+else if (... LanguageAutoDetect.Letters.Korean.Contains(ch) || IsCjk(ch)) { /* CJK 가중치 */ }
+else { /* 그 외 가중치 */ }
 ```
 
 ### 3.3 `RulesProfile` — 플랫폼 프로파일
@@ -95,13 +97,15 @@ BridgeGaps / DialogHyphenSpace / EllipsesNotThreeDots / Glyph / Italics / MaxCps
 
 그리고 **`NetflixQualityController`는 `IsSDH`와 `IsChildrenProgram` 플래그로 SDH/번역을 이미 구분한다.** 한국어 수치도 우리가 정리한 공식 규정과 정확히 일치:
 
-| 조건 | ko 값 | 우리 문서 |
+| 조건 | SubtitleEdit ko 값 | 우리 프로파일과 |
 |---|---|---|
-| 번역 자막 성인 | 12 CPS | 12 ✓ |
-| 번역 자막 아동 | 9 CPS | 9 ✓ |
-| SDH 성인 | 14 CPS | 14 ✓ |
-| SDH 아동 | 11 CPS | 11 ✓ |
-| 한 줄 최대 | 16자 | 16 ✓ |
+| 번역 자막 성인 CPS | 규정값 | 일치 ✓ |
+| 번역 자막 아동 CPS | 규정값 | 일치 ✓ |
+| SDH 성인 CPS | 규정값 | 일치 ✓ |
+| SDH 아동 CPS | 규정값 | 일치 ✓ |
+| 한 줄 최대 글자 수 | 규정값 | 일치 ✓ |
+
+네 값 모두 비공개 규정 프로파일(`rules/private/netflix/`)에 있다.
 
 `NetflixCheckMaxLineLength`는 `ko`일 때 `CalcCjk`로 세도록 분기까지 돼 있다.
 

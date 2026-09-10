@@ -48,10 +48,10 @@ def ids(report: dict) -> set[str]:
 
 # --- 글자 수 가중치 ------------------------------------------------------
 
-ok("한글은 1자", count_chars("가나다", {"cjk": 1.0, "other": 0.5}) == 3)
-ok("라틴·공백은 0.5자", count_chars("ab c", {"cjk": 1.0, "other": 0.5}) == 2.0)
+ok("CJK는 가중치대로 센다", count_chars("가나다", {"cjk": 1.0, "other": 0.5}) == 3)
+ok("그 외 문자도 가중치대로 센다", count_chars("ab c", {"cjk": 1.0, "other": 0.5}) == 2.0)
 ok("태그는 세지 않는다", count_chars("<i>가나</i>", {"cjk": 1.0, "other": 0.5}) == 2)
-ok("영어는 전부 1자", count_chars("abc ", {"cjk": 1.0, "other": 1.0}) == 4)
+ok("가중치가 같으면 전부 1자", count_chars("abc ", {"cjk": 1.0, "other": 1.0}) == 4)
 
 
 # --- 로더 계약 -----------------------------------------------------------
@@ -75,13 +75,17 @@ ko_sdh = load_profile("netflix", "ko", "sdh")
 ko_tr = load_profile("netflix", "ko", "translation")
 en_tr = load_profile("netflix", "en", "translation")
 
-ok("SDH와 번역의 CPS가 다르다",
-   ko_sdh["limits"]["reading_speed_cps"]["adult"] == 14
-   and ko_tr["limits"]["reading_speed_cps"]["adult"] == 12)
-ok("common이 병합된다", ko_sdh["limits"]["duration_ms"]["max"] == 7000)
+# 규정 수치 자체는 비공개 프로파일에 있다. 시험은 **관계**를 본다 — 수치를 여기
+# 박아 두면 규정이 개정될 때마다 시험이 깨지고, 저장소에 규정이 다시 새어 나온다.
+ok("SDH가 번역보다 읽기 속도가 빠르다",
+   ko_sdh["limits"]["reading_speed_cps"]["adult"]
+   > ko_tr["limits"]["reading_speed_cps"]["adult"])
+ok("common이 병합된다",
+   ko_sdh["limits"]["duration_ms"]["max"]
+   == ko_tr["limits"]["duration_ms"]["max"] > 0)
 ok("공통 규칙도 이어 붙는다", any(r["id"] == "C01" for r in ko_sdh["rules"]))
-ok("한국어 16자 / 영어 42자",
-   ko_tr["limits"]["chars_per_line"] == 16 and en_tr["limits"]["chars_per_line"] == 42)
+ok("한국어와 영어의 줄당 글자 수가 다르다",
+   ko_tr["limits"]["chars_per_line"] != en_tr["limits"]["chars_per_line"] > 0)
 
 # 디즈니·쿠팡 한국어 SDH는 실무 자료로 채워졌다. 아직 없는 조합은 여전히 실패해야 한다.
 try:
@@ -171,7 +175,7 @@ r = check_events([ev("한 줄\n두 줄\n세 줄")], ko_sdh)
 ok("3줄 검출", "C02" in ids(r))
 
 r = check_events([ev("가나다라마바사아자차카타파하가나다라", end=20000)], ko_tr)
-ok("16자 초과 검출", "T01" in ids(r))
+ok("줄당 글자 수 초과 검출", "T01" in ids(r))
 
 r = check_events([ev("가" * 20, end=20000)], ko_tr, children=True)
 ok("아동 기준이 별도로 적용된다",
@@ -444,8 +448,10 @@ agency = load_profile_file(AGENCY)
 
 ok("공식 프로파일을 상속한다", agency["platform"] == "netflix" and agency["kind"] == "translation")
 ok("덮어쓴 값이 이긴다", agency["limits"]["chars_per_line"] == 14)
-ok("안 덮어쓴 값은 상속된다", agency["limits"]["reading_speed_cps"]["adult"] == 12)
-ok("공통 프로파일까지 사슬로 병합된다", agency["limits"]["duration_ms"]["max"] == 7000)
+ok("안 덮어쓴 값은 상속된다", agency["limits"]["reading_speed_cps"]["adult"]
+   == ko_tr["limits"]["reading_speed_cps"]["adult"])
+ok("공통 프로파일까지 사슬로 병합된다", agency["limits"]["duration_ms"]["max"]
+   == ko_tr["limits"]["duration_ms"]["max"])
 ok("disable_rules로 상위 규칙을 끈다", all(r["id"] != "T06" for r in agency["rules"]))
 ok("발주처 고유 규칙이 더해진다", any(r["id"] == "A01" for r in agency["rules"]))
 
@@ -549,8 +555,9 @@ ok("디즈니는 씬마다 초기화", disney["speaker_id"]["numbering_reset"] =
 ok("쿠팡은 장면 전환 비적용", coupang["shot_change"]["applied"] is False)
 ok("디즈니는 장면 전환 적용", disney["shot_change"]["applied"] is True)
 ok("실무 판은 공식 값을 물려받는다",
-   practice["limits"]["reading_speed_cps"]["adult"] == 14
-   and practice["limits"]["chars_per_line"] == 16)
+   practice["limits"]["reading_speed_cps"]["adult"]
+   == ko_sdh["limits"]["reading_speed_cps"]["adult"]
+   and practice["limits"]["chars_per_line"] == ko_sdh["limits"]["chars_per_line"])
 
 r = check_events([ev("아, 저요? [웃음]")], coupang)
 ok("쿠팡은 대사 뒤 효과음을 잡는다", "CP01" in ids(r))
@@ -623,18 +630,22 @@ coupang2 = load_profile_file(rule_file("coupang/ko-sdh"))
 disney2 = load_profile_file(rule_file("disney/ko-sdh"))
 practice2 = load_profile_file(rule_file("netflix/ko-sdh-practice"))
 
-ok("쿠팡 듀레이션 상한만 6초", coupang2["limits"]["duration_ms"]["max"] == 6000
-   and disney2["limits"]["duration_ms"]["max"] == 7000)
+ok("쿠팡 듀레이션 상한만 더 짧다",
+   coupang2["limits"]["duration_ms"]["max"] < disney2["limits"]["duration_ms"]["max"])
 ok("CPL·CPS는 세 플랫폼이 같다",
-   coupang2["limits"]["chars_per_line"] == disney2["limits"]["chars_per_line"] == 16
-   and coupang2["limits"]["reading_speed_cps"]["adult"] == 14)
+   coupang2["limits"]["chars_per_line"] == disney2["limits"]["chars_per_line"]
+   == ko_sdh["limits"]["chars_per_line"]
+   and coupang2["limits"]["reading_speed_cps"]["adult"]
+   == ko_sdh["limits"]["reading_speed_cps"]["adult"])
 ok("쿠팡은 불가피할 때의 한계도 적어 둔다",
-   coupang2["limits"]["chars_per_line_hard"] == 20 and coupang2["limits"]["max_lines_hard"] == 3)
+   coupang2["limits"]["chars_per_line_hard"] > coupang2["limits"]["chars_per_line"]
+   and coupang2["limits"]["max_lines_hard"] > coupang2["limits"].get("max_lines", 0))
 
-r = check_events([ev("가나다", end=6500)], coupang2)
-ok("쿠팡 6초 초과를 잡는다", "CP00" in ids(r))
-r = check_events([ev("가나다", end=6500)], disney2)
-ok("디즈니는 6.5초를 잡지 않는다", "DP00" not in ids(r))
+_over_cp = coupang2["limits"]["duration_ms"]["max"] + 500
+r = check_events([ev("가나다", end=_over_cp)], coupang2)
+ok("쿠팡 상한 초과를 잡는다", "CP00" in ids(r))
+r = check_events([ev("가나다", end=_over_cp)], disney2)
+ok("같은 길이를 디즈니는 잡지 않는다", "DP00" not in ids(r))
 
 gap_events = [{"index": 1, "start_ms": 0, "end_ms": 2000, "text": "첫 줄"},
               {"index": 2, "start_ms": 2050, "end_ms": 4000, "text": "둘째 줄"}]
@@ -788,7 +799,8 @@ r = check_events([ev("자막: 홍길동")], pr6)
 ok("넷플릭스는 크레딧을 잡는다", "S32" in ids(r))
 r = check_events([ev("자막: 홍길동")], cp6)
 ok("쿠팡은 크레딧을 쓴다", not any(v["rule_id"] == "CP21" for v in r["violations"]))
-ok("쿠팡 크레딧 길이는 2초", cp6["credit"]["credit_duration_ms"] == 2000)
+ok("쿠팡은 크레딧 길이를 정해 둔다",
+   0 < cp6["credit"]["credit_duration_ms"] < cp6["limits"]["duration_ms"]["max"])
 
 r = check_events([{"index": 1, "start_ms": 0, "end_ms": 3000, "text": "첫 자막"}], cp6)
 ok("쿠팡은 첫 셀 인점 0을 잡는다", "CP20" in ids(r))
@@ -823,23 +835,26 @@ ok("호명 뒤 쉼표는 정상", "S34" not in ids(r))
 from checker.timing import TimingLimits, converge  # noqa: E402
 
 lim = TimingLimits.from_profile(ko_sdh, fps=23.976)
-# 넷플릭스 공식은 5/6초를 833ms로 적었고 실무 스펙 표는 0.834초로 적었다.
-# 같은 값을 반올림만 다르게 쓴 것이라 프로파일마다 그대로 둔다.
+# 넷플릭스 공식과 실무 스펙 표가 최소 표시 시간을 반올림만 다르게 적었다.
+# 같은 값이라 프로파일마다 그대로 둔다.
 ok("프로파일에서 한계를 읽는다",
-   lim.min_duration_ms == 833 and lim.max_duration_ms == 7000 and lim.max_cps == 14)
+   lim.min_duration_ms == ko_sdh["limits"]["duration_ms"]["min"]
+   and lim.max_duration_ms == ko_sdh["limits"]["duration_ms"]["max"]
+   and lim.max_cps == ko_sdh["limits"]["reading_speed_cps"]["adult"])
 
 cp_lim = TimingLimits.from_profile(load_profile_file(rule_file("coupang/ko-sdh")), fps=23.976)
-ok("쿠팡은 6초·2프레임", cp_lim.max_duration_ms == 6000 and cp_lim.min_gap_ms == 83)
+ok("쿠팡은 상한이 더 짧고 프레임 간격을 쓴다",
+   cp_lim.max_duration_ms < lim.max_duration_ms and cp_lim.min_gap_ms > 0)
 ok("프레임레이트가 바뀌면 간격도 바뀐다",
    TimingLimits.from_profile(load_profile_file(rule_file("coupang/ko-sdh")),
-                             fps=59.94).min_gap_ms == 33)
+                             fps=59.94).min_gap_ms < cp_lim.min_gap_ms)
 
 r = converge([Event(1, 0, 400, "짧다"), Event(2, 5000, 6000, "다음")], lim)
 ok("최소 표시 시간을 늘린다", r.events[0].duration_ms >= lim.min_duration_ms, str(r.events[0]))
 ok("무엇을 왜 고쳤는지 남긴다", r.changes and "최소 표시 시간" in r.changes[0].reason)
 
 r = converge([Event(1, 0, 20000, "길다")], lim)
-ok("최대 표시 시간을 줄인다", r.events[0].duration_ms == 7000)
+ok("최대 표시 시간을 줄인다", r.events[0].duration_ms == lim.max_duration_ms)
 
 r = converge([Event(1, 0, 3000, "앞"), Event(2, 2000, 5000, "뒤")], lim)
 ok("겹침을 푼다", r.events[0].end_ms <= r.events[1].start_ms,
