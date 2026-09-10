@@ -1,0 +1,305 @@
+<title>자막 및 TC 생성기</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Gowun+Batang:wght@400;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+KR:wght@400;500;600&display=swap">
+<style>
+:root{
+  --ground:#E8EAED; --surface:#FAFBFC; --ink:#16181C; --ink-soft:#5B6068;
+  --rule:#C9CDD4; --hair:#D6D9DE;
+  --accent:#8A6410; --accent-bright:#C9962F; --accent-wash:#F2E7D2;
+  --chip:#DFE2E7; --chip-line:#B4BAC3; --chip-ink:#1A1D22; --chip-ink-soft:#5B6068;
+  --ai-fill:#F6E4C0; --ai-line:#C9962F; --ai-ink:#5A3F08; --ai-ink-soft:#85662A;
+  --arrow:#7A818C;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --ground:#14161A; --surface:#1C1F24; --ink:#E9EBEE; --ink-soft:#99A0AA;
+    --rule:#2C3138; --hair:#262A31;
+    --accent:#E0A32E; --accent-bright:#F0BC5A; --accent-wash:#2A2313;
+    --chip:#242830; --chip-line:#3A414B; --chip-ink:#E4E7EB; --chip-ink-soft:#99A0AA;
+    --ai-fill:#3A2C10; --ai-line:#C9962F; --ai-ink:#F3D9A4; --ai-ink-soft:#C4A669;
+    --arrow:#79818C;
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#14161A; --surface:#1C1F24; --ink:#E9EBEE; --ink-soft:#99A0AA;
+  --rule:#2C3138; --hair:#262A31;
+  --accent:#E0A32E; --accent-bright:#F0BC5A; --accent-wash:#2A2313;
+  --chip:#242830; --chip-line:#3A414B; --chip-ink:#E4E7EB; --chip-ink-soft:#99A0AA;
+  --ai-fill:#3A2C10; --ai-line:#C9962F; --ai-ink:#F3D9A4; --ai-ink-soft:#C4A669;
+  --arrow:#79818C;
+}
+*{box-sizing:border-box}
+body{background:var(--ground);color:var(--ink);
+  font-family:"IBM Plex Sans KR","Malgun Gothic",system-ui,sans-serif;
+  -webkit-font-smoothing:antialiased}
+.wrap{max-width:860px;margin:0 auto;padding:56px 24px 96px}
+header{border-bottom:1px solid var(--rule);padding-bottom:28px;margin-bottom:8px}
+h1{font-family:"Gowun Batang",serif;font-weight:700;font-size:38px;line-height:1.25;
+  margin:0 0 14px;letter-spacing:-.01em;text-wrap:balance}
+.meta{display:flex;flex-wrap:wrap;gap:8px 10px;font-family:"IBM Plex Mono",monospace;
+  font-size:12px;letter-spacing:.06em;color:var(--ink-soft)}
+.meta span{border:1px solid var(--hair);border-radius:2px;padding:4px 9px}
+.beat{display:grid;grid-template-columns:74px 1fr;gap:26px;padding:34px 0;
+  border-bottom:1px solid var(--hair)}
+.cue{font-size:12px;font-weight:500;color:var(--accent);
+  letter-spacing:.04em;padding-top:11px}
+.say{display:flex;flex-direction:column;gap:20px}
+.say p{margin:0;max-width:34em;font-size:20px;line-height:1.85;letter-spacing:-.003em}
+.note{max-width:34em;display:grid;grid-template-columns:auto 1fr;gap:12px;align-items:start;
+  background:var(--accent-wash);border-left:2px solid var(--accent-bright);
+  border-radius:0;padding:13px 16px;font-size:15px;line-height:1.65;color:var(--ink)}
+.note b{font-family:"IBM Plex Mono",monospace;font-size:10px;font-weight:500;
+  letter-spacing:.1em;color:var(--accent);white-space:nowrap;padding-top:4px}
+.note ul{margin:0;padding-left:17px;display:flex;flex-direction:column;gap:7px}
+.figure{margin:0;background:var(--surface);
+  border:1px solid var(--hair);padding:22px 20px 18px;overflow-x:auto}
+.figure figcaption{font-family:"IBM Plex Mono",monospace;font-size:11px;
+  letter-spacing:.08em;color:var(--ink-soft);margin-bottom:16px}
+svg{width:100%;height:auto;display:block;min-width:620px;
+  font-family:"IBM Plex Sans KR","Malgun Gothic",sans-serif}
+.n-rule rect{fill:var(--chip);stroke:var(--chip-line);stroke-width:.8}
+.n-ai rect{fill:var(--ai-fill);stroke:var(--ai-line);stroke-width:.8}
+.n-rule .t{fill:var(--chip-ink)}.n-rule .s{fill:var(--chip-ink-soft)}
+.n-ai .t{fill:var(--ai-ink)}.n-ai .s{fill:var(--ai-ink-soft)}
+.t{font-size:14px;font-weight:500}.s{font-size:12px}
+.lane{fill:none;stroke:var(--chip-line);stroke-width:.8;stroke-dasharray:3 4}
+.lb{font-size:14px;font-weight:600;fill:var(--ink)}
+.lbs{font-size:12px;fill:var(--ink-soft)}
+.lg{font-size:12px;fill:var(--ink-soft)}
+.cap{font-size:12px;fill:var(--ink-soft)}
+.ar{stroke:var(--arrow);stroke-width:1.4;fill:none}
+.qa{margin-top:52px}
+.qa h2{font-family:"Gowun Batang",serif;font-size:24px;font-weight:700;margin:0 0 6px}
+.qa .lede{margin:0 0 26px;color:var(--ink-soft);font-size:15px}
+.qa dl{margin:0;display:flex;flex-direction:column;gap:2px}
+.qa dt{background:var(--surface);border:1px solid var(--hair);border-bottom:none;
+  padding:14px 18px 12px;font-weight:600;font-size:16px}
+.qa dd{margin:0 0 14px;background:var(--surface);border:1px solid var(--hair);
+  border-top:none;padding:0 18px 15px;font-size:15px;line-height:1.7;color:var(--ink-soft)}
+.qa dd code{font-family:"IBM Plex Mono",monospace;font-size:13px;color:var(--accent)}
+.tbl{overflow-x:auto;background:var(--surface);border:1px solid var(--hair)}
+table{border-collapse:collapse;width:100%;min-width:520px;font-size:14px}
+caption{caption-side:bottom;text-align:left;padding:10px 16px 14px;font-size:12px;
+  color:var(--ink-soft);line-height:1.6}
+th{text-align:left;font-weight:500;font-size:11px;letter-spacing:.08em;
+  color:var(--ink-soft);font-family:"IBM Plex Mono",monospace;
+  padding:12px 16px;border-bottom:1px solid var(--rule)}
+td{padding:11px 16px;border-bottom:1px solid var(--hair);vertical-align:top;
+  line-height:1.5}
+tr:last-child td{border-bottom:none}
+td.v{font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums;
+  white-space:nowrap;color:var(--ink)}
+td.n{color:var(--ink-soft);font-size:13px}
+td em{font-style:normal;color:var(--ink-soft)}
+@media (max-width:680px){
+  .wrap{padding:36px 18px 72px} h1{font-size:29px}
+  .beat{grid-template-columns:1fr;gap:14px;padding:28px 0}
+  .cue{padding-top:0}
+  .say p{font-size:18px;line-height:1.8}
+}
+</style>
+
+<div class="wrap">
+<header>
+  <h1>자막 및 TC 생성기</h1>
+  <div class="meta"><span>발표 대본</span><span>구어체</span><span>2026.09.10</span></div>
+</header>
+
+<section class="beat">
+  <div class="cue">여는 말</div>
+  <div class="say">
+    <p>안녕하세요, 신서연입니다. 저는 요즘 “자막 및 TC 생성기”라는 도구를 만들고 있어요.</p>
+  </div>
+</section>
+
+<section class="beat">
+  <div class="cue">문제</div>
+  <div class="say">
+    <p>넷플릭스나 디즈니플러스 보면 자막이 화면 타이밍에 딱딱 맞잖아요. 그거 다 사람이 손으로 잡아요. 그것도 플랫폼마다 규정이 다 달라요. 넷플릭스 기준 다르고 디즈니 기준 다르고요.</p>
+  </div>
+</section>
+
+<section class="beat">
+  <div class="cue">파이프라인</div>
+  <div class="say">
+    <figure class="figure">
+    <figcaption>PIPELINE</figcaption>
+    <svg viewBox="0 0 680 700" role="img" aria-labelledby="plt pld">
+      <title id="plt">자막 및 TC 생성기 작업 구조</title>
+      <desc id="pld">발주처 확인 뒤 TC 작업(전사, 대조, 스포팅)이 오고, 거기서 번역 자막 작업(번역, 재분할, 글자 수 검사)과 SDH 자막 작업(화자명·효과음, 장면전환, 글자 수 검사)으로 갈라진다. 세 작업은 각각 따로 발주된다.</desc>
+      <defs><marker id="ar" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>
+
+      <g class="n-rule">
+        <rect x="240" y="40" width="200" height="56" rx="6"/>
+        <text class="t" x="340" y="58" text-anchor="middle" dominant-baseline="central">발주처 확인</text>
+        <text class="s" x="340" y="76" text-anchor="middle" dominant-baseline="central">어느 OTT 규정인지</text>
+      </g>
+      <line class="ar" x1="340" y1="96" x2="340" y2="126" marker-end="url(#ar)"/>
+
+      <rect class="lane" x="40" y="136" width="600" height="120" rx="10"/>
+      <text class="lb" x="60" y="158" dominant-baseline="central">TC 작업</text>
+      <text class="lbs" x="142" y="159" dominant-baseline="central">내용을 몰라도 되는 작업</text>
+      <g class="n-ai">
+        <rect x="60" y="176" width="160" height="56" rx="6"/>
+        <text class="t" x="140" y="194" text-anchor="middle" dominant-baseline="central">전사</text>
+        <text class="s" x="140" y="212" text-anchor="middle" dominant-baseline="central">whisper로 받아쓰기</text>
+      </g>
+      <g class="n-rule">
+        <rect x="260" y="176" width="160" height="56" rx="6"/>
+        <text class="t" x="340" y="194" text-anchor="middle" dominant-baseline="central">대조</text>
+        <text class="s" x="340" y="212" text-anchor="middle" dominant-baseline="central">대본과 맞춰 표시</text>
+      </g>
+      <g class="n-rule">
+        <rect x="460" y="176" width="160" height="56" rx="6"/>
+        <text class="t" x="540" y="194" text-anchor="middle" dominant-baseline="central">스포팅</text>
+        <text class="s" x="540" y="212" text-anchor="middle" dominant-baseline="central">인·아웃점 확정</text>
+      </g>
+      <line class="ar" x1="228" y1="204" x2="252" y2="204" marker-end="url(#ar)"/>
+      <line class="ar" x1="428" y1="204" x2="452" y2="204" marker-end="url(#ar)"/>
+
+      <line class="ar" x1="340" y1="256" x2="340" y2="284"/>
+      <line class="ar" x1="180" y1="284" x2="500" y2="284"/>
+      <line class="ar" x1="180" y1="284" x2="180" y2="312" marker-end="url(#ar)"/>
+      <line class="ar" x1="500" y1="284" x2="500" y2="312" marker-end="url(#ar)"/>
+
+      <rect class="lane" x="40" y="322" width="280" height="310" rx="10"/>
+      <text class="lb" x="60" y="348" dominant-baseline="central">번역 자막 작업</text>
+      <text class="lbs" x="60" y="368" dominant-baseline="central">장면전환 안 넣음</text>
+      <g class="n-ai">
+        <rect x="60" y="384" width="240" height="56" rx="6"/>
+        <text class="t" x="180" y="402" text-anchor="middle" dominant-baseline="central">번역</text>
+        <text class="s" x="180" y="420" text-anchor="middle" dominant-baseline="central">로컬 Ollama로</text>
+      </g>
+      <line class="ar" x1="180" y1="444" x2="180" y2="460" marker-end="url(#ar)"/>
+      <g class="n-rule">
+        <rect x="60" y="470" width="240" height="56" rx="6"/>
+        <text class="t" x="180" y="488" text-anchor="middle" dominant-baseline="central">재분할</text>
+        <text class="s" x="180" y="506" text-anchor="middle" dominant-baseline="central">의미 단위로 끊기</text>
+      </g>
+      <line class="ar" x1="180" y1="530" x2="180" y2="546" marker-end="url(#ar)"/>
+      <g class="n-rule">
+        <rect x="60" y="556" width="240" height="56" rx="6"/>
+        <text class="t" x="180" y="574" text-anchor="middle" dominant-baseline="central">글자 수 검사</text>
+        <text class="s" x="180" y="592" text-anchor="middle" dominant-baseline="central">읽기 속도·줄 수</text>
+      </g>
+
+      <rect class="lane" x="360" y="322" width="280" height="310" rx="10"/>
+      <text class="lb" x="380" y="348" dominant-baseline="central">SDH 자막 작업</text>
+      <text class="lbs" x="380" y="368" dominant-baseline="central">장면전환 넣음</text>
+      <g class="n-ai">
+        <rect x="380" y="384" width="240" height="56" rx="6"/>
+        <text class="t" x="500" y="402" text-anchor="middle" dominant-baseline="central">화자명·효과음</text>
+        <text class="s" x="500" y="420" text-anchor="middle" dominant-baseline="central">짐작해 후보만 냄</text>
+      </g>
+      <line class="ar" x1="500" y1="444" x2="500" y2="460" marker-end="url(#ar)"/>
+      <g class="n-rule">
+        <rect x="380" y="470" width="240" height="56" rx="6"/>
+        <text class="t" x="500" y="488" text-anchor="middle" dominant-baseline="central">장면전환</text>
+        <text class="s" x="500" y="506" text-anchor="middle" dominant-baseline="central">SDH에만 넣는다</text>
+      </g>
+      <line class="ar" x1="500" y1="530" x2="500" y2="546" marker-end="url(#ar)"/>
+      <g class="n-rule">
+        <rect x="380" y="556" width="240" height="56" rx="6"/>
+        <text class="t" x="500" y="574" text-anchor="middle" dominant-baseline="central">글자 수 검사</text>
+        <text class="s" x="500" y="592" text-anchor="middle" dominant-baseline="central">읽기 속도·줄 수</text>
+      </g>
+
+      <g class="n-ai"><rect x="40" y="644" width="12" height="12" rx="2"/></g>
+      <text class="lg" x="60" y="650" dominant-baseline="central">AI 모델이 하는 일</text>
+      <g class="n-rule"><rect x="192" y="644" width="12" height="12" rx="2"/></g>
+      <text class="lg" x="212" y="650" dominant-baseline="central">규칙·알고리즘이 하는 일</text>
+      <text class="cap" x="40" y="676" dominant-baseline="central">세 작업은 각각 따로 발주된다 — TC만, 번역만, SDH만 받는 경우가 모두 있다</text>
+    </svg>
+  </figure>
+    <p>그래서 영상 하나 받으면 제일 먼저 이게 지금 어디서 상영 중인지부터 확인해요. 발주처가 정해져야 뒤에 따라야 할 규정이 정해지거든요.</p>
+    <p>그다음은 크게 세 갈래인데, 이게 실무에서는 각각 따로 발주되는 독립적인 작업이에요. 먼저 TC 작업. 자막이 몇 초에 뜨고 몇 초에 지는지, 그 자리를 잡는 일이에요. 전사하고, 대본이랑 맞춰보고, 인점 아웃점을 확정해요. 대조할 때 재밌는 게, 전사가 틀릴 때도 있고 대본이 틀릴 때도 있어요. 현장에서 애드리브 치기도 하니까요. 그래서 둘 중 하나를 정답으로 안 두고 어긋나는 데는 표시만 해둬요.</p>
+    <p>TC가 확정되면 거기서 번역 자막이냐 SDH냐로 갈라져요. 번역 자막은 번역하고, 의미 단위로 다시 끊고, 글자 수를 맞춰요. SDH는 청각장애인용 자막이라 누가 말하는지, 무슨 소리가 나는지를 넣고, 장면전환도 표시해요. 이 장면전환은 SDH에만 넣고 번역 자막에는 안 넣어요. 실무 관행이 그래요.</p>
+    <p>그리고 실제로는 TC가 이미 끝난 파일을 받아서 번역만 하는 경우가 제일 흔해요. 그때는 도구가 타임코드를 아예 못 건드리게 잠가버립니다. 잠근 상태에서 타이밍을 고치라고 하면 그냥 에러를 내요.</p>
+    <div class="note"><b>짚을 것</b>
+      <ul>
+        <li>세 갈래가 각각 따로 발주된다는 게 핵심 — TC만, 번역만, SDH만 받는 경우가 다 있음</li>
+        <li>장면전환은 SDH에만 — 넷플릭스 공식 문서는 전체 적용이라 적었지만 실무는 갈라 씀</li>
+        <li>노란 박스 세 개가 AI — 받아쓰기, 번역, 소리 짐작. 검사·타이밍은 전부 규칙</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section class="beat">
+  <div class="cue">원칙</div>
+  <div class="say">
+    <p>여기서 원칙이 하나 있는데, 확실하게 아는 건 자동으로 고치고 애매하게 추정한 건 표시만 해줘요. 그리고 미공개 영상 다루는 작업이라 전사도 번역도 전부 로컬에서 돌아갑니다.</p>
+  </div>
+</section>
+
+<section class="beat">
+  <div class="cue">에이전트</div>
+  <div class="say">
+    <p>그리고 최근에 여기에 에이전트를 하나 붙였어요. Claude Agent SDK로 만든 건데, 도구를 딱 세 개만 줬어요. 검사해라, 고쳐라, 사람한테 물어라. 자동으로 고칠 수 있는 건 바로 고치고, 진짜 판단이 필요한 것만 사람한테 넘겨요.</p>
+    <p>재밌는 게, 이 에이전트는 자막 원문을 아예 못 봐요. 몇 번 규칙이 몇 건 걸렸고 몇 번째 자막에 있다, 딱 이 정보만 받아요. 원래는 미공개 자료 보호하려고 막아둔 건데, 덕분에 파일이 아무리 길어도 비용이 거의 안 늘더라고요.</p>
+    <p>실제 방영작 정답 자막 6편으로 검증했어요. 넷플릭스, 디즈니플러스, 쿠팡플레이 섞어서요. 결과가, 에이전트가 고친 자막을 다시 정답이랑 대조해봤더니 타이밍이 1밀리초도 안 틀어졌어요. 처리 비용은 편당 0.16달러, 우리 돈 200원대였고요.</p>
+    <div class="note"><b>주의</b>
+      <ul>
+        <li>모델 이름은 말하지 말 것 — 코드에 지정 안 했고 SDK 기본값을 씀</li>
+        <li>비용은 달러로 — $0.164, 환율 따라 210~230원. “200원 미만”은 틀림</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section class="beat">
+  <div class="cue">지금 정확도</div>
+  <div class="say">
+    <p>그럼 지금 얼마나 정확하냐. 영역마다 좀 달라요.</p>
+    <p>TC는 숫자가 나와 있어요. 자막이 뜨는 시점은 정답 대비 0.3초 안쪽까지 왔고, 지는 시점은 0.6초 정도 벌어져요. 진짜 문제는 우리가 만든 자막이 정답보다 거의 두 배 오래 떠 있다는 거예요. 여러 사람이 겹쳐서 말하면 그 전부를 하나의 긴 말소리로 잡아버리거든요. 지금 제일 큰 숙제입니다.</p>
+    <p>SDH 쪽 화자명이랑 효과음은 아직 정답이랑 대조해서 재본 적이 없어요. 애초에 자동으로 채우면 안 되는 것들이라, 후보만 내고 사람이 확인하게 해뒀거든요.</p>
+    <p>아, 그리고 아까 말씀드린 1밀리초는 다른 얘기예요. 이미 완성된 자막을 넣고 검사를 돌렸을 때 자동 교정이 그걸 안 건드린다는 뜻이지, 백지에서 만든 TC가 정답이랑 그만큼 맞는다는 뜻은 아니에요.</p>
+    <div class="tbl">
+      <table>
+        <caption>전부 실측치. TC·짝지음율은 2026-08-27~09-01, 비파괴 대조는 2026-09-09.</caption>
+        <thead><tr><th>잰 것</th><th>지금 값</th><th>표본</th></tr></thead>
+        <tbody>
+          <tr><td>TC 인점 절대오차 (중앙값)</td><td class="v">297~367ms</td><td class="n">예능A 15회 1편, ko-SDH</td></tr>
+          <tr><td>TC 아웃점 절대오차 (중앙값)</td><td class="v">580~854ms</td><td class="n">같은 편</td></tr>
+          <tr><td>자막 표시 시간 (중앙값)</td><td class="v">3,000ms</td><td class="n">정답은 1,669ms — 거의 2배</td></tr>
+          <tr><td>정답과 짝지어진 자막 비율</td><td class="v">41~81%</td><td class="n">작품 5개·10편 안팎, 작품마다 편차 큼</td></tr>
+          <tr><td>재분할 뒤 자막 한 개 길이</td><td class="v">30.0자</td><td class="n">고치기 전 35.5자, 정답 30.0자 — 1편</td></tr>
+          <tr><td>SDH 화자명·효과음</td><td class="v"><em>측정 없음</em></td><td class="n">자동으로 안 채우기로 한 영역</td></tr>
+          <tr><td>장면전환</td><td class="v"><em>구현됨</em></td><td class="n">정확도는 아직 안 쟀음</td></tr>
+          <tr><td>자동 교정 비파괴 (TC 편차)</td><td class="v">0ms</td><td class="n">6편, 발주처 3곳 — 생성 정확도 아님</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="note"><b>주의</b>
+      <ul>
+        <li>“인점편향 +16ms”는 인용하지 말 것 — 앞뒤 오차가 상쇄된 값이고, 같은 회차 절대오차는 300ms대</li>
+        <li>발주처·장르별 표본이 아직 3편 미만이라 성숙도 판정은 전부 미완</li>
+        <li>화자명 질문 나오면 — 시리즈물은 앞 회차 정답지로 목소리 표본을 만들 수 있어서 가능성은 열려 있음</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section class="beat">
+  <div class="cue">맺음</div>
+  <div class="say">
+    <p>정리하면, 사람이 판단해야 할 것만 남기고 나머지는 도구가 대신하는 걸 목표로 하고 있고요, 실제 업계 규정이랑 실측 데이터로 계속 검증하면서 만들고 있습니다. 감사합니다.</p>
+  </div>
+</section>
+
+<section class="qa">
+  <h2>질문 나오면</h2>
+  <p class="lede">말하지 않는 부분. 답만 짧게 잡아둔 것.</p>
+  <dl>
+    <dt>파이프라인 더 자세히 설명해줄 수 있어요?</dt>
+    <dd>발주처 확인이 0단계고, 전사·대조·번역·재분할·글자 수 검사가 5단계. TC(자막이 뜨고 지는 자리)를 잡는 일과 그 안에 무슨 말을 채울지 정하는 일은 다른 작업이라, TC부터 확정하고 내용으로 넘어감.</dd>
+    <dt>무슨 에이전트예요?</dt>
+    <dd>Claude Agent SDK 루프. 도구는 <code>run_check</code>, <code>run_fix</code>, <code>ask_human</code> 셋뿐이고 빌트인 도구는 다 껐음. 고치는 건 결정론적 checker 코드가 하고, LLM은 “고칠까 / 사람한테 물을까”만 판단.</dd>
+    <dt>왜 그렇게 저렴해요?</dt>
+    <dd>LLM에 자막 원문을 안 넘김 — 규칙 번호·건수·큐 위치만 전달해서 파일이 길어져도 토큰이 안 늘어남. 여기에 컨텍스트 최소화(스킬·훅 미로딩), 프롬프트에 절차를 명시해 회차를 줄인 것이 더해짐. 절차 명시 $0.0635 vs 자유 판단 $0.1698로 2.7배 차이가 실측으로 나왔음.</dd>
+    <dt>정확도가 아직 낮은 거 아닌가요?</dt>
+    <dd>TC는 뜨는 시점이 0.3초, 지는 시점이 0.6초 수준이고, 정답과 짝지어지는 비율은 작품에 따라 41~81%로 편차가 큽니다. 낮은 쪽은 예능처럼 여러 사람이 겹쳐 말하는 장르고, 높은 쪽은 드라마입니다. 원인을 하나씩 찾아 고치는 중이고, 영화A는 41%에서 67%까지 올렸습니다.</dd>
+    <dt>이거 꼭 LLM이 필요한 일인가요?</dt>
+    <dd>번역과 QC 판단, 이 둘은 LLM 없이는 성립 안 됨. 반대로 타이밍 검출·글자 수·포맷 규정 검사는 규칙으로 충분하고, 거기 LLM을 넣으면 느려지고 결과가 매번 달라짐. 어디에 안 썼는지가 설계의 절반.</dd>
+  </dl>
+</section>
+</div>
