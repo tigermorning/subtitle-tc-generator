@@ -44,10 +44,29 @@ transcribe.py  align.py          translate.py  resplit.py  timing.py / checks.py
 ## 3. 규정(rule) 3계층
 
 ```
-rules/<플랫폼>/        공식 문건에서 옮긴 값. source.official: true
+rules/private/<플랫폼>/ 공식 문건에서 옮긴 값. source.official: true
 rules/learned/<플랫폼>/ 정답 자막에서 관측한 값. source.origin: learned
 코드 기본값             위 둘 다 없을 때만
 ```
+
+**공식 규정층은 이 저장소에 없다**(2026-09-10). 넷플릭스·디즈니+·쿠팡플레이
+규정과 그 근거 문서(`sources/`)는 파트너 전용 비공개 문서라 별도 비공개
+저장소 `tigermorning/subtitle-tc-rules`로 떼어 냈고, `rules/private/`로 클론해
+쓴다(`README.md`의 "발주처 공식 규정은 별도 비공개 저장소에 있다" 참고).
+`.gitignore`가 그 자리를 막는다.
+
+같은 날 히스토리도 재작성했다 — `git filter-repo`로 옛 커밋에서 네 경로를
+지우고, GitHub 저장소를 지웠다 다시 만들어 올렸다. **저장소를 지운 이유는
+force-push만으로는 안 지워지기 때문이다**: 병합된 PR 16개가 `refs/pull/N/head`로
+옛 커밋을 붙들고 있었고(PR #11·#12·#13은 diff에 규정 파일이 그대로 보였다),
+그 ref는 GitHub이 관리해서 사람이 못 지운다. 재작성 전 상태는
+`Documents/subtitle-tc-generator-BACKUP-20260910-175236.git`(미러)와
+같은 이름 `-PRs.json`(PR 기록)에 남겼다.
+
+**부르는 이름은 안 바뀌었다.** `checker/profile.py`의 `_roots()`가
+`rules/private/`를 함께 뒤진다 — `-p netflix -l ko -k sdh`도
+`extends: netflix/ko-sdh.yaml`도 그대로다. 클론이 없으면 그 세 발주처
+프로파일만 로드 실패하고 나머지 검사는 돈다.
 
 **학습값이 규정을 덮어쓰지 않는다.** 배운 값이 `rules/<플랫폼>/`를 고치는
 일은 없다 — 관측이 공식 문건과 다르면 그건 승격이 아니라 "지적"으로 남긴다.
