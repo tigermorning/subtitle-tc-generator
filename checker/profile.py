@@ -190,20 +190,46 @@ def load_learned_chars_per_cue(platform: str | None, language: str | None,
     파일이 없거나 값이 없으면 `None`이다 — 학습값 없는 조합에서는 호출하는 쪽이
     기존 동작(텍스트 중앙 기준 분할)을 그대로 유지해야 한다.
     """
+    observed = _load_learned_observed(platform, language, kind)
+    value = (observed.get("chars_per_cue") or {}).get("중앙값")
+    return float(value) if isinstance(value, (int, float)) else None
+
+
+def load_learned_short_cue_floor(platform: str | None, language: str | None,
+                                 kind: str | None) -> int | None:
+    """`rules/learned/<platform>/<language>-<kind>.yaml`의 `duration_ms.짧은자막.중앙값`.
+
+    **규정이 비워 둔 자리다**(규칙 11). 규정은 표시 시간의 하한만 정하고, 실무는 그
+    하한에 붙이지 않는다 — 말이 짧을수록 아웃점을 더 늘려 약 1초 언저리에 자막을
+    세운다(2026-09-11, 드라마B E02·E03 정답 대조: 말소리 0.6초 이하 자막에서 정답
+    아웃점이 VAD 오프셋보다 +433/+424ms 뒤, 1초 넘는 말은 +60~+130ms. 정답 srt만
+    봐도 넷플릭스·디즈니·쿠팡·HBO·아마존이 같은 바닥). `generate()`가 **생성
+    경로에서만** 이 값을 `TimingLimits.preferred_min_duration_ms`로 쓴다 — 검사
+    경로는 규정 하한 그대로다. 값을 낸 도구는 `tools/learned_short_cue_floor.py`.
+
+    엄격 일치·`None` 규약은 `load_learned_chars_per_cue`와 같다.
+    """
+    observed = _load_learned_observed(platform, language, kind)
+    value = ((observed.get("duration_ms") or {}).get("짧은자막") or {}).get("중앙값")
+    return int(value) if isinstance(value, (int, float)) else None
+
+
+def _load_learned_observed(platform: str | None, language: str | None,
+                           kind: str | None) -> dict:
+    """학습값 파일의 `observed` 블록. 없거나 못 읽으면 빈 사전."""
     if not (platform and language and kind):
-        return None
+        return {}
     path = RULES_ROOT / "learned" / platform / f"{language}-{kind}.yaml"
     if not path.is_file():
-        return None
+        return {}
     try:
         data = yaml.safe_load(path.read_text(encoding="utf-8"))
     except yaml.YAMLError:
-        return None
+        return {}
     if not isinstance(data, dict):
-        return None
-    observed = data.get("observed") or {}
-    value = (observed.get("chars_per_cue") or {}).get("중앙값")
-    return float(value) if isinstance(value, (int, float)) else None
+        return {}
+    observed = data.get("observed")
+    return observed if isinstance(observed, dict) else {}
 
 
 def user_root() -> Path:

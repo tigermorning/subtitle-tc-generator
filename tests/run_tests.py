@@ -880,6 +880,31 @@ original = [Event(1, 0, 400, "짧다")]
 converge(original, lim)
 ok("원본 이벤트를 건드리지 않는다", original[0].end_ms == 400)
 
+# 실무 바닥(학습값, 규정 하한 위) — 2026-09-11. 규정 하한까지만 늘리고 멈춰
+# 짧은 말이 정답보다 200~400ms 일찍 끝나던 자리다. 생성 경로에서만 채운다.
+from dataclasses import replace as _dc_replace  # noqa: E402
+_pref = _dc_replace(lim, preferred_min_duration_ms=lim.min_duration_ms + 300)
+ok("실무 바닥이 없으면 목표는 규정 하한", lim.extend_to_ms == lim.min_duration_ms)
+ok("실무 바닥이 있으면 목표는 그쪽", _pref.extend_to_ms == lim.min_duration_ms + 300)
+r = converge([Event(1, 0, 400, "짧다"), Event(2, 5000, 6000, "다음")], _pref)
+ok("자리가 있으면 실무 바닥까지 늘린다", r.events[0].duration_ms == _pref.extend_to_ms,
+   str(r.events[0]))
+# 규정은 이미 맞고 실무 바닥에만 못 미치는 자막 — 늘리되, 못 늘려도 문제로 적지 않는다
+_ok_dur = lim.min_duration_ms + 50
+r = converge([Event(1, 0, _ok_dur, "규정은 맞다"), Event(2, 5000, 6000, "다음")], _pref)
+ok("규정은 맞아도 실무 바닥까지 늘린다", r.events[0].duration_ms == _pref.extend_to_ms
+   and "학습값" in r.changes[0].reason, str(r.changes))
+r = converge([Event(1, 0, _ok_dur, "규정은 맞다"), Event(2, _ok_dur + 100, 3000, "바로 뒤")], _pref)
+ok("자리가 없으면 실무 바닥은 포기하고 규정 위반으로 적지 않는다",
+   r.events[0].duration_ms == _ok_dur and not r.unresolved, str(r.unresolved))
+# 규정에도 못 미치는데 실무 바닥까지는 자리가 없고 규정까지는 있다 — 규정까지만
+r = converge([Event(1, 0, 400, "짧다"), Event(2, lim.min_duration_ms + 150, 3000, "뒤")], _pref)
+ok("실무 바닥은 못 가도 규정 하한까지는 늘린다",
+   r.events[0].duration_ms == lim.min_duration_ms, str(r.events[0]))
+r = converge([Event(1, 0, 400, "짧다"), Event(2, 500, 3000, "바로 뒤")], _pref)
+ok("규정까지도 자리가 없으면 예전처럼 남긴다",
+   any("최소 표시 시간" in m for _i, m in r.unresolved), str(r.unresolved))
+
 
 # --- 스포팅 제안 (영상 없이 합성 구간으로 검증) -------------------------------
 
@@ -1173,6 +1198,19 @@ ok("백필한 조합에서 학습값이 실제로 읽힌다",
 ok("엄격 일치 — 학습값 없는 발주처는 None",
    load_learned_chars_per_cue("unknown", "ko", "sdh") is None)
 ok("platform이 없으면 None", load_learned_chars_per_cue(None, "ko", "sdh") is None)
+
+# 짧은 자막 실무 바닥(2026-09-11) — 값이 사라지면 생성 경로가 그 조합에서 조용히
+# 규정 하한으로 돌아가므로 여기서 못박는다. 값 자체는 학습값이라 관계만 본다.
+from checker.profile import load_learned_short_cue_floor  # noqa: E402
+_floors = {t: load_learned_short_cue_floor(*t) for t in
+           (("netflix", "ko", "sdh"), ("disney", "ko", "sdh"), ("coupang", "ko", "sdh"),
+            ("amazon", "en", "sdh"), ("hbo", "en", "translation"))}
+ok("짧은 자막 바닥을 읽는다(정수, 규정 하한 위, 2초 아래)",
+   all(isinstance(v, int) and 834 < v < 2000 for v in _floors.values()), str(_floors))
+ok("쿠팡 바닥이 넷플릭스보다 높다(실측 관계)",
+   _floors[("coupang", "ko", "sdh")] > _floors[("netflix", "ko", "sdh")])
+ok("학습값 없는 조합은 None", load_learned_short_cue_floor("unknown", "ko", "sdh") is None
+   and load_learned_short_cue_floor("bluray", "en", "sdh") is None)
 
 _t14_text = "안녕하세요 반갑습니다 오늘 날씨가 참 좋네요 산책이나 갈까요 저는 좋아요"
 _t14_default = split_text(_t14_text, 30, W2)

@@ -394,6 +394,21 @@ torch DLL이 걸린다. 어젯밤(2026-08-27)엔 됐다가 다음날 안 됐다 
 전부 `checker/`에 남아 자동으로 다음 영상부터 적용된다. 상세 재현 과정은
 `docs/BACKLOG.md`에 있다 — 여기는 "무엇을, 왜"만.
 
+- **짧은 자막을 규정 하한까지만 늘리고 멈췄다 — 실무는 약 1초에 세운다**
+  (2026-09-11, `timing.TimingLimits.preferred_min_duration_ms`·`profile.
+  load_learned_short_cue_floor`, 학습값 `rules/learned/*/duration_ms.짧은자막`).
+  붙임 규칙 뒤에도 남던 아웃점 잔여(-41/-38ms)를 드라마B E02·E03 캐시로 갈라
+  재 보니, 떨어진 자막에서 정답 아웃점은 말소리가 짧을수록 멀었다(≤0.6초
+  +433/+424ms, ≥1초 +60~+130ms) — 짧은 말의 정답 표시시간이 규정 하한이 아니라
+  약 1초 바닥에 쌓인다. 정답 srt만으로 넷플릭스·디즈니·쿠팡·HBO·아마존이 같은
+  방향(6자 이하 자막 표시시간 중앙값 959~1168, HBO 영어는 정확히 1000). 규정이
+  하한만 정하고 비워 둔 자리라(규칙 11) 학습값으로 넣고 **생성 경로에서만**
+  `converge()`의 늘림 목표로 쓴다 — 못 늘려도 `unresolved`엔 안 적는다(규정
+  위반이 아니다). 검사 경로는 규정 하한 그대로. 값은 `tools/learned_short_cue_floor.py`
+  가 같은 정답지 재측정(동일 자료 증명)과 함께 낸다. 고친 뒤 짧은 정답(<8자)
+  우리 표시시간 가운데 1001/1002ms = 정답 1001/1084, 아웃점 잔여 -16/-68ms.
+  **진짜 짝 필터(정답≥8자)가 이 자막들을 통째로 빼서** 전체 지표엔 거의 안
+  보인다 — 짧은 자막은 유사도 0.7로 따로 본다(`정답지-대조-진단` 스킬 §4).
 - **whisper 세그먼트가 직전 말의 꼬리에 걸쳐 시작하면 인점이 그 앞 구간에
   붙었다**(2026-09-11, `timing.suggest_spotting`). 세그먼트가 실제 말보다
   몇백 ms~1초 일찍 시작해 이전 화자의 VAD 구간 끝에 걸치면 `min(s)`가 그 앞
@@ -896,6 +911,13 @@ torch DLL이 걸린다. 어젯밤(2026-08-27)엔 됐다가 다음날 안 됐다 
 | 자료 | 검토일 | 판정 | 근거 |
 |---|---|---|---|
 | AI Hub `71699` 한국어 텍스트-비디오-사운드 (50만 건, 3.29TB) | 2026-09-10 | **안 쓴다** | `start`/`end`가 말소리 경계가 아니다 (아래) |
+| Buckeye Corpus (영어 인터뷰 40명, 손보정 단어·음소 경계) | 2026-09-11 | **안 쓴다** | 공식 페이지 "FREE for noncommercial uses"(조사 에이전트가 CC BY라 잘못 보고 — 직접 확인해 정정). 한국어 아님, Seoul Corpus와 역할 겹침 |
+| AMI Meeting Corpus (회의 100h, CC BY) | 2026-09-11 | **안 쓴다** | 단어 시각이 forced alignment 산출 — 손보정 아님. 발화 단위만 사람 |
+| MuST-Cinema·TED-LIUM3·LRS2/3·GigaSpeech·Emilia | 2026-09-11 | **안 쓴다** | 비상업 또는 자동 정렬 |
+| IWSLT Subtitling — ITV dev2025/2026·Asharq-Bloomberg | 2026-09-11 재확인 | **후보 유지** | 링크 살아 있음(SharePoint, 2025·2026 페이지 둘 다 — "배포 중단" 보고는 오보). 전문 자막 TC + 오디오 짝은 이것뿐. 비상업 조건 |
+| AI Hub `71379` 방송콘텐츠 한-영 통번역 음성 (600h, 자매 `71384`) | 2026-09-11 조사 | **1순위 후보** | `원시시작/원시끝` HH:MM:SS,mmm·전사작업자 기록 명시. 로그인·심사 필요, 상업 이용은 별도 협의. 받으면 `timestamp_origin.py`부터 |
+| AI Hub `463`·`464` 방송 대화체·회의 | 2026-09-11 조사 | 확인 필요 | "억양구 단위 경계정보"만 명시, 단위·JSON 미확인(설명서 로그인) |
+| AI Hub `71557` 뉴스 앵커 음성 | 2026-09-11 조사 | 참고만 | 발화 시작/종료 있으나 낭독체 — clean 대조군 용도뿐 |
 
 AI Hub 71699을 본 이유는 `checker/vad.py`의 문턱값 셋이 **한국어 실사 쪽 근거가
 한 작품(드라마B)뿐**이라 규칙 12의 "최소 2편"에 못 닿아 있기 때문이다.
@@ -1028,10 +1050,38 @@ TC가 좋아지리라는 가설을 드라마B E02·E03으로 쟀다. whisper 세
 - 자료 자체는 저장소에 안 넣는다(2.5GB). 다시 받는 곳: `https://www.openslr.org/113/`
   (`label.tgz` 57MB, `sound.tgz` 2.5GB).
 
+### pip 정렬기 전반 — 재검토 조건 미충족 (2026-09-11 조사, FA-Bench 근거)
+
+MFA 기각 뒤 남긴 "다시 볼 조건"(pip만으로 도는 정렬기가 MFA 동급)을 **공개
+벤치마크로 확인했고, 충족되지 않는다.** olewave/fa-bench(2026, 영어 TIMIT·Buckeye,
+잡음·음악·반향·웅성거림 조건 포함) 단어 경계 MAE(Buckeye test, clean / music):
+
+    MFA 3.4                  20 / 32ms   ← 공개 정렬기 1위
+    Qwen3-ForcedAligner-0.6B 32 / 49     한국어 명시 지원, pip `qwen-asr`, Apache 2.0, 5분 상한
+    CrisperWhisper           39 / 48
+    TorchAudio MMS_FA        48 / 54
+    WhisperX                 48 / 55     한국어 기본 미지원
+    BFA                      58 / 60
+
+우리가 기각한 MFA가 가장 정확하고, pip 정렬기는 전부 그 아래다 — MFA도 우리
+인·아웃점에선 VAD를 못 이겼으니 더 나쁜 것을 붙일 이유가 없다. Qwen3-ForcedAligner
+는 한국어+pip라는 점만 장점이고, 쓸 자리가 있다면 **내부 경계**(재분할 자리,
+MFA가 앞섰던 유일한 곳)뿐이다 — 지금 |중앙| 73~90ms라 급하지 않다.
+
+- CTC 정렬기가 단어 끝을 이르게 끊는 원인은 문헌 확인됨(peaky CTC — Huang et al.
+  2024, arXiv 2406.02560, torchaudio에 label-prior 레시피 공개). 우리는 CTC를
+  안 쓰므로(VAD 오프셋) 해당 없음.
+- Silero VAD는 이미 최신이다 — `models/silero_vad.onnx` blob sha `80c5592…`가
+  GitHub master(v6.2, 2025-12)와 같다. 올릴 것 없음.
+- 자막 스포팅 자동화 연구(AppTek IWSLT 2024, SBAAM 2024)는 TC를 정렬 결과
+  그대로 쓴다 — 여유·붙임을 학습한 공개 연구는 없다. 그 자리는 우리
+  `rules/learned/`가 채운다.
+- 평가 방법(|중앙|·100ms 안 비율)은 FA-Bench와 같다. 바꿀 것 없음.
+
 ## 9. 테스트·커밋
 
 ```bash
-python3 tests/run_tests.py    # 801건(2026-08-30 기준), GUI 제외
+python3 tests/run_tests.py    # 건수는 CLAUDE.md 규칙 9(훅이 지킨다), GUI 제외
 ```
 
 **테스트 통과가 커밋의 전제조건이다** — `tools/hooks/pre-commit`이 커밋 직전에

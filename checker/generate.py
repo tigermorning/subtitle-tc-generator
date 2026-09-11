@@ -527,7 +527,18 @@ def generate(video: Path, profile: dict, script: Path | None = None,
         say(f"인점·아웃점 {moved}곳을 말소리에 맞춤")
     stats["spotting_applied"] = moved
 
-    result = converge(events, TimingLimits.from_profile(profile, fps=fps))
+    limits = TimingLimits.from_profile(profile, fps=fps)
+    # 규정 하한 위의 실무 바닥(학습값, 약 1초) — **생성 경로에서만**. 짧은 말은
+    # 작업자가 아웃점을 더 늘려 세우는데 규정 하한까지만 늘리고 멈춰 정답보다
+    # 200~400ms 일찍 끝났다(2026-09-11, 드라마B E02·E03). 규칙 11: 규정이 비워 둔
+    # 자리만 채운다 — 검사(`--check`)는 이 값을 모른다.
+    from .profile import load_learned_short_cue_floor
+    floor = load_learned_short_cue_floor(profile.get("platform"), profile.get("language"),
+                                         profile.get("kind"))
+    if floor and floor > (limits.min_duration_ms or 0):
+        limits.preferred_min_duration_ms = floor
+        say(f"짧은 자막 실무 바닥(학습값) {floor}ms — 규정 하한 위에서 아웃점을 늘립니다")
+    result = converge(events, limits)
     say(f"스포팅 {len(result.changes)}곳 조정, 남은 문제 {len(result.unresolved)}건")
     stats.update(cues_out=len(result.events), timing_changes=len(result.changes),
                  timing_unresolved=len(result.unresolved))

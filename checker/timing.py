@@ -37,6 +37,18 @@ class TimingLimits:
     min_gap_ms: int = 0
     max_cps: float | None = None
     char_weights: dict | None = None
+    # 규정 하한(`min_duration_ms`) **위의** 실무 바닥 — 학습값(`rules/learned/`의
+    # `duration_ms.짧은자막.중앙값`, 약 1초). `converge()`가 아웃점을 늘릴 때만
+    # 이 값까지 늘리고, 못 늘렸다고 `unresolved`에 적지는 않는다 — 규정을 어긴
+    # 것이 아니기 때문이다(규칙 11: 학습값은 규정 판정에 섞이지 않는다). 생성
+    # 경로에서만 채운다(`generate.py`). `None`이면 예전 그대로 규정 하한까지만.
+    preferred_min_duration_ms: int | None = None
+
+    @property
+    def extend_to_ms(self) -> int | None:
+        """아웃점을 늘릴 목표 — 규정 하한과 실무 바닥 중 큰 쪽."""
+        return max(filter(None, (self.min_duration_ms, self.preferred_min_duration_ms)),
+                   default=None)
 
     @classmethod
     def from_profile(cls, profile: dict, fps: float = 23.976,
@@ -106,11 +118,25 @@ def converge(events: list[Event], limits: TimingLimits, rounds: int = 3) -> Timi
                      f"다음 자막(#{nxt.index})과 겹쳐 아웃점을 당김", result)
 
             # 2. 최소 표시 시간 — 아웃점을 뒤로 민다(인점은 소리와 붙어 있으므로 마지막에)
-            if limits.min_duration_ms and ev.duration_ms < limits.min_duration_ms:
-                want_end = ev.start_ms + limits.min_duration_ms
+            #    목표는 규정 하한이 아니라 `extend_to_ms`(실무 바닥이 있으면 그쪽,
+            #    2026-09-11). 짧은 말에서 정답이 우리보다 200~400ms 늦게 끝나던
+            #    원인이 여기였다 — 규정 하한까지만 늘리고 멈췄다.
+            target = limits.extend_to_ms
+            if target and ev.duration_ms < target:
+                want_end = ev.start_ms + target
                 room = nxt.start_ms - limits.min_gap_ms if nxt else None
                 if room is None or want_end <= room:
-                    _set(work, i, "end_ms", want_end, "최소 표시 시간 확보", result)
+                    reason = ("최소 표시 시간 확보" if ev.duration_ms < (limits.min_duration_ms or 0)
+                              else "짧은 자막 실무 바닥(학습값)까지 늘림")
+                    _set(work, i, "end_ms", want_end, reason, result)
+                elif room is not None and limits.min_duration_ms and \
+                        ev.duration_ms < limits.min_duration_ms < target and \
+                        ev.start_ms + limits.min_duration_ms <= room:
+                    # 실무 바닥까지는 자리가 없어도 규정 하한까지는 된다 — 거기까지만.
+                    _set(work, i, "end_ms", ev.start_ms + limits.min_duration_ms,
+                         "최소 표시 시간 확보", result)
+                elif ev.duration_ms >= (limits.min_duration_ms or 0):
+                    pass  # 규정은 이미 맞다 — 실무 바닥은 자리가 없으면 포기한다
                 else:
                     # 뒤로 못 밀면 앞으로 당긴다. 앞 자막 간격이 허락하는 만큼만.
                     prev = work[i - 1] if i > 0 else None
