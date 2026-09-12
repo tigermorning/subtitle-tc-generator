@@ -1512,9 +1512,11 @@ def main(argv: list[str] | None = None) -> int:
                           "가장 큰 것). large-v3-turbo 권장")
     gen.add_argument("--whisper-lang", default="auto",
                      help="말소리 언어(ko, en, auto…). 아는 값을 주면 정확해진다")
-    gen.add_argument("--speech", choices=["auto", "vad", "loudness"], default="auto",
+    gen.add_argument("--speech", choices=["auto", "vad", "vad-band", "loudness"],
+                     default="auto",
                      help="말소리를 어떻게 찾을지. auto는 모델(VAD)을 먼저 쓰고 "
-                          "없으면 음량으로 돌아간다")
+                          "없으면 음량으로 돌아간다. vad-band는 검출은 문턱 0.5로 "
+                          "하되 경계는 낮은 문턱까지 늘려 잡는다(시험 중)")
     gen.add_argument("--diarize", action="store_true",
                      help="화자가 바뀌는 자리를 찾아 병합 때 넘지 않는다(pyannote.audio "
                           "필요, 없으면 오류 — 조용히 건너뛰지 않는다). 화자 '이름'은 "

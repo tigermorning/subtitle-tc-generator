@@ -4334,6 +4334,84 @@ ok("VAD 기본값이 이름 붙은 상수와 같다",
    == (_a4_vad.THRESHOLD, _a4_vad.MIN_SPEECH_MS, _a4_vad.MIN_SILENCE_MS))
 ok("VAD 상수가 실측 당시 값 그대로다(바꾸려면 주석의 표부터 갱신한다)",
    (_a4_vad.THRESHOLD, _a4_vad.MIN_SPEECH_MS, _a4_vad.MIN_SILENCE_MS) == (0.5, 120, 100))
+# --- 줄바꿈을 만든다(place_line_break) --------------------------------------
+# 생성 경로에 줄을 나누는 단계가 없어서 초안에 두 줄 자막이 0개였고 한 줄이
+# 63자까지 갔다(2026-09-13, 드라마B E02). 검사 함수를 심판으로 써서 자리를 고른다.
+
+from checker.korean_break import place_line_break as _wrap  # noqa: E402
+
+_NL = chr(10)
+ok("한 줄에 들어가면 안 나눈다", _wrap("짧은 말", 16) == "짧은 말")
+ok("이미 나뉜 것은 안 건드린다", _wrap("위" + _NL + "아래", 3) == "위" + _NL + "아래")
+ok("한 줄 한계가 없으면 안 나눈다", _wrap("아주 아주 긴 문장이다", 0) == "아주 아주 긴 문장이다")
+_w1 = _wrap("오늘 회의는 세 시에 시작합니다", 10)
+ok("한계를 넘으면 두 줄로 나눈다", _NL in _w1)
+ok("나눈 두 줄이 한계 안에 든다", all(len(line) <= 10 for line in _w1.split(_NL)))
+ok("역피라미드를 고른다(아랫줄이 더 길게)",
+   len(_w1.split(_NL)[0]) <= len(_w1.split(_NL)[1]))
+ok("단어 중간에서 끊지 않는다",
+   set(_w1.replace(_NL, " ").split()) == set("오늘 회의는 세 시에 시작합니다".split()))
+_w2 = _wrap("- 어디 갔었어? - 그냥 산책 좀 했어", 12)
+ok("2인 화자는 두 번째 대시 앞에서 끊는다", _w2.split(_NL)[1].startswith("-"))
+ok("띄어쓰기가 없으면 나누지 않는다", _wrap("아주아주긴한낱말이야", 4) == "아주아주긴한낱말이야")
+
+
+# --- 경계를 구간으로 잡는다(speech_bands) -----------------------------------
+# 값을 고르는 시험이 아니다. **구간이 core를 감싸고 이웃을 안 삼키는지**만 본다.
+# 실측 결과(합성에서는 낫고 실사 TC로는 안 넘어옴)는 docs/HANDOFF.md 8절.
+
+_band_probs = ([0.02] * 5 + [0.25, 0.4, 0.55, 0.8, 0.95, 0.9, 0.7, 0.45, 0.3]
+               + [0.02] * 5)
+_bands = _a4_vad.speech_bands(_band_probs, total_ms=len(_band_probs) * 32)
+ok("말소리 하나를 구간 하나로 낸다", len(_bands) == 1)
+_b = _bands[0]
+ok("인점 구간이 core 시작을 감싼다", _b["start_low"] <= _b["core_start"] <= _b["start_high"])
+ok("아웃점 구간이 core 끝을 감싼다", _b["end_low"] <= _b["core_end"] <= _b["end_high"])
+ok("분위수 0은 구간의 이른 끝", _a4_vad.pick_in_band(100, 200, 0.0) == 100)
+ok("분위수 1은 구간의 늦은 끝", _a4_vad.pick_in_band(100, 200, 1.0) == 200)
+ok("구간 폭이 불확실도로 나온다", _a4_vad.band_width_ms(_b)[0] >= 0)
+_hyst = _a4_vad.bands_to_spans(_bands, 0.0, 1.0)[0]
+ok("히스테리시스는 core보다 넓다",
+   _hyst[0] <= _b["core_start"] and _hyst[1] >= _b["core_end"])
+
+# 말소리 둘이 붙어 있으면 낮은 문턱에서 하나로 이어진다. 그때도 **이웃을 삼키지
+# 않는다** — 2026-09-11에 고친 "이웃 말 꼬리에 걸린 인점"과 같은 자리다.
+_two = ([0.02] * 4 + [0.3, 0.9, 0.9, 0.3] + [0.3, 0.3] + [0.3, 0.9, 0.9, 0.3]
+        + [0.02] * 4)
+_two_bands = _a4_vad.speech_bands(_two, min_speech_ms=32, min_silence_ms=32,
+                                  total_ms=len(_two) * 32)
+ok("붙은 말 둘을 각각 낸다", len(_two_bands) == 2)
+if len(_two_bands) == 2:
+    ok("뒤 말의 인점 구간이 앞 말의 끝을 넘지 않는다",
+       _two_bands[1]["start_low"] >= _two_bands[0]["core_end"])
+    ok("앞 말의 아웃점 구간이 뒤 말의 시작을 넘지 않는다",
+       _two_bands[0]["end_high"] <= _two_bands[1]["core_start"])
+
+# 검출기 이름마다 여유가 따로 있어야 한다 — 모르는 이름이면 loudness로 되돌아가
+# 엉뚱한 여유가 걸린다(2026-09-13에 실제로 그렇게 재서 한 판을 버렸다).
+from checker.timing import LEADS as _band_leads  # noqa: E402
+ok("vad-band 여유가 따로 있다", "vad-band" in _band_leads)
+ok("vad-band 아웃 여유가 vad보다 작다",
+   _band_leads["vad-band"]["out"] < _band_leads["vad"]["out"])
+
+# --- VAD 입력 오디오: 5.1이면 센터(대사) 채널만 듣는다 ----------------------
+# 근거는 `checker/vad.py`의 주석(합성 시험 + 실사 2편). 여기서는 **어느 오디오를
+# 고르는지의 판단**만 못박는다 — ffprobe·ffmpeg 없이 돌아야 하므로 파싱과 판정을
+# 뗀 순수 함수로 본다.
+
+ok("5.1은 센터가 있다", _a4_vad._layout_has_center("6,5.1(side)"))
+ok("7.1도 센터가 있다", _a4_vad._layout_has_center("8,7.1"))
+ok("스테레오는 센터가 없다", not _a4_vad._layout_has_center("2,stereo"))
+ok("모노는 센터가 없다", not _a4_vad._layout_has_center("1,mono"))
+ok("레이아웃을 모르면 채널 수로 본다(6채널)", _a4_vad._layout_has_center("6,unknown"))
+ok("레이아웃을 모르고 2채널이면 센터가 없다", not _a4_vad._layout_has_center("2,unknown"))
+ok("ffprobe가 빈 줄을 내면 다운믹스로 간다", not _a4_vad._layout_has_center(""))
+ok("센터가 거의 비면 다운믹스로 되돌린다", _a4_vad._center_is_empty(0.01, 1.0))
+ok("센터에 소리가 있으면 센터를 쓴다", not _a4_vad._center_is_empty(0.5, 1.0))
+ok("다운믹스가 무음이면 되돌리지 않는다", not _a4_vad._center_is_empty(0.0, 0.0))
+ok("오디오 고르기 기본값은 auto다",
+   _a4_inspect.signature(_a4_vad.detect_speech).parameters["audio_source"].default == "auto")
+
 ok("침묵 당김 폭이 이름 붙은 상수와 같다",
    _a4_inspect.signature(_a4_resplit._snap_to_silence).parameters["tolerance_ms"].default
    == _a4_resplit.SNAP_TOLERANCE_MS == 400)

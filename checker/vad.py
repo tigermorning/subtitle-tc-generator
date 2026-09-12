@@ -91,27 +91,125 @@ def find_model(explicit: str | None = None) -> Path:
         "경로를 지정하세요. https://github.com/snakers4/silero-vad 에서 받습니다(2MB).")
 
 
-def _read_audio(video: Path):
+# **5.1에서는 센터 채널만 듣는다**(2026-09-12 실측). 대사는 센터(FC)에 있고
+# 음악·효과는 나머지 채널에 있다. `-ac 1` 다운믹스는 그 둘을 섞는데, 실측한
+# ffmpeg 계수가 하필 대사를 가장 많이 깎는다:
+#
+#     FC(대사) ×0.293   FL·FR ×0.207   SL·SR ×0.146   (베드 4채널 전력합 ≈0.358)
+#
+# 즉 다운믹스는 VAD 입력에서 대사를 음악보다 약 1.7dB **아래**로 내려놓는다.
+#
+# 얼마나 손해였는지 정답 경계를 아는 합성 자료로 쟀다(Seoul Corpus 손라벨
+# 15클립 × 180초 + 메이드 인 코리아 E02의 **대사 없는 구간**을 베드로 얹어
+# 5.1을 만든 뒤, 같은 파일을 다운믹스와 센터 추출로 각각 읽었다):
+#
+#     SNR(다운믹스 도메인)   다운믹스 인점중앙/덮음   센터 인점중앙/덮음
+#     +15dB                  61ms / 88.2%            39ms / 95.2%
+#     +10dB                  87ms / 79.7%            44ms / 92.8%
+#      +5dB                 205ms / 68.0%            55ms / 89.2%
+#       0dB                1326ms / 41.3%            83ms / 79.4%
+#     (말소리만 = 천장       26ms / 97.9%)
+#
+# 센터 추출이 유효 SNR을 약 10dB 벌어 준다. 실사 2편(정답 SRT 대비, 같은 자):
+#
+#     메이드 인 코리아 E02  인점중앙 146→137ms  95% 17767→8324ms  덮음 83.0→86.9%
+#     토이스토리5          인점중앙 889→776ms  95% 17032→11752ms 덮음 83.3→87.3%
+#
+# **중앙값 이득은 작고 꼬리·덮음에서 크다** — 대사는 대부분 음악보다 충분히
+# 크게 믹스돼 있어서, 이 고침이 값을 내는 자리는 음악이 큰 장면이다. 발주처·
+# 장르가 다른 2편이 같은 방향이라 규칙 12를 채운다.
+#
+# 대사가 센터에 있다는 것도 추측이 아니라 실측이다 — E02에서 Silero가 말로
+# 잡은 시간이 센터 28.3%, 나머지 채널 0.2%였다. 그래도 믹스가 다르면 센터가
+# 빌 수 있으므로 아래 `CENTER_MIN_RMS_RATIO`로 확인하고 되돌린다.
+CENTER_MIN_RMS_RATIO = 0.1
+
+
+def _decode(video: Path, audio_filter: str | None = None):
     """16kHz 모노 PCM으로 읽는다. ffmpeg이 이미 있으니 그것을 쓴다."""
     import numpy as np
 
-    result = subprocess.run(
-        [_find("ffmpeg"), "-hide_banner", "-nostats", "-v", "error",
-         "-i", _as_tool_path(video), "-vn", "-ac", "1", "-ar", str(SAMPLE_RATE),
-         "-f", "s16le", "-"],
-        capture_output=True, check=False,
-    )
+    command = [_find("ffmpeg"), "-hide_banner", "-nostats", "-v", "error",
+               "-i", _as_tool_path(video), "-vn"]
+    command += ["-af", audio_filter] if audio_filter else ["-ac", "1"]
+    command += ["-ar", str(SAMPLE_RATE), "-f", "s16le", "-"]
+    result = subprocess.run(command, capture_output=True, check=False)
     if result.returncode != 0 or not result.stdout:
         detail = (result.stderr or b"").decode("utf-8", "replace").strip()[:200]
         raise MediaToolUnavailable(f"오디오를 읽지 못했습니다: {detail}")
     return np.frombuffer(result.stdout, dtype=np.int16).astype("float32") / 32768.0
 
 
+def _layout_has_center(csv_text: str) -> bool:
+    """`ffprobe ... -of csv=p=0`이 낸 `채널수,레이아웃` 한 줄을 읽는다.
+
+    파싱을 따로 뗀 이유는 시험이 ffprobe 없이 확인할 수 있어야 하기 때문이다.
+    레이아웃 이름이 없을 때(`unknown`)는 채널 수로 판단한다 — 3채널 이상이면
+    센터가 있다고 본다.
+    """
+    text = (csv_text or "").strip()
+    if not text:
+        return False
+    head = text.splitlines()[0]
+    parts = [x.strip().lower() for x in head.split(",")]
+    channels = parts[0] if parts else ""
+    layout = parts[1] if len(parts) > 1 else ""
+    if layout and layout != "unknown":
+        # 5.1·5.1(side)·7.1·3.0 … 모두 센터를 가진다. 스테레오·모노는 없다.
+        return layout not in ("mono", "stereo", "downmix") and not layout.startswith("2.")
+    return channels.isdigit() and int(channels) >= 3
+
+
+def _has_center(video: Path) -> bool:
+    """첫 오디오 스트림에 센터 채널이 있나. 없으면 다운믹스로 간다."""
+    try:
+        result = subprocess.run(
+            [_find("ffprobe"), "-v", "error", "-select_streams", "a:0",
+             "-show_entries", "stream=channels,channel_layout",
+             "-of", "csv=p=0", _as_tool_path(video)],
+            capture_output=True, check=False)
+    except MediaToolUnavailable:
+        return False
+    return _layout_has_center((result.stdout or b"").decode("utf-8", "replace"))
+
+
+def _center_is_empty(center_rms: float, downmix_rms: float) -> bool:
+    """센터가 비었나 — 대사를 센터에 두지 않은 믹스를 걸러 낸다."""
+    return downmix_rms > 0 and center_rms < CENTER_MIN_RMS_RATIO * downmix_rms
+
+
+def _read_audio(video: Path, source: str = "auto", progress=None):
+    """VAD에 먹일 16kHz 모노. `source`는 auto | center | downmix.
+
+    `auto`는 센터 채널이 있으면 센터만 쓰고, 센터가 비어 있으면(대사를 다른
+    채널에 둔 믹스) 다운믹스로 되돌린다. 어느 쪽을 썼는지 **말한다** — 조용히
+    고르면 나중에 결과가 달라졌을 때 원인을 못 찾는다(규칙 4).
+    """
+    import numpy as np
+
+    say = progress or (lambda _m: None)
+    video = Path(video)
+    if source == "downmix" or (source == "auto" and not _has_center(video)):
+        return _decode(video)
+    center = _decode(video, "pan=mono|c0=FC")
+    if source == "center":
+        return center
+    downmix = _decode(video)
+    center_rms = float(np.sqrt(np.mean(center ** 2))) if len(center) else 0.0
+    downmix_rms = float(np.sqrt(np.mean(downmix ** 2))) if len(downmix) else 0.0
+    if _center_is_empty(center_rms, downmix_rms):
+        say("센터 채널이 거의 비어 있어 다운믹스로 듣습니다")
+        return downmix
+    say("5.1 센터 채널(대사)만 듣습니다 — 음악·효과는 빼고 봅니다")
+    return center
+
+
 def detect_speech(video: Path, threshold: float = THRESHOLD,
                   min_speech_ms: int = MIN_SPEECH_MS,
                   min_silence_ms: int = MIN_SILENCE_MS,
                   pad_ms: int = 0, model: str | None = None,
-                  progress=None) -> list[tuple[int, int]]:
+                  progress=None, audio_source: str = "auto",
+                  boundary: str = "threshold") -> list[tuple[int, int]]:
     """말소리 구간 [(시작ms, 끝ms)]. `media.detect_speech`와 계약이 같다.
 
     같은 계약을 지키는 이유는 **바꿔 끼워 가며 잴 수 있어야** 하기 때문이다.
@@ -125,11 +223,22 @@ def detect_speech(video: Path, threshold: float = THRESHOLD,
 
     say = progress or (lambda _m: None)
     model_path = find_model(model)
-    audio = _read_audio(Path(video))
+    audio = _read_audio(Path(video), audio_source, say)
     say(f"말소리를 모델로 찾습니다 — {len(audio) / SAMPLE_RATE:.0f}초")
     probabilities = _probabilities(audio, model_path)
+    total_ms = int(len(audio) / SAMPLE_RATE * 1000)
+    if boundary == "band":
+        # 검출은 `threshold`로, **경계는 낮은 문턱까지 늘려** 잡는다(히스테리시스).
+        # 근거는 `speech_bands` 아래 주석 — 손라벨 정답으로 여섯 조건 전부에서
+        # 인점·아웃점 절대오차가 줄었다.
+        bands = speech_bands(probabilities, threshold, min_speech_ms, min_silence_ms,
+                             total_ms)
+        spans = bands_to_spans(bands, 0.0, 1.0)
+        if pad_ms:
+            spans = [(max(0, s - pad_ms), min(total_ms, e + pad_ms)) for s, e in spans]
+        return spans
     return _spans(probabilities, threshold, min_speech_ms, min_silence_ms, pad_ms,
-                  total_ms=int(len(audio) / SAMPLE_RATE * 1000))
+                  total_ms=total_ms)
 
 
 def _probabilities(audio, model_path):
@@ -188,3 +297,87 @@ def _spans(probabilities, threshold: float, min_speech_ms: int,
     if pad_ms:
         spans = [(max(0, s - pad_ms), min(total_ms, e + pad_ms)) for s, e in spans]
     return spans
+
+
+# --- 경계를 점이 아니라 구간으로 (2026-09-13) --------------------------------
+# 지금까지는 확률이 `THRESHOLD`를 처음 넘는 프레임 하나를 경계로 쓰고 나머지
+# 확률을 버렸다. 그런데 **TC는 비용이 비대칭이다**:
+#
+#     인점이 늦다   말 첫음절이 잘린다             치명적
+#     인점이 이르다  관행 여유(0.1~0.2초)까지 무해
+#     아웃점이 이르다 말꼬리가 잘린다               치명적
+#     아웃점이 늦다  다음 자막 전까지 무해
+#
+# 오차 절대값을 줄이는 것과, 늦지 않는 것은 다른 목표다. 그래서 문턱을 여러 개
+# 써서 경계를 **구간**으로 잡고(낮은 문턱일수록 이르게 시작하고 늦게 끝난다),
+# 그 구간에서 분위수를 고른다. 핀볼(quantile) 손실에서 최적 분위수는
+# `이른 비용 / (이른 비용 + 늦은 비용)`이다 — 5:1이면 0.17.
+#
+# 구간 폭 자체가 **불확실도**다. 넓으면 검출기가 흔들린 자리이므로 사람이 볼
+# 자리로 표시한다(규칙 3·4 — 추정은 고치지 말고 표시한다).
+BAND_THRESHOLDS = (0.2, 0.35, 0.5, 0.65)
+IN_QUANTILE = 0.17     # 인점: 이른 쪽. 늦는 비용이 이른 비용의 5배라고 보고 고른 값
+OUT_QUANTILE = 0.83    # 아웃점: 늦은 쪽. 같은 비대칭의 반대편
+
+
+def _overlapping(spans: list[tuple[int, int]], start: int, end: int):
+    """[start, end)와 겹치는 구간만 고른다."""
+    return [(s, e) for s, e in spans if s < end and e > start]
+
+
+def speech_bands(probabilities, threshold: float = THRESHOLD,
+                 min_speech_ms: int = MIN_SPEECH_MS,
+                 min_silence_ms: int = MIN_SILENCE_MS, total_ms: int = 0,
+                 thresholds=BAND_THRESHOLDS) -> list[dict]:
+    """말소리 구간마다 경계의 **구간**을 낸다.
+
+    `threshold`로 잡은 구간을 뼈대(core)로 삼고, 문턱을 바꿔 가며 같은 자리의
+    시작·끝이 어디까지 움직이는지 잰다. 돌려주는 각 항목:
+
+        core_start, core_end      지금까지 쓰던 값(문턱 하나)
+        start_low, start_high     인점 후보의 구간
+        end_low, end_high         아웃점 후보의 구간
+
+    **이웃 말을 삼키지 않는다** — 낮은 문턱에서 앞뒤 구간이 하나로 붙는 일이
+    흔하다. 그래서 구간을 앞 core의 끝과 뒤 core의 시작으로 자른다(2026-09-11에
+    고친 "이웃 말 꼬리에 걸린 인점"과 같은 이유).
+    """
+    core = _spans(probabilities, threshold, min_speech_ms, min_silence_ms, 0, total_ms)
+    by_threshold = {t: _spans(probabilities, t, min_speech_ms, min_silence_ms, 0, total_ms)
+                    for t in thresholds}
+    bands = []
+    for i, (core_start, core_end) in enumerate(core):
+        previous_end = core[i - 1][1] if i else 0
+        next_start = core[i + 1][0] if i + 1 < len(core) else total_ms or core_end
+        starts, ends = [core_start], [core_end]
+        for spans in by_threshold.values():
+            touching = _overlapping(spans, core_start, core_end)
+            if not touching:
+                continue
+            starts.append(max(min(s for s, _ in touching), previous_end))
+            ends.append(min(max(e for _, e in touching), next_start or core_end))
+        bands.append({"core_start": core_start, "core_end": core_end,
+                      "start_low": min(starts), "start_high": max(starts),
+                      "end_low": min(ends), "end_high": max(ends)})
+    return bands
+
+
+def pick_in_band(low: int, high: int, quantile: float) -> int:
+    """구간에서 분위수 하나를 고른다. 0이면 가장 이른 값, 1이면 가장 늦은 값."""
+    return int(round(low + (high - low) * quantile))
+
+
+def bands_to_spans(bands: list[dict], in_quantile: float = IN_QUANTILE,
+                   out_quantile: float = OUT_QUANTILE) -> list[tuple[int, int]]:
+    """구간에서 인점·아웃점을 골라 `detect_speech`와 같은 꼴로 낸다."""
+    spans = []
+    for band in bands:
+        start = pick_in_band(band["start_low"], band["start_high"], in_quantile)
+        end = pick_in_band(band["end_low"], band["end_high"], out_quantile)
+        spans.append((start, max(end, start)))
+    return spans
+
+
+def band_width_ms(band: dict) -> tuple[int, int]:
+    """인점·아웃점 구간의 폭 — 이 값이 크면 검출기가 흔들린 자리다."""
+    return (band["start_high"] - band["start_low"], band["end_high"] - band["end_low"])

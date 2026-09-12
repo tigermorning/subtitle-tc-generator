@@ -128,3 +128,75 @@ def check_top_heavy(lines: list[str], weights: dict | None = None) -> list[str]:
         return [f"윗줄({upper_len:g}자)이 아랫줄({lower_len:g}자)의 2배 이상입니다"
                 " — 다른 자리에서 끊을 수 있는지 보세요"]
     return []
+
+
+# --- 줄바꿈을 **만든다** (2026-09-13) ---------------------------------------
+# 위 두 함수는 이미 나뉜 두 줄을 **보기만** 했다. 생성 경로에는 줄을 나누는
+# 단계가 아예 없었다 — 드라마B E02 초안 846개 중 두 줄이 **0개**였고 한 줄이
+# 63자까지 갔다(정답은 961개 중 287개가 두 줄, 최대 36자). 우리 검사기로
+# 우리 초안을 보면 그 자리가 규정 위반으로 잡힌다(디즈니 스펙 182건).
+#
+# 정답과 견주면 이 빈칸이 **분할 단위**까지 흔든다(2026-09-13 실측):
+#
+#     우리가 쪼갠 자리   정답 글자수 중앙 18~19자, 그중 51~56%가 두 줄
+#     우리가 합친 자리   정답 두 자막 사이 간격 중앙 84ms(전체 917ms)
+#
+# 정답은 소리가 안 끊겨도 글자 수 때문에 두 자막으로 나누고, 대신 18~19자를
+# 두 줄로 한 자막에 담는다. 두 줄을 못 만들면 그 둘 다 못 흉내 낸다.
+#
+# **새 상수를 만들지 않는다.** 후보 자리를 전부 놓고 위 검사 함수를 심판으로
+# 써서 고른다 — 규정이 이미 말한 것(문법 단위를 끊지 말 것, 역피라미드)이
+# 그대로 목적함수가 된다.
+_OVER_LIMIT = 100.0      # 한 줄 한계를 넘는 글자당 벌점 — 가장 무겁다
+_BROKEN_UNIT = 40.0      # 문법 단위를 끊었을 때(check_line_break)
+_TOP_HEAVY = 10.0        # 윗줄이 아랫줄의 2배 이상(check_top_heavy)
+_UPPER_LONGER = 0.5      # 역피라미드에서 벗어난 글자당
+
+
+def _penalty(upper: str, lower: str, per_line: float, weights: dict | None) -> float:
+    upper_len = count_chars(upper, weights)
+    lower_len = count_chars(lower, weights)
+    score = _OVER_LIMIT * (max(0.0, upper_len - per_line) + max(0.0, lower_len - per_line))
+    score += _BROKEN_UNIT * len(check_line_break([upper, lower], weights))
+    score += _TOP_HEAVY * len(check_top_heavy([upper, lower], weights))
+    if upper_len > lower_len:
+        score += _UPPER_LONGER * (upper_len - lower_len)
+    return score
+
+
+def place_line_break(text: str, per_line: float, weights: dict | None = None) -> str:
+    """한 줄짜리 자막 텍스트를 규정 한 줄 한계에 맞춰 두 줄로 나눈다.
+
+    - 이미 줄이 나뉘어 있으면 **건드리지 않는다**(앞 단계의 판단을 덮지 않는다).
+    - 한 줄에 들어가면 그대로 둔다.
+    - 나눌 자리는 띄어쓰기 자리뿐이다. 단어 중간에서 끊지 않는다.
+    - 2인 화자 자막(`- `로 시작하는 두 대사)은 두 번째 대시 앞에서 끊는다.
+    - 어디서 끊어도 한계를 못 지키면 **가장 덜 나쁜 자리**로 나눈다 — 줄바꿈이
+      해결할 수 없는 문제(글자가 너무 많다)는 검사가 사람에게 알린다(규칙 3).
+    """
+    if not text or "\n" in text or not per_line:
+        return text
+    if count_chars(text, weights) <= per_line:
+        return text
+
+    stripped = text.strip()
+    words = stripped.split(" ")
+    if len(words) < 2:
+        return text
+
+    # 2인 화자: 두 번째 대시가 아랫줄 첫 글자가 되도록
+    dash_at = [i for i, word in enumerate(words) if i and word.startswith("-")]
+    candidates = dash_at[:1] if dash_at and stripped.startswith("-") else range(1, len(words))
+
+    best, best_score = None, None
+    for i in candidates:
+        upper = " ".join(words[:i])
+        lower = " ".join(words[i:])
+        if not upper.strip() or not lower.strip():
+            continue
+        score = _penalty(upper, lower, per_line, weights)
+        if best_score is None or score < best_score:
+            best, best_score = (upper, lower), score
+    if best is None:
+        return text
+    return best[0] + "\n" + best[1]
