@@ -25,6 +25,7 @@ from .align import AlignedCue, Segment, align, summary
 from .media import find_speech, probe
 from .model import Event
 from .text import chars_per_second
+from .korean_break import place_line_break
 from .resplit import resplit_all
 from .timing import TimingLimits, converge
 
@@ -540,6 +541,22 @@ def generate(video: Path, profile: dict, script: Path | None = None,
         say(f"짧은 자막 실무 바닥(학습값) {floor}ms — 규정 하한 위에서 아웃점을 늘립니다")
     result = converge(events, limits)
     say(f"스포팅 {len(result.changes)}곳 조정, 남은 문제 {len(result.unresolved)}건")
+
+    # **줄바꿈을 여기서 넣는다.** 재분할(`resplit`)은 한 자막의 용량을 "한 줄
+    # 한계 × 줄 수"로 잡아 두고 줄은 안 나눴다 — 그래서 초안에 두 줄 자막이
+    # 하나도 없었고 한 줄이 규정 한계를 넘었다(`korean_break.place_line_break`
+    # 주석의 실측). 타임코드는 안 건드리므로 이 단계는 TC와 무관하다.
+    per_line = (profile.get("limits") or {}).get("chars_per_line")
+    if per_line:
+        weights = (profile.get("limits") or {}).get("char_weights")
+        wrapped = 0
+        for event in result.events:
+            placed = place_line_break(event.text, per_line, weights)
+            if placed != event.text:
+                event.text = placed
+                wrapped += 1
+        if wrapped:
+            say(f"줄바꿈 {wrapped}곳 — 한 줄 한계({per_line}자)를 넘는 자막을 두 줄로 놓았습니다")
     stats.update(cues_out=len(result.events), timing_changes=len(result.changes),
                  timing_unresolved=len(result.unresolved))
 
