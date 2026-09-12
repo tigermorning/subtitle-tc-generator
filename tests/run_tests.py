@@ -4334,6 +4334,24 @@ ok("VAD 기본값이 이름 붙은 상수와 같다",
    == (_a4_vad.THRESHOLD, _a4_vad.MIN_SPEECH_MS, _a4_vad.MIN_SILENCE_MS))
 ok("VAD 상수가 실측 당시 값 그대로다(바꾸려면 주석의 표부터 갱신한다)",
    (_a4_vad.THRESHOLD, _a4_vad.MIN_SPEECH_MS, _a4_vad.MIN_SILENCE_MS) == (0.5, 120, 100))
+# --- VAD 입력 오디오: 5.1이면 센터(대사) 채널만 듣는다 ----------------------
+# 근거는 `checker/vad.py`의 주석(합성 시험 + 실사 2편). 여기서는 **어느 오디오를
+# 고르는지의 판단**만 못박는다 — ffprobe·ffmpeg 없이 돌아야 하므로 파싱과 판정을
+# 뗀 순수 함수로 본다.
+
+ok("5.1은 센터가 있다", _a4_vad._layout_has_center("6,5.1(side)"))
+ok("7.1도 센터가 있다", _a4_vad._layout_has_center("8,7.1"))
+ok("스테레오는 센터가 없다", not _a4_vad._layout_has_center("2,stereo"))
+ok("모노는 센터가 없다", not _a4_vad._layout_has_center("1,mono"))
+ok("레이아웃을 모르면 채널 수로 본다(6채널)", _a4_vad._layout_has_center("6,unknown"))
+ok("레이아웃을 모르고 2채널이면 센터가 없다", not _a4_vad._layout_has_center("2,unknown"))
+ok("ffprobe가 빈 줄을 내면 다운믹스로 간다", not _a4_vad._layout_has_center(""))
+ok("센터가 거의 비면 다운믹스로 되돌린다", _a4_vad._center_is_empty(0.01, 1.0))
+ok("센터에 소리가 있으면 센터를 쓴다", not _a4_vad._center_is_empty(0.5, 1.0))
+ok("다운믹스가 무음이면 되돌리지 않는다", not _a4_vad._center_is_empty(0.0, 0.0))
+ok("오디오 고르기 기본값은 auto다",
+   _a4_inspect.signature(_a4_vad.detect_speech).parameters["audio_source"].default == "auto")
+
 ok("침묵 당김 폭이 이름 붙은 상수와 같다",
    _a4_inspect.signature(_a4_resplit._snap_to_silence).parameters["tolerance_ms"].default
    == _a4_resplit.SNAP_TOLERANCE_MS == 400)
