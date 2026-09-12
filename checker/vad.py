@@ -208,7 +208,8 @@ def detect_speech(video: Path, threshold: float = THRESHOLD,
                   min_speech_ms: int = MIN_SPEECH_MS,
                   min_silence_ms: int = MIN_SILENCE_MS,
                   pad_ms: int = 0, model: str | None = None,
-                  progress=None, audio_source: str = "auto") -> list[tuple[int, int]]:
+                  progress=None, audio_source: str = "auto",
+                  boundary: str = "threshold") -> list[tuple[int, int]]:
     """말소리 구간 [(시작ms, 끝ms)]. `media.detect_speech`와 계약이 같다.
 
     같은 계약을 지키는 이유는 **바꿔 끼워 가며 잴 수 있어야** 하기 때문이다.
@@ -225,8 +226,19 @@ def detect_speech(video: Path, threshold: float = THRESHOLD,
     audio = _read_audio(Path(video), audio_source, say)
     say(f"말소리를 모델로 찾습니다 — {len(audio) / SAMPLE_RATE:.0f}초")
     probabilities = _probabilities(audio, model_path)
+    total_ms = int(len(audio) / SAMPLE_RATE * 1000)
+    if boundary == "band":
+        # 검출은 `threshold`로, **경계는 낮은 문턱까지 늘려** 잡는다(히스테리시스).
+        # 근거는 `speech_bands` 아래 주석 — 손라벨 정답으로 여섯 조건 전부에서
+        # 인점·아웃점 절대오차가 줄었다.
+        bands = speech_bands(probabilities, threshold, min_speech_ms, min_silence_ms,
+                             total_ms)
+        spans = bands_to_spans(bands, 0.0, 1.0)
+        if pad_ms:
+            spans = [(max(0, s - pad_ms), min(total_ms, e + pad_ms)) for s, e in spans]
+        return spans
     return _spans(probabilities, threshold, min_speech_ms, min_silence_ms, pad_ms,
-                  total_ms=int(len(audio) / SAMPLE_RATE * 1000))
+                  total_ms=total_ms)
 
 
 def _probabilities(audio, model_path):
@@ -285,3 +297,87 @@ def _spans(probabilities, threshold: float, min_speech_ms: int,
     if pad_ms:
         spans = [(max(0, s - pad_ms), min(total_ms, e + pad_ms)) for s, e in spans]
     return spans
+
+
+# --- 경계를 점이 아니라 구간으로 (2026-09-13) --------------------------------
+# 지금까지는 확률이 `THRESHOLD`를 처음 넘는 프레임 하나를 경계로 쓰고 나머지
+# 확률을 버렸다. 그런데 **TC는 비용이 비대칭이다**:
+#
+#     인점이 늦다   말 첫음절이 잘린다             치명적
+#     인점이 이르다  관행 여유(0.1~0.2초)까지 무해
+#     아웃점이 이르다 말꼬리가 잘린다               치명적
+#     아웃점이 늦다  다음 자막 전까지 무해
+#
+# 오차 절대값을 줄이는 것과, 늦지 않는 것은 다른 목표다. 그래서 문턱을 여러 개
+# 써서 경계를 **구간**으로 잡고(낮은 문턱일수록 이르게 시작하고 늦게 끝난다),
+# 그 구간에서 분위수를 고른다. 핀볼(quantile) 손실에서 최적 분위수는
+# `이른 비용 / (이른 비용 + 늦은 비용)`이다 — 5:1이면 0.17.
+#
+# 구간 폭 자체가 **불확실도**다. 넓으면 검출기가 흔들린 자리이므로 사람이 볼
+# 자리로 표시한다(규칙 3·4 — 추정은 고치지 말고 표시한다).
+BAND_THRESHOLDS = (0.2, 0.35, 0.5, 0.65)
+IN_QUANTILE = 0.17     # 인점: 이른 쪽. 늦는 비용이 이른 비용의 5배라고 보고 고른 값
+OUT_QUANTILE = 0.83    # 아웃점: 늦은 쪽. 같은 비대칭의 반대편
+
+
+def _overlapping(spans: list[tuple[int, int]], start: int, end: int):
+    """[start, end)와 겹치는 구간만 고른다."""
+    return [(s, e) for s, e in spans if s < end and e > start]
+
+
+def speech_bands(probabilities, threshold: float = THRESHOLD,
+                 min_speech_ms: int = MIN_SPEECH_MS,
+                 min_silence_ms: int = MIN_SILENCE_MS, total_ms: int = 0,
+                 thresholds=BAND_THRESHOLDS) -> list[dict]:
+    """말소리 구간마다 경계의 **구간**을 낸다.
+
+    `threshold`로 잡은 구간을 뼈대(core)로 삼고, 문턱을 바꿔 가며 같은 자리의
+    시작·끝이 어디까지 움직이는지 잰다. 돌려주는 각 항목:
+
+        core_start, core_end      지금까지 쓰던 값(문턱 하나)
+        start_low, start_high     인점 후보의 구간
+        end_low, end_high         아웃점 후보의 구간
+
+    **이웃 말을 삼키지 않는다** — 낮은 문턱에서 앞뒤 구간이 하나로 붙는 일이
+    흔하다. 그래서 구간을 앞 core의 끝과 뒤 core의 시작으로 자른다(2026-09-11에
+    고친 "이웃 말 꼬리에 걸린 인점"과 같은 이유).
+    """
+    core = _spans(probabilities, threshold, min_speech_ms, min_silence_ms, 0, total_ms)
+    by_threshold = {t: _spans(probabilities, t, min_speech_ms, min_silence_ms, 0, total_ms)
+                    for t in thresholds}
+    bands = []
+    for i, (core_start, core_end) in enumerate(core):
+        previous_end = core[i - 1][1] if i else 0
+        next_start = core[i + 1][0] if i + 1 < len(core) else total_ms or core_end
+        starts, ends = [core_start], [core_end]
+        for spans in by_threshold.values():
+            touching = _overlapping(spans, core_start, core_end)
+            if not touching:
+                continue
+            starts.append(max(min(s for s, _ in touching), previous_end))
+            ends.append(min(max(e for _, e in touching), next_start or core_end))
+        bands.append({"core_start": core_start, "core_end": core_end,
+                      "start_low": min(starts), "start_high": max(starts),
+                      "end_low": min(ends), "end_high": max(ends)})
+    return bands
+
+
+def pick_in_band(low: int, high: int, quantile: float) -> int:
+    """구간에서 분위수 하나를 고른다. 0이면 가장 이른 값, 1이면 가장 늦은 값."""
+    return int(round(low + (high - low) * quantile))
+
+
+def bands_to_spans(bands: list[dict], in_quantile: float = IN_QUANTILE,
+                   out_quantile: float = OUT_QUANTILE) -> list[tuple[int, int]]:
+    """구간에서 인점·아웃점을 골라 `detect_speech`와 같은 꼴로 낸다."""
+    spans = []
+    for band in bands:
+        start = pick_in_band(band["start_low"], band["start_high"], in_quantile)
+        end = pick_in_band(band["end_low"], band["end_high"], out_quantile)
+        spans.append((start, max(end, start)))
+    return spans
+
+
+def band_width_ms(band: dict) -> tuple[int, int]:
+    """인점·아웃점 구간의 폭 — 이 값이 크면 검출기가 흔들린 자리다."""
+    return (band["start_high"] - band["start_low"], band["end_high"] - band["end_low"])

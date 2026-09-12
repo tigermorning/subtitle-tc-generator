@@ -62,8 +62,9 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from checker.parsers import parse  # noqa: E402
-from checker.vad import (SAMPLE_RATE, VadUnavailable, _probabilities,  # noqa: E402
-                         _read_audio, _spans, find_model)
+from checker.vad import (BAND_THRESHOLDS, MIN_SILENCE_MS, MIN_SPEECH_MS,  # noqa: E402
+                         SAMPLE_RATE, THRESHOLD, VadUnavailable, _probabilities,
+                         _read_audio, _spans, bands_to_spans, find_model, speech_bands)
 
 # 대괄호·음표만 있는 자막은 사람 말이 아니다. 효과음·음악 표기라 VAD가 못 잡는
 # 것이 정상이고, 그것을 오차로 세면 문턱값이 엉뚱하게 낮은 쪽으로 끌린다.
@@ -160,6 +161,8 @@ def main() -> int:
     ap.add_argument("--corpus", type=Path, help="flac+json 짝이 든 폴더(코퍼스 모드)")
     ap.add_argument("--limit", type=int, default=0, help="코퍼스 모드: 앞 N개 파일만")
     ap.add_argument("--model", default=None)
+    ap.add_argument("--bands", action="store_true",
+                    help="코퍼스 모드: 문턱 하나 대신 **구간+분위수**로 경계를 고른다")
     a = ap.parse_args()
 
     if a.corpus:
@@ -224,6 +227,65 @@ def load_truth_json(path: Path):
     return cues, exclude, points
 
 
+QUANTILES = (0.0, 0.17, 0.34, 0.5, 0.66, 0.83, 1.0)
+
+
+def corpus_bands(a, pairs, model_path) -> int:
+    """경계를 구간으로 잡고 분위수별 오차를 낸다.
+
+    인점 열은 `q`를 **인점**에 적용했을 때, 아웃점 열은 같은 `q`를 **아웃점**에
+    적용했을 때다. 둘은 서로 영향을 주지 않으므로 한 표에서 각각 읽으면 된다.
+    비대칭 손실이 맞다면 인점은 작은 q, 아웃점은 큰 q에서 좋아야 한다.
+    """
+    pooled = {q: {"in": [], "out": [], "covered": 0, "counted": 0, "spans": 0}
+              for q in QUANTILES}
+    baseline = {"in": [], "out": [], "covered": 0, "counted": 0, "spans": 0}
+    started = time.time()
+    for k, (audio_path, truth_path) in enumerate(pairs, 1):
+        cues, exclude, points = load_truth_json(truth_path)
+        if not cues:
+            continue
+        audio = _read_audio(audio_path)
+        total_ms = int(len(audio) / SAMPLE_RATE * 1000)
+        probabilities = _probabilities(audio, model_path)
+        plain = _spans(probabilities, THRESHOLD, MIN_SPEECH_MS, MIN_SILENCE_MS, 0, total_ms)
+        in_err, out_err, covered, counted = raw_errors(plain, cues, exclude, points)
+        baseline["in"].extend(in_err); baseline["out"].extend(out_err)
+        baseline["covered"] += covered; baseline["counted"] += counted
+        baseline["spans"] += len(plain)
+        bands = speech_bands(probabilities, THRESHOLD, MIN_SPEECH_MS, MIN_SILENCE_MS,
+                             total_ms, BAND_THRESHOLDS)
+        for q in QUANTILES:
+            spans = bands_to_spans(bands, q, q)
+            in_err, out_err, covered, counted = raw_errors(spans, cues, exclude, points)
+            acc = pooled[q]
+            acc["in"].extend(in_err); acc["out"].extend(out_err)
+            acc["covered"] += covered; acc["counted"] += counted
+            acc["spans"] += len(spans)
+        print(f"  [{k}/{len(pairs)}] {audio_path.name} ({time.time() - started:.0f}초)",
+              file=sys.stderr)
+
+    print(f"{a.corpus}: 파일 {len(pairs)}개, {time.time() - started:.0f}초")
+    print(f"   {'분위수':>8} {'구간':>6} {'덮음%':>7} {'인점중앙':>9} {'인점95':>8}"
+          f" {'아웃중앙':>9} {'아웃95':>8}")
+    got = summarize(baseline["spans"], baseline["in"], baseline["out"],
+                    baseline["covered"], baseline["counted"])
+    print(f"   {'문턱하나':>8} {got['구간']:>6} {got['덮음%']:>7.1f}"
+          f" {got['인점중앙']:>9.0f} {(got['인점95'] or 0):>8.0f}"
+          f" {got['아웃중앙']:>9.0f} {(got['아웃95'] or 0):>8.0f}   <- 지금 값")
+    for q in QUANTILES:
+        acc = pooled[q]
+        got = summarize(acc["spans"], acc["in"], acc["out"], acc["covered"], acc["counted"])
+        if not got:
+            continue
+        print(f"   {q:>8.2f} {got['구간']:>6} {got['덮음%']:>7.1f}"
+              f" {got['인점중앙']:>9.0f} {(got['인점95'] or 0):>8.0f}"
+              f" {got['아웃중앙']:>9.0f} {(got['아웃95'] or 0):>8.0f}")
+    print()
+    print("인점은 작은 q, 아웃점은 큰 q 열에서 읽는다 - 비대칭 손실이 맞다면 거기가 낫다.")
+    return 0
+
+
 def corpus_main(a) -> int:
     """폴더의 flac/wav + json 짝을 전부 돌리고 오차를 한데 모은다."""
     audios = sorted(p for p in a.corpus.iterdir() if p.suffix.lower() in (".flac", ".wav"))
@@ -239,6 +301,8 @@ def corpus_main(a) -> int:
         print(f"{exc}", file=sys.stderr)
         return 2
 
+    if a.bands:
+        return corpus_bands(a, pairs, model_path)
     grid = [(t, ms, sil) for t in GRID_THRESHOLD for ms in GRID_MIN_SPEECH
             for sil in GRID_MIN_SILENCE]
     pooled = {g: {"in": [], "out": [], "covered": 0, "counted": 0, "spans": 0} for g in grid}
