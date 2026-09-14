@@ -27,7 +27,7 @@ from .model import Event
 from .text import chars_per_second
 from .korean_break import place_line_break
 from .resplit import resplit_all
-from .timing import TimingLimits, converge
+from .timing import TimingLimits, TimingResult, converge
 
 
 @dataclass
@@ -182,6 +182,54 @@ def has_vad_support(start_ms: int, end_ms: int, speech: list[tuple[int, int]],
     if undetected_after and start_ms >= speech_end:
         return True
     return any(s < end_ms and start_ms < e for s, e in speech)
+
+
+def settle_timecodes(events: list[Event], speech: list[tuple[int, int]], fps: float,
+                     detector: str, limits: TimingLimits,
+                     shots: list[int] | None = None,
+                     no_audio: set[int] | None = None) -> tuple[TimingResult, int]:
+    """스포팅(말소리·장면 전환)과 수렴. 돌려주는 `events`는 번호순이다.
+
+    **인점·아웃점을 말소리에 맞춘다.** 작업자 기준: 인점은 목소리 시작 2~3프레임
+    전, 아웃점은 끝난 뒤 6~9프레임. whisper가 찍은 경계는 이 여유를 모른다.
+
+    검사 경로에서는 이 조정을 자동으로 하지 않는다 — 사람이 잡은 타임코드를
+    추정값으로 덮어쓰면 싱크가 통째로 어긋나기 때문이다. 여기서는 타임코드 자체가
+    방금 기계가 만든 것이라 훼손할 작업물이 없다.
+
+    **`no_audio` 번호는 스포팅·수렴에 넣지 않는다**(2026-09-14, `docs/STAGE_CONTRACTS.md`
+    구멍 1). 대조(`align`)는 소리를 못 찾은 대본 줄을 길이 0으로 남기는데, 수렴은
+    그것을 "최소 표시 시간 위반"으로만 보고 늘렸다 — 맨 뒤 표식이 867ms짜리 자막이
+    되고, 가운데 표식은 앞 자막의 아웃점을 간격만큼 당겼다. 없는 자막이 이웃으로
+    끼면 안 되므로 빼 두었다가 제자리(번호)로 되돌린다. `converge` 자체는 안 고친다 —
+    `--check`에서 사람이 만든 길이 0 자막을 늘리는 것은 정당한 교정이다.
+    """
+    from .timing import apply_spotting, suggest_shot_snap, suggest_spotting
+
+    no_audio = no_audio or set()
+    timed = [e for e in events if e.index not in no_audio]
+    held = [e for e in events if e.index in no_audio]
+
+    suggestions = suggest_spotting(timed, speech, fps, detector=detector)
+    if shots is not None:
+        suggestions += suggest_shot_snap(timed, shots, fps)
+    moved = apply_spotting(timed, suggestions)
+
+    result = converge(timed, limits)
+    if held:
+        # 표식을 **정리된 이웃**에 다시 붙인다. `align`이 붙인 기준 그대로다 — 가운데
+        # 표식은 다음 대사의 인점, 맨 뒤 표식은 마지막 대사의 아웃점. 옛 시각을 그대로
+        # 두면 스포팅이 다음 대사의 인점을 당겼을 때 표식이 그보다 늦어져, 번호순과
+        # 시간순이 어긋난다(리뷰 지적, 2026-09-14).
+        settled = sorted(result.events, key=lambda e: e.index)
+        for marker in held:
+            after = next((e for e in settled if e.index > marker.index), None)
+            before = [e for e in settled if e.index < marker.index]
+            anchor = (after.start_ms if after else
+                      before[-1].end_ms if before else marker.start_ms)
+            marker.start_ms = marker.end_ms = anchor
+        result.events = sorted(settled + held, key=lambda e: e.index)
+    return result, moved
 
 
 def generate(video: Path, profile: dict, script: Path | None = None,
@@ -351,6 +399,9 @@ def generate(video: Path, profile: dict, script: Path | None = None,
 
     notes: list[tuple[int, str]] = []
     stats: dict = {"transcript": len(segments)}
+    # 대본 줄 중 소리를 못 찾아 길이 0으로 남긴 것의 번호. 뒤의 스포팅·수렴이
+    # 이 표식을 "짧은 자막"으로 보고 늘리지 않게 따로 들고 간다(`settle_timecodes`).
+    no_audio: set[int] = set()
 
     if script:
         # 대본은 워드·PDF로도 온다. 형식은 `script.py`가 가린다.
@@ -373,6 +424,7 @@ def generate(video: Path, profile: dict, script: Path | None = None,
         cues = align(segments, lines)
         stats.update(summary(cues))
         events = _to_events(cues, notes)
+        no_audio = {e.index for e in events if e.start_ms == e.end_ms}
     else:
         # **전사 조각을 자막 단위로 다시 묶는다.** whisper는 말이 잠깐 멎을 때마다
         # 끊지만 사람은 한 호흡을 한 자막에 담는다(`regroup.py` 첫머리에 근거를
@@ -492,15 +544,8 @@ def generate(video: Path, profile: dict, script: Path | None = None,
                 if old == old_index:
                     moved.setdefault(new_index, []).append(note)
         notes = [(i, " / ".join(v)) for i, v in sorted(moved.items())]
-
-    # **인점·아웃점을 말소리에 맞춘다.** 작업자 기준: 인점은 목소리 시작 2~3프레임
-    # 전, 아웃점은 끝난 뒤 6~9프레임. whisper가 찍은 경계는 이 여유를 모른다.
-    #
-    # 검사 경로에서는 이 조정을 자동으로 하지 않는다 — 사람이 잡은 타임코드를
-    # 추정값으로 덮어쓰면 싱크가 통째로 어긋나기 때문이다. 여기서는 타임코드 자체가
-    # 방금 기계가 만든 것이라 훼손할 작업물이 없다.
-    from .timing import apply_spotting, suggest_spotting
-    suggestions = suggest_spotting(events, speech, fps, detector=how)
+    if no_audio:
+        no_audio = {new for new, old in enumerate(origins, 1) if old in no_audio}
 
     # **장면 전환도 스포팅의 일부다.** 전에는 `--check --fix-spotting`
     # 경로에서만 이 조정을 했고 `--generate` 자체는 몰랐다 — 만든 초안이
@@ -516,17 +561,11 @@ def generate(video: Path, profile: dict, script: Path | None = None,
     # 번역 자막은 TC 작업 뒤 장면전환 지정 없이 바로 번역으로 들어간다. 문서가
     # 틀렸다고 고치는 게 아니라(rules/*/common.yaml의 공식 인용문은 그대로
     # 둔다) 이 도구의 적용 범위를 실무에 맞춘 것이다.
+    shots = None
     if (profile.get("shot_change") or {}).get("applied") and profile.get("kind") == "sdh":
         from .media import detect_shot_changes
-        from .timing import suggest_shot_snap
         shots = detect_shot_changes(video)
         say(f"장면 전환 {len(shots)}곳")
-        suggestions += suggest_shot_snap(events, shots, fps)
-
-    moved = apply_spotting(events, suggestions)
-    if moved:
-        say(f"인점·아웃점 {moved}곳을 말소리에 맞춤")
-    stats["spotting_applied"] = moved
 
     limits = TimingLimits.from_profile(profile, fps=fps)
     # 규정 하한 위의 실무 바닥(학습값, 약 1초) — **생성 경로에서만**. 짧은 말은
@@ -539,7 +578,13 @@ def generate(video: Path, profile: dict, script: Path | None = None,
     if floor and floor > (limits.min_duration_ms or 0):
         limits.preferred_min_duration_ms = floor
         say(f"짧은 자막 실무 바닥(학습값) {floor}ms — 규정 하한 위에서 아웃점을 늘립니다")
-    result = converge(events, limits)
+    result, moved = settle_timecodes(events, speech, fps, how, limits,
+                                     shots=shots, no_audio=no_audio)
+    if moved:
+        say(f"인점·아웃점 {moved}곳을 말소리에 맞춤")
+    stats["spotting_applied"] = moved
+    if no_audio:
+        say(f"소리를 못 찾은 대본 줄 {len(no_audio)}개는 길이 0 그대로 둡니다")
     say(f"스포팅 {len(result.changes)}곳 조정, 남은 문제 {len(result.unresolved)}건")
 
     # **줄바꿈을 여기서 넣는다.** 재분할(`resplit`)은 한 자막의 용량을 "한 줄
@@ -631,8 +676,10 @@ def generate(video: Path, profile: dict, script: Path | None = None,
     # 손해, 안 지우면 후자가 사람 손이 한 번 더 간다. 둘 중 되돌릴 수 없는
     # 쪽(실제 대사 삭제)을 피한다.
     if speech:
+        # 소리 없는 대본 줄은 뺀다 — "소리를 찾지 못했다"는 더 정확한 노트가 이미 있다.
         no_vad = [ev for ev in result.events
-                 if not _has_vad_support(ev.start_ms, ev.end_ms)]
+                 if ev.index not in no_audio
+                 and not _has_vad_support(ev.start_ms, ev.end_ms)]
         if no_vad:
             say(f"말소리 구간(VAD)과 안 겹치는 자막 {len(no_vad)}곳 — 배경음에 묻힌 "
                 "진짜 대사이거나 침묵에서 지어낸 것, 둘 다일 수 있습니다. "

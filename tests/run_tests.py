@@ -1308,6 +1308,38 @@ ok("소리를 못 찾은 스크립트 줄을 지우지 않는다", len(_events) 
 ok("소리 없는 줄은 길이 0으로 남는다", _events[1].start_ms == _events[1].end_ms)
 ok("그 자리를 봐야 할 곳으로 표시한다", any(i == 2 for i, _ in _notes))
 
+# **대조가 남긴 길이 0 표식이 스포팅·수렴을 지나도 살아남는가**(docs/STAGE_CONTRACTS.md
+# 구멍 1). 위 시험은 `_to_events` 출력만 봤다 — 뒤 단계가 그 약속을 모른 채 맨 뒤
+# 표식을 867ms짜리 자막으로 늘리던 것을 못 잡았다. 이음매를 가로질러 본다.
+from checker.generate import settle_timecodes  # noqa: E402
+
+def _marker_run(no_audio_on: bool):
+    cues = align([Segment(0, 1000, "hello there"), Segment(1500, 2500, "how are you")],
+                 ["Hello there.", "Where have you been?", "How are you?", "Goodbye."])
+    events = _to_events(cues, [])
+    markers = {e.index for e in events if e.start_ms == e.end_ms}
+    limits = TimingLimits(min_duration_ms=833, max_duration_ms=7000, min_gap_ms=83, max_cps=15)
+    result, _moved = settle_timecodes(events, [(50, 950), (1200, 2400)], 23.976, "vad", limits,
+                                      no_audio=markers if no_audio_on else None)
+    return markers, {e.index: (e.start_ms, e.end_ms) for e in result.events}, result.events
+
+_markers, _times, _settled = _marker_run(True)
+ok("대조 결과에 소리 없음 표식이 둘 있다(가운데·맨 뒤)", _markers == {2, 4})
+ok("스포팅·수렴 뒤에도 가운데 표식은 길이 0, 다음 대사 인점에 붙는다",
+   _times[2] == (_times[3][0], _times[3][0]))
+ok("스포팅·수렴 뒤에도 맨 뒤 표식은 길이 0, 마지막 대사 아웃점에 붙는다",
+   _times[4] == (_times[3][1], _times[3][1]))
+ok("표식을 되돌린 뒤 대본 순서(번호순)다", [e.index for e in _settled] == [1, 2, 3, 4])
+# 번호순이 시간순이기도 해야 한다 — 스포팅이 #3 인점을 당겼는데 표식이 옛 시각(1500)에
+# 남으면 #2가 #3보다 늦게 시작하는 SRT가 나온다.
+ok("번호순이 곧 시간순이다", all(a.start_ms <= b.start_ms for a, b in zip(_settled, _settled[1:])))
+ok("(시험 전제) 스포팅이 #3 인점을 표식보다 앞으로 당겼다", _times[3][0] < 1500)
+ok("진짜 자막은 여전히 수렴한다", _times[1][1] - _times[1][0] >= 833
+   and _times[3][1] - _times[3][0] >= 833)
+# 이 시험이 구멍을 실제로 잡는지 — 표식을 안 빼면 맨 뒤 표식이 늘어난다.
+_, _times_off, _ = _marker_run(False)
+ok("(대조군) 표식을 안 빼면 수렴이 맨 뒤 표식을 늘린다", _times_off[4][1] > _times_off[4][0])
+
 _draft = Draft([Event(1, 0, 1000, "가"), Event(2, 1000, 2000, "나")],
                notes=[(2, "스크립트에 없는 대사입니다")])
 _out = notes_srt(_draft)
