@@ -583,6 +583,13 @@ def generate(video: Path, profile: dict, script: Path | None = None,
         notes = [(i, " / ".join(v)) for i, v in sorted(moved.items())]
     if no_audio:
         no_audio = {new for new, old in enumerate(origins, 1) if old in no_audio}
+    if revisions_out:
+        # 감수 내역도 새 번호로 옮긴다(`docs/STAGE_CONTRACTS.md` 구멍 3).
+        from .revise import renumber
+        split: dict[int, list[int]] = {}
+        for new_index, old_index in enumerate(origins, 1):
+            split.setdefault(old_index, []).append(new_index)
+        revisions_out = renumber(revisions_out, split)
 
     # **장면 전환도 스포팅의 일부다.** 전에는 `--check --fix-spotting`
     # 경로에서만 이 조정을 했고 `--generate` 자체는 몰랐다 — 만든 초안이

@@ -1396,6 +1396,74 @@ ok("콘솔 20곳을 넘는 환각 의심도 전부 notes에 남는다",
 ok("같은 번호에 VAD 노트가 겹쳐도 둘 다 남는다",
    "환각 의심" in _by.get(_N, "") and "VAD" in _by.get(_N, ""), _by.get(_N))
 ok("notes에 같은 번호가 두 번 나오지 않는다", len(_draft.notes) == len(_by))
+
+# **감수 내역의 번호가 최종 자막 번호를 가리키는가**(docs/STAGE_CONTRACTS.md 구멍 3).
+# 감수는 재분할 전에 돈다 — 전에는 그때 번호가 리포트에 그대로 나가, 그 번호로 최종
+# SRT를 찾으면 다른 자막이 나왔다.
+from checker.revise import Revision, renumber, report as _rev_report  # noqa: E402
+
+_rn = renumber([Revision(1, "a", "b", "2차"), Revision(2, "c", "d", "2차")], {1: [1, 2], 2: [3]})
+ok("나뉜 자막의 감수 내역은 조각 번호를 다 가진다", _rn[0].indices == (1, 2) and _rn[0].index == 1)
+ok("뒤 자막의 감수 내역은 밀린 번호로 간다", _rn[1].index == 3)
+ok("리포트는 최종 번호로 적는다", "#1·2" in _rev_report(_rn) and "#3" in _rev_report(_rn))
+_rn2 = renumber(_rn, {1: [1], 2: [3], 3: [4]})
+ok("두 번 옮겨도 이어서 옮긴다(재분할 뒤 캡션 합치기)", _rn2[0].indices == (1, 3) and _rn2[1].index == 4)
+ok("옮길 곳이 없는 번호는 그대로 둔다", renumber([Revision(9, "a", "b", "2차")], {1: [2]})[0].index == 9)
+
+# CLI가 캡션 합치기 뒤에 쓰는 방식 그대로 — 대사 자막 객체로 옛 번호를 기억한다.
+_dlg = [Event(1, 0, 1000, "첫 대사"), Event(2, 5000, 6000, "둘째 대사")]
+_before_merge = {id(e): e.index for e in _dlg}
+_cap = captions_to_events([OcrCaption(start_ms=2000, end_ms=3000, text="간판", confidence=0.9)],
+                          start_index=3)
+_merged_events, _ = merge_captions(_dlg, [], _cap, {3: 0.9}, "bracket")
+_rn3 = renumber([Revision(2, "둘째", "둘째 대사", "2차")],
+                {_before_merge[id(e)]: [e.index] for e in _merged_events if id(e) in _before_merge})
+ok("캡션이 끼어든 뒤 감수 내역이 같은 대사를 가리킨다",
+   next(e.text for e in _merged_events if e.index == _rn3[0].index) == "둘째 대사")
+
+# generate()를 끝까지 — 번역·감수만 가짜로 바꾸고, 감수가 늘린 자막을 재분할이 나누게 한다.
+import checker.pipeline as _pipe_mod  # noqa: E402
+import checker.translate as _trans_mod  # noqa: E402
+
+_LONG = "첫 번째 문장은 꽤 길게 늘어났습니다. 두 번째 문장도 이어서 붙었습니다."
+_rev_segs = [Segment(0, 6000, "one", confidence=-0.1), Segment(8000, 9000, "two", confidence=-0.1)]
+
+def _fake_revise(events, profile, **_k):
+    out = [Event(e.index, e.start_ms, e.end_ms, _LONG if e.index == 1 else "두 번째 자막")
+           for e in events]
+    return _pipe_mod.StageResult(events=out, extra={
+        "revisions": [Revision(1, events[0].text, _LONG, "2차"),
+                      Revision(2, events[1].text, "두 번째 자막", "2차")],
+        "rounds": [], "stopped_because": ""})
+
+_saved = (_gen_mod.probe, _gen_mod.find_speech, _tr_mod.transcribe, _paths_mod.user_data,
+          _trans_mod.translate_events, _trans_mod.to_events, _pipe_mod.stage_revise)
+with _tf3.TemporaryDirectory() as _d:
+    try:
+        _gen_mod.probe = lambda _v: _NS(fps=23.976, duration_ms=10000)
+        _gen_mod.find_speech = lambda *_a, **_k: ([(0, 6000), (8000, 9000)], "vad")
+        _tr_mod.transcribe = lambda *_a, **_k: list(_rev_segs)
+        _paths_mod.user_data = lambda: Path(_d)
+        _trans_mod.translate_events = lambda events, *_a, **_k: []
+        _trans_mod.to_events = lambda _cues, events: [Event(e.index, e.start_ms, e.end_ms, "번역")
+                                                      for e in events]
+        _pipe_mod.stage_revise = _fake_revise
+        _rdraft = _gen_mod.generate(Path(_d) / "fake.mkv",
+                                    {"kind": "translation", "language": "ko",
+                                     "limits": {"chars_per_line": 16, "max_lines": 2,
+                                                "duration_ms": {"min": 833, "max": 7000}}},
+                                    translator=object(), passes=2,
+                                    transcript_cache=Path(_d) / "cache.json")
+    finally:
+        (_gen_mod.probe, _gen_mod.find_speech, _tr_mod.transcribe, _paths_mod.user_data,
+         _trans_mod.translate_events, _trans_mod.to_events, _pipe_mod.stage_revise) = _saved
+_rtext = {e.index: e.text for e in _rdraft.events}
+_r1, _r2 = _rdraft.revisions
+ok("(시험 전제) 감수가 늘린 자막을 재분할이 나눴다", len(_rdraft.events) == 3, str(_rtext))
+ok("나뉜 자막의 감수 내역이 그 조각들을 가리킨다",
+   " ".join(_rtext[i] for i in _r1.indices).replace("\n", " ") == _LONG, str((_r1.indices, _rtext)))
+ok("뒤 자막의 감수 내역이 밀린 번호를 가리킨다", _rtext.get(_r2.index) == "두 번째 자막",
+   str((_r2.index, _rtext)))
 ok("순서가 안 섞인다(1번이 먼저)", [i for i, _ in _merged] == [1, 2])
 ok("빈 추가 목록이면 원본과 같다",
    merge_notes([(3, "그대로")], []) == [(3, "그대로")])
