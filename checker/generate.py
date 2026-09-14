@@ -184,6 +184,43 @@ def has_vad_support(start_ms: int, end_ms: int, speech: list[tuple[int, int]],
     return any(s < end_ms and start_ms < e for s, e in speech)
 
 
+# 환각 의심 기준 — 근거는 `generate()`의 "환각 의심 자막을 알린다" 주석.
+CONFIDENCE_THRESHOLD = -0.4
+SPARSE_CPS = 3.0
+
+
+def hallucination_suspects(events: list[Event], segments: list[Segment],
+                           profile: dict) -> tuple[list[Event], str]:
+    """통계(신뢰도·글자 밀도)로 환각이 의심되는 자막과 그 근거를 돌려준다.
+
+    신뢰도가 있으면 **신뢰도 낮음 + 글자 밀도 낮음**이 같이 있을 때만, 없으면
+    **최대 표시 시간을 꽉 채웠는데 글자가 적을 때**만 잡는다. 기준의 근거는
+    `generate()`의 호출부 주석에 있다. 고치지 않고 알리기만 한다(규칙 4).
+    """
+    limits = profile.get("limits") or {}
+    dur_max = (limits.get("duration_ms") or {}).get("max")
+    weights = limits.get("char_weights")
+    has_confidence = any(s.confidence is not None for s in segments)
+
+    def _worst_confidence(ev) -> float | None:
+        values = [s.confidence for s in segments
+                 if s.confidence is not None
+                 and s.start_ms < ev.end_ms and ev.start_ms < s.end_ms]
+        return min(values) if values else None
+
+    suspects = []
+    for ev in events:
+        sparse = chars_per_second(ev.text, ev.duration_ms, weights) < SPARSE_CPS
+        if has_confidence:
+            conf = _worst_confidence(ev)
+            if conf is not None and conf < CONFIDENCE_THRESHOLD and sparse:
+                suspects.append(ev)
+        elif dur_max and ev.duration_ms >= dur_max and sparse:
+            suspects.append(ev)
+    basis = "신뢰도·글자 밀도 둘 다 낮음" if has_confidence else "시간을 꽉 채웠는데 글자가 적음"
+    return suspects, basis
+
+
 def settle_timecodes(events: list[Event], speech: list[tuple[int, int]], fps: float,
                      detector: str, limits: TimingLimits,
                      shots: list[int] | None = None,
@@ -635,35 +672,19 @@ def generate(video: Path, profile: dict, script: Path | None = None,
     # 필터 — srt·json 둘 다 이 값을 안 준다) "최대 표시 시간을 꽉 채웠는지"로
     # 대신한다. 어느 쪽이든 놓치는 것과 잘못 잡는 것이 있을 수 있다 — 그래서
     # 지우거나 고치지 않고 **알리기만** 한다.
-    CONFIDENCE_THRESHOLD = -0.4
-    SPARSE_CPS = 3.0
-
-    def _worst_confidence(ev) -> float | None:
-        values = [s.confidence for s in segments
-                 if s.confidence is not None
-                 and s.start_ms < ev.end_ms and ev.start_ms < s.end_ms]
-        return min(values) if values else None
-
-    dur_max = (profile.get("limits") or {}).get("duration_ms", {}).get("max")
-    weights = (profile.get("limits") or {}).get("char_weights")
-    has_confidence = any(s.confidence is not None for s in segments)
-    suspects = []
-    for ev in result.events:
-        sparse = chars_per_second(ev.text, ev.duration_ms, weights) < SPARSE_CPS
-        if has_confidence:
-            conf = _worst_confidence(ev)
-            if conf is not None and conf < CONFIDENCE_THRESHOLD and sparse:
-                suspects.append(ev)
-        elif dur_max and ev.duration_ms >= dur_max and sparse:
-            suspects.append(ev)
+    suspects, basis = hallucination_suspects(result.events, segments, profile)
     if suspects:
-        basis = "신뢰도·글자 밀도 둘 다 낮음" if has_confidence else "시간을 꽉 채웠는데 글자가 적음"
         say(f"환각 의심 자막 {len(suspects)}곳({basis}) — 영상에서 직접 들어보고 확인하세요:")
         for ev in suspects[:20]:
             ts = ev.start_ms // 1000
             say(f"    #{ev.index} {ts // 60}:{ts % 60:02d}  {ev.text[:40]!r}")
         if len(suspects) > 20:
             say(f"    ...외 {len(suspects) - 20}곳 더")
+        # **notes.srt에도 남긴다**(2026-09-14, `docs/STAGE_CONTRACTS.md` 구멍 4) — 아래
+        # VAD 검사를 2026-08-31에 같은 이유로 고쳤는데 이 검사는 빠져 있었다. 콘솔에
+        # 20곳까지만 찍혀 21번째부터는 어디에도 안 남았다.
+        notes = merge_notes(notes, [(ev.index, f"환각 의심({basis}) — 들어보고 확인 필요")
+                                    for ev in suspects])
 
     # **말소리 구간(VAD)과 전혀 안 겹치는 자막도 따로 알린다(2026-08-31,
     # 위쪽 `_has_vad_support` 정정과 짝).** 위 환각 의심 검사와 근거가 다르다
@@ -693,8 +714,11 @@ def generate(video: Path, profile: dict, script: Path | None = None,
             # 출력만으로는 사람이 실제로 여는 `<초안>.notes.srt`(cli.py가
             # SE에 얹어 보라고 안내하는 파일)에 하나도 안 남아서, 콘솔
             # 스크롤을 넘긴 나머지(20곳 넘는 것)는 확인할 방법이 없었다.
-            notes.extend((ev.index, "말소리 구간(VAD)과 안 겹칩니다 — 들어보고 확인 필요")
-                         for ev in no_vad)
+            #
+            # **`extend`가 아니라 `merge_notes`로 넣는다**(2026-09-14). 같은 번호에 노트가
+            # 이미 있으면(대본 대조·번역 등) `notes_srt`의 `dict()`가 먼저 것을 덮어썼다.
+            notes = merge_notes(notes, [(ev.index, "말소리 구간(VAD)과 안 겹칩니다 — 들어보고 확인 필요")
+                                        for ev in no_vad])
 
     # 재분할로 번호가 바뀌었으면 원어도 새 번호로 옮긴다.
     moved_sources: dict[int, str] = {}

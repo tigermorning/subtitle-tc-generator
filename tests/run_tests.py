@@ -1354,6 +1354,48 @@ ok("자막 수만큼 노트를 낸다", _out.count("-->") == 2)
 _merged = merge_notes([(1, "align 노트"), (2, "sfx 노트")], [(1, "규정 위반")])
 ok("겹치는 번호는 이어 붙인다", dict(_merged)[1] == "align 노트 / 규정 위반")
 ok("안 겹치는 번호는 그대로 남는다", dict(_merged)[2] == "sfx 노트")
+
+# **환각 의심 자막이 notes에 남는가 — generate()를 끝까지 돌려 본다**(docs/STAGE_CONTRACTS.md
+# 구멍 4). 전에는 콘솔에 20곳까지만 찍고 notes에는 안 넣었다. 영상 읽기·말소리·전사만
+# 가짜로 바꾸고 나머지 단계는 진짜로 돈다 — 검사가 notes까지 가는 이음매를 보려는 것이다.
+import checker.generate as _gen_mod  # noqa: E402
+import checker.paths as _paths_mod  # noqa: E402
+import checker.transcribe as _tr_mod  # noqa: E402
+from checker.generate import hallucination_suspects  # noqa: E402
+from types import SimpleNamespace as _NS  # noqa: E402
+
+_sus_segs = [Segment(0, 3000, "잡음", confidence=-0.8),
+             Segment(4000, 5000, "또렷하게 말한 대사입니다", confidence=-0.1)]
+_sus, _basis = hallucination_suspects([Event(1, 0, 3000, "잡음"), Event(2, 4000, 5000, "또렷하게 말한 대사입니다")],
+                                      _sus_segs, {})
+ok("신뢰도 낮고 글자가 성긴 자막만 환각 의심이다", [e.index for e in _sus] == [1])
+ok("신뢰도가 있으면 근거에 그렇게 적는다", "신뢰도" in _basis)
+
+_N = 25
+_fake_segs = [Segment(i * 5000, i * 5000 + 3000, f"잡음 {i}", confidence=-0.8) for i in range(_N)]
+# 마지막 조각만 VAD 밖에 둔다 — 환각 의심과 VAD 노트가 같은 번호에 겹치게.
+_fake_speech = [(s.start_ms, s.end_ms) for s in _fake_segs[:-1]]
+_saved = (_gen_mod.probe, _gen_mod.find_speech, _tr_mod.transcribe, _paths_mod.user_data)
+with _tf3.TemporaryDirectory() as _d:
+    try:
+        _gen_mod.probe = lambda _v: _NS(fps=23.976, duration_ms=_N * 5000)
+        _gen_mod.find_speech = lambda *_a, **_k: (list(_fake_speech), "vad")
+        _tr_mod.transcribe = lambda *_a, **_k: list(_fake_segs)
+        _paths_mod.user_data = lambda: Path(_d)
+        _draft = _gen_mod.generate(Path(_d) / "fake.mkv",
+                                   {"kind": "sdh", "language": "ko",
+                                    "limits": {"chars_per_line": 16, "max_lines": 2,
+                                               "duration_ms": {"min": 833, "max": 7000}}},
+                                   transcript_cache=Path(_d) / "cache.json")
+    finally:
+        _gen_mod.probe, _gen_mod.find_speech, _tr_mod.transcribe, _paths_mod.user_data = _saved
+_by = dict(_draft.notes)
+ok("(시험 전제) 조각마다 자막 하나", len(_draft.events) == _N)
+ok("콘솔 20곳을 넘는 환각 의심도 전부 notes에 남는다",
+   sum(1 for t in _by.values() if "환각 의심" in t) == _N, str(len(_by)))
+ok("같은 번호에 VAD 노트가 겹쳐도 둘 다 남는다",
+   "환각 의심" in _by.get(_N, "") and "VAD" in _by.get(_N, ""), _by.get(_N))
+ok("notes에 같은 번호가 두 번 나오지 않는다", len(_draft.notes) == len(_by))
 ok("순서가 안 섞인다(1번이 먼저)", [i for i, _ in _merged] == [1, 2])
 ok("빈 추가 목록이면 원본과 같다",
    merge_notes([(3, "그대로")], []) == [(3, "그대로")])
