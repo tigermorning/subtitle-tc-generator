@@ -474,6 +474,20 @@ r = check_events([{"index": 1, "start_ms": 0, "end_ms": 2000, "text": "첫 줄"}
                   {"index": 2, "start_ms": 1900, "end_ms": 4000, "text": "둘째 줄"}], gap_profile)
 ok("겹침도 잡는다", any("겹칩니다" in v["detail"] for v in r["violations"]))
 
+# 프레임 규정은 SRT 밀리초로 내려 적힌 값을 통과시켜야 한다 — 2프레임(23.976fps)은
+# 83.4ms인데 파일에는 83ms로 남는다. 정답지 805건이 이것 하나로 위반이 됐었다.
+frame_profile = dict(gap_profile)
+frame_profile["limits"] = {k: v for k, v in agency["limits"].items() if k != "min_gap_ms"}
+frame_profile["limits"]["min_gap_frames"] = 2
+r = check_events([{"index": 1, "start_ms": 0, "end_ms": 2000, "text": "첫 줄"},
+                  {"index": 2, "start_ms": 2083, "end_ms": 4000, "text": "둘째 줄"}],
+                 frame_profile, fps=23.976)
+ok("정확히 2프레임(83ms로 적힌)은 통과한다", "A02" not in ids(r), str(r["violations"]))
+r = check_events([{"index": 1, "start_ms": 0, "end_ms": 2000, "text": "첫 줄"},
+                  {"index": 2, "start_ms": 2082, "end_ms": 4000, "text": "둘째 줄"}],
+                 frame_profile, fps=23.976)
+ok("2프레임에 못 미치면 잡는다", "A02" in ids(r))
+
 ok("넷플릭스에는 간격 규정을 넣지 않았다", "min_gap_ms" not in ko_tr["limits"])
 
 try:
@@ -4538,6 +4552,52 @@ ok("같은 id가 두 번 적히면 문제로 낸다",
                                       {"state": "정독함", "ids": ["A-1"]}]})["problems"])
 ok("적힌 수가 전체보다 많으면 문제로 낸다",
    _rp.tally({"total": 1, "records": [{"state": "반영함", "count": 5}]})["problems"])
+
+
+# --- 정답지 자기검증: 검사기를 정답지로 먼저 잰다 ---------------------------
+
+_ts_spec = _a4_iu.spec_from_file_location("truth_self_check", Path("tools/truth_self_check.py"))
+_ts = _a4_iu.module_from_spec(_ts_spec)
+sys.modules["truth_self_check"] = _ts   # dataclass가 제 모듈을 찾는다
+_ts_spec.loader.exec_module(_ts)
+
+_ts_eps = {"가 [netflix/ko-sdh]": ["가 E1 sdh", "가 E2 sdh"],
+           "나 [netflix/ko-sdh]": ["나 E1 sdh"]}
+ok("두 작품에서 걸리면 검사기·프로파일을 먼저 의심한다",
+   _ts.classify({"가 [netflix/ko-sdh]": 1, "나 [netflix/ko-sdh]": 1},
+                {"가 E1 sdh": 1, "나 E1 sdh": 1}, _ts_eps) == _ts.SYSTEMIC)
+ok("한 작품의 모든 회차에서 반복되면 그 작품 관행으로 본다(비율이 낮아도)",
+   _ts.classify({"가 [netflix/ko-sdh]": 6}, {"가 E1 sdh": 3, "가 E2 sdh": 3}, _ts_eps)
+   == _ts.ONE_WORK)
+ok("일부 회차에만 드물게 걸리면 사람 실수 후보다",
+   _ts.classify({"가 [netflix/ko-sdh]": 5}, {"가 E1 sdh": 5}, _ts_eps) == _ts.SCATTERED)
+ok("회차가 하나뿐인 작품은 반복을 말할 수 없다",
+   _ts.classify({"나 [netflix/ko-sdh]": 9}, {"나 E1 sdh": 9}, _ts_eps) == _ts.SCATTERED)
+
+_ts_dir = Path(tempfile.mkdtemp())
+(_ts_dir / "a.srt").write_text("1\n00:00:01,000 --> 00:00:02,000\n가\n", encoding="utf-8")
+_ts_found, _ts_skip = _ts.targets_from_ledger({"works": {"작품": {
+    "platform": "netflix", "genre": "variety", "episodes": {"1": {"kinds": {
+        "sdh": {"lang": "ko", "truth": "a.srt"},
+        "translation_fr": {"lang": "fr", "truth": "없는파일.srt"},
+        "translation_other": {"lang": "da/nl", "truth": "a.srt"},
+        "translation": {"lang": "en"}}}}}}}, root=_ts_dir)
+ok("원장에서 읽을 수 있는 정답지만 고른다",
+   [(t.kind, t.language) for t in _ts_found] == [("sdh", "ko")], str(_ts_found))
+ok("못 고른 것은 이유를 남긴다(조용히 빠지지 않는다)", len(_ts_skip) == 3, str(_ts_skip))
+
+_ts_res = _ts.run_one(_ts.Target("작품", "1", "없는발주처", "ko", "sdh", None,
+                                 _ts_dir / "a.srt"), 23.976)
+ok("프로파일이 없으면 위반 0이 아니라 오류로 남긴다", bool(_ts_res.error), str(_ts_res))
+import contextlib as _ts_ctx  # noqa: E402
+import io as _ts_io  # noqa: E402
+
+with _ts_ctx.redirect_stdout(_ts_io.StringIO()), _ts_ctx.redirect_stderr(_ts_io.StringIO()):
+    _ts_code = _ts.main(["--file", str(_ts_dir / "a.srt"), "--profile", "없는발주처/ko-sdh"])
+ok("검사한 정답지가 없으면 2로 끝난다", _ts_code == 2, str(_ts_code))
+import shutil as _ts_shutil  # noqa: E402
+
+_ts_shutil.rmtree(_ts_dir, ignore_errors=True)
 
 
 # --- 일본어 2차·3차 검수 ----------------------------------------------------
