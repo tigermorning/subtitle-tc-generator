@@ -1787,6 +1787,51 @@ _text = report(_cmp)
 ok("어긋난 자막을 보여 준다", "가장 많이 어긋난" in _text)
 ok("빠뜨린 자막을 보여 준다", "그러게요" in _text)
 
+# --- 분할 구조: 1:1 짝짓기가 뭉개는 쪼갬·합침을 따로 센다 ---------------------
+
+from checker.evaluate import structure as _structure, structure_of as _structure_of  # noqa: E402
+
+_st_truth = [Event(1, 0, 3000, "가"), Event(2, 4000, 5000, "나"), Event(3, 5100, 6000, "다"),
+             Event(4, 7000, 8000, "라"), Event(5, 10000, 11000, "마"),
+             Event(6, 20000, 21000, "바"), Event(7, 23000, 24000, "사"),
+             Event(8, 24000, 25000, "아")]
+_st_ours = [Event(1, 0, 1500, "가1"), Event(2, 1500, 3000, "가2"),       # 쪼갬
+            Event(3, 4000, 6000, "나다"),                                 # 합침
+            Event(4, 7200, 8000, "라"),                                   # 1:1, 인점 늦음
+            Event(5, 10800, 12000, "마?"),                                # 조금만 걸침 -> 빠뜨림+군더더기
+            Event(6, 23000, 23500, "사"), Event(7, 23500, 25000, "사아"),   # 뒤엉킴
+            Event(8, 30000, 31000, "x")]                                  # 군더더기
+_st = _structure(_st_ours, _st_truth)
+_stk = _st["kinds"]
+ok("1:1을 센다", (_stk["one_to_one"]["truth"], _stk["one_to_one"]["ours"]) == (1, 1), str(_stk))
+ok("우리가 쪼갠 자리를 정답·우리 양쪽 개수로 센다",
+   (_stk["ours_split"]["truth"], _stk["ours_split"]["ours"]) == (1, 2), str(_stk["ours_split"]))
+ok("우리가 합친 자리를 센다",
+   (_stk["ours_merged"]["truth"], _stk["ours_merged"]["ours"]) == (2, 1), str(_stk["ours_merged"]))
+ok("정답 2+ : 우리 2+는 뒤엉킴으로 따로 둔다",
+   (_stk["tangled"]["truth"], _stk["tangled"]["ours"]) == (2, 2), str(_stk["tangled"]))
+ok("절반 넘게 덮지 못하면 빠뜨림이다(조금 걸친 것도)",
+   _stk["missing"]["truth"] == 2 and _st["missing_partially_covered"] == 1, str(_st))
+ok("정답과 절반 이상 겹치지 않은 우리 자막은 군더더기다", _stk["extra"]["ours"] == 2, str(_stk["extra"]))
+ok("정답 쪽 분류를 다 더하면 정답 개수다",
+   sum(v["truth"] for v in _stk.values()) == len(_st_truth))
+ok("우리 쪽 분류를 다 더하면 우리 개수다",
+   sum(v["ours"] for v in _stk.values()) == len(_st_ours))
+ok("1:1 인점·아웃점 방향을 1프레임 기준으로 나눈다",
+   _st["one_to_one_in"] == {"early": 0, "ok": 0, "late": 1}
+   and _st["one_to_one_out"] == {"early": 0, "ok": 1, "late": 0},
+   str((_st["one_to_one_in"], _st["one_to_one_out"])))
+ok("짝짓기 결과에서도 같은 구조가 나온다(짝짓기와 무관)",
+   _structure_of(compare(_st_ours, _st_truth))["kinds"] == _stk)
+_st_text = report(compare(_st_ours, _st_truth))
+ok("대조표에 분할 구조를 낸다", "우리가 쪼갬" in _st_text and "뒤엉킴" in _st_text, _st_text[:300])
+ok("어느 쪽이 해로운지 판정하지 않는다고 밝힌다", "판정하지 않습니다" in _st_text)
+ok("빈 자막끼리도 터지지 않는다", _structure([], [])["totals"] == {"truth": 0, "ours": 0})
+_st_zero = _structure(_st_ours + [Event(9, 40000, 40000, "대본에만 있는 줄")], _st_truth)
+ok("길이 0 자막(소리 못 찾은 대본 줄)은 군더더기로 세지 않고 따로 적는다",
+   _st_zero["kinds"]["extra"]["ours"] == 2 and _st_zero["zero_length_excluded"]["ours"] == 1,
+   str(_st_zero["zero_length_excluded"]))
+
 # --- --semantic: 짝짓기·유사도를 바꿔 끼울 수 있다 ---------------------------
 # 글자는 하나도 안 겹쳐도(의역) 뜻이 같으면 짝지어야 한다. 실제 임베딩 없이
 # 가짜 유사도 함수로 이 배선만 검증한다(2026-08-27, `embed.py`).
