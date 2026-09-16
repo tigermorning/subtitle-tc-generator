@@ -29,6 +29,17 @@
 막으면 이름만 비슷한 다른 작품에서 일을 못 하게 된다(규칙 4 — 추정은 알리기만
 한다). `--generate`를 계속 돌릴지는 사람이 정한다.
 
+## 학습·평가 누수도 함께 알린다
+
+정답지를 학습한 회차(`rules/learned/`에 값이 들어간 회차)로 다시 `--against`를
+돌리면 **답을 본 채로 시험을 치르는 것**이 된다 — 점수가 실제보다 좋게 나온다.
+드라마B E01~05에서 잰 `disney/ko-sdh` 학습값을 같은 E02·E03 대조로 검증한 적이
+있다. 원장 회차마다 `learned_into: [플랫폼/언어-종류]`를 적어 두면 여기서 짚는다.
+
+학습값 파일(`rules/learned/*.yaml`)은 공개 저장소라 가명만 적히고, 원장은 비공개라
+실제 제목이 적힌다 — 그래서 연결은 원장 쪽에 둔다. 적혀 있지 않으면 **모른다**이지
+안 새었다가 아니다(규칙 3). 막지 않는다.
+
 **정답지를 열어 보지 않는다.** 있다는 사실만 알린다. 내용을 읽어 초안에 섞으면
 그것은 학습이 아니라 복제다(규칙 13).
 """
@@ -90,6 +101,7 @@ class AnswerKey:
     episode: str | None = None
     detail: str = ""
     label: str = ""        # 화면에 낼 이름. 비면 파일 이름을 쓴다
+    learned_into: tuple[str, ...] = ()   # 원장이 적은, 이 정답지가 들어간 학습값
 
     @property
     def shown(self) -> str:
@@ -113,6 +125,28 @@ def _truth_path(raw: str) -> tuple[Path, str]:
         return trimmed, ""
     # 둘 다 못 찾았다. 적힌 그대로 보여 준다 — 우리가 고쳐 쓰지 않는다(규칙 13).
     return full, text
+
+
+def _learned_refs(kdata) -> tuple[str, ...]:
+    """원장 kind 항목의 `learned_into`. 문자열 하나로 적어도 받는다."""
+    raw = (kdata or {}).get("learned_into") or ()
+    if isinstance(raw, str):
+        raw = [raw]
+    return tuple(str(r).strip() for r in raw if str(r).strip())
+
+
+def _load_status(status_file: Path) -> dict | None:
+    if not status_file.is_file():
+        return None
+    try:
+        import yaml
+    except ImportError:
+        return None
+    try:
+        data = yaml.safe_load(status_file.read_text(encoding="utf-8"))
+    except (OSError, ValueError, yaml.YAMLError):
+        return None
+    return data if isinstance(data, dict) else None
 
 
 def _from_status(video: Path, status_file: Path) -> tuple[list[AnswerKey], list[str]]:
@@ -142,7 +176,7 @@ def _from_status(video: Path, status_file: Path) -> tuple[list[AnswerKey], list[
                     path, label = _truth_path(truth)
                     found.append(AnswerKey(
                         path, "corpus_status", str(ep),
-                        f"{work} {ep}회 {kind}", label))
+                        f"{work} {ep}회 {kind}", label, _learned_refs(kdata)))
                 # 이미 끝난 단계를 다시 돌리지 않게 함께 알린다(규칙 17 2번).
                 for stage, sdata in ((kdata or {}).get("pipeline") or {}).items():
                     if isinstance(sdata, dict) and sdata.get("done"):
@@ -227,6 +261,61 @@ def tc_state(truth: Path, status_file: Path | None = None) -> tuple[bool, str] |
     return None
 
 
+def learned_state(truth: Path, status_file: Path | None = None
+                  ) -> tuple[tuple[str, ...], str] | None:
+    """이 정답지가 어느 학습값에 들어갔는지 원장에서 찾는다.
+
+    `(learned_into, 라벨)`. 원장에서 이 정답지를 못 찾으면 `None`(모른다).
+    찾았는데 `learned_into`가 없으면 빈 튜플 — **기록이 없다**는 뜻이지 안 새었다는
+    뜻이 아니다. 판단은 `leak_warning`이 한다.
+    """
+    status_file = STATUS_FILE if status_file is None else status_file
+    data = _load_status(status_file)
+    if data is None:
+        return None
+    # **폴더까지 맞춘다.** 정답지 이름은 `E02_한국어_SDH.srt`처럼 작품마다 같아서,
+    # 파일 이름만 보면 다른 작품의 누수를 이 작품에 뒤집어씌운다.
+    truth = Path(truth)
+    want = (truth.parent.name.lower(), truth.name.lower())
+    for work, wdata in (data.get("works") or {}).items():
+        for ep, edata in ((wdata or {}).get("episodes") or {}).items():
+            for kind, kdata in ((edata or {}).get("kinds") or {}).items():
+                raw = (kdata or {}).get("truth")
+                if not raw:
+                    continue
+                path, _ = _truth_path(raw)
+                # 주석이 붙어 파일을 못 찾은 칸(`… (다른 데도 있음)`)은 앞쪽 경로로 맞춘다.
+                head = Path(str(raw).split(" (", 1)[0].strip())
+                if want in {(path.parent.name.lower(), path.name.lower()),
+                            (head.parent.name.lower(), head.name.lower())}:
+                    return _learned_refs(kdata), f"{work} {ep}회 {kind}"
+    return None
+
+
+def profile_ref(platform: str, language: str, kind: str) -> str:
+    """학습값 파일 이름과 같은 꼴: `disney/ko-sdh`."""
+    return f"{platform}/{language}-{kind}"
+
+
+def leak_warning(refs: tuple[str, ...], label: str, profile: str | None = None) -> str | None:
+    """학습·평가 누수 경고. 학습에 안 들어갔으면 `None`.
+
+    `profile`을 주면 **지금 쓰는 프로파일의 학습값**에 들어갔는지를 가른다 — 다른
+    발주처·언어 학습값에만 들어갔다면 이 대조의 생성값에는 안 섞였다.
+    """
+    if not refs:
+        return None
+    if profile and profile not in refs:
+        return (f"참고: 이 정답지({label})는 다른 학습값에 들어갔습니다"
+                f"({', '.join(refs)}). 지금 프로파일({profile})의 학습값과는 무관합니다.")
+    hit = profile or ", ".join(refs)
+    return "\n".join([
+        f"경고: 이 정답지({label})는 학습값 {hit}에 이미 들어갔습니다 — 학습·평가 누수.",
+        "      같은 회차로 대조하면 답을 본 채로 재는 것이라 점수가 실제보다 좋게 나옵니다.",
+        "      개선을 주장하려면 학습에 안 쓴 회차로 다시 재세요(rules/learned/ 출처 참고).",
+    ])
+
+
 def warning(keys: list[AnswerKey], done: list[str]) -> str | None:
     """사람에게 낼 경고. 찾은 게 없으면 `None`."""
     if not keys and not done:
@@ -247,6 +336,11 @@ def warning(keys: list[AnswerKey], done: list[str]) -> str | None:
                      f"(다른 회차 {len(other)}개). 이 회차 것은 못 찾았습니다.")
         for k in other[:4]:
             lines.append(f"      - {k.shown}")
+
+    learned = sorted({r for k in same for r in k.learned_into})
+    if learned:
+        lines.append(f"      이 회차는 학습값에 이미 들어갔습니다({', '.join(learned)}) — "
+                     "이 영상으로 `--against`를 재면 점수가 부풉니다(학습·평가 누수).")
 
     if done:
         lines.append("      이미 끝난 단계가 기록돼 있습니다:")

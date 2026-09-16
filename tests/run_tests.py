@@ -4283,6 +4283,37 @@ with _tempfile.TemporaryDirectory() as _aktmp:
     ok("캐시 폴더(_로 시작)는 정답지로 세지 않는다",
        all("_whisper_cache" not in str(k.path) for k in _akkeys))
 
+    # 학습·평가 누수 — 원장에 `learned_into`가 없으면 모른다, 있으면 짚는다.
+    ok("학습 기록이 없으면 누수를 말하지 않는다", "누수" not in _akmsg, _akmsg)
+    _akleak = _ak.learned_state(Path("넷플릭스_시험 작품/E03_한국어_SDH.srt"), status_file=_akstatus)
+    ok("원장에 있는 정답지인데 학습 기록이 없으면 빈 튜플(모른다)",
+       _akleak is not None and _akleak[0] == () and
+       _ak.leak_warning(_akleak[0], _akleak[1], "netflix/ko-sdh") is None, str(_akleak))
+    ok("이름이 같아도 다른 작품 폴더면 남의 기록을 가져오지 않는다",
+       _ak.learned_state(Path("넷플릭스_다른 작품/E03_한국어_SDH.srt"),
+                         status_file=_akstatus) is None)
+    ok("원장에 없는 정답지는 None",
+       _ak.learned_state(Path("없는정답.srt"), status_file=_akstatus) is None)
+
+    _akstatus.write_text(
+        _akstatus.read_text(encoding="utf-8")
+        + "            learned_into: [netflix/ko-sdh]\n", encoding="utf-8")
+    _akleak = _ak.learned_state(Path("넷플릭스_시험 작품/E03_한국어_SDH.srt"), status_file=_akstatus)
+    ok("원장의 learned_into를 읽는다", _akleak and _akleak[0] == ("netflix/ko-sdh",),
+       str(_akleak))
+    _aknote = _ak.leak_warning(_akleak[0], _akleak[1], "netflix/ko-sdh")
+    ok("같은 프로파일 학습값에 들어갔으면 누수로 경고한다",
+       _aknote and _aknote.startswith("경고") and "누수" in _aknote, str(_aknote))
+    _aknote = _ak.leak_warning(_akleak[0], _akleak[1], "disney/ko-sdh")
+    ok("다른 프로파일 학습값이면 경고가 아니라 참고로 말한다",
+       _aknote and _aknote.startswith("참고") and "무관" in _aknote, str(_aknote))
+    ok("learned_into를 문자열 하나로 적어도 받는다",
+       _ak._learned_refs({"learned_into": "disney/ko-sdh"}) == ("disney/ko-sdh",))
+    _akkeys, _akdone = _ak.find(_akvideo, truth_root=_akroot, status_file=_akstatus)
+    _akmsg = _ak.warning(_akkeys, _akdone)
+    ok("--generate 경고에도 학습값 누수를 함께 적는다",
+       "netflix/ko-sdh" in _akmsg and "누수" in _akmsg, _akmsg)
+
     # 같은 작품 다른 회차뿐일 때 — 있는 것을 없다고 하지도, 있다고 단정하지도 않는다.
     _ak2, _akdone2 = _ak.find(Path("시험 작품.E09.1080p.NF.WEB-DL.mkv"),
                               truth_root=_akroot, status_file=_akstatus)
