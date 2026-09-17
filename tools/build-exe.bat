@@ -10,11 +10,11 @@ set "HERE=%~dp0"
 set "REPO=%HERE%.."
 cd /d "%REPO%"
 
+rem Python: CHECKER_PYTHON env var, then this repo's own .venv, then PATH.
+rem Do not borrow the Korean corrector's venv. Create .venv with tools\setup-venv.bat.
 set "PY=%CHECKER_PYTHON%"
 if not defined PY (
-  if exist "%REPO%\..\korean-subtitle-corrector\.venv\Scripts\python.exe" (
-    set "PY=%REPO%\..\korean-subtitle-corrector\.venv\Scripts\python.exe"
-  )
+  if exist "%REPO%\.venv\Scripts\python.exe" set "PY=%REPO%\.venv\Scripts\python.exe"
 )
 if not defined PY set "PY=python"
 

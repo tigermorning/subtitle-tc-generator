@@ -75,7 +75,7 @@ fi
 if git diff --cached --name-only | grep -q '^app/'; then
     echo ""
     echo "pre-commit: app/ 을 건드렸다. PySide6까지 도는 시험은 훅이 못 돌린다:"
-    echo "  cmd.exe /c \"..\\korean-subtitle-corrector\\.venv\\Scripts\\python.exe tests\\run_tests.py\""
+    echo "  cmd.exe /c \".venv\\Scripts\\python.exe tests\\run_tests.py\"   (.venv가 없으면 tools\\setup-venv.bat)"
 fi
 
 exit 0

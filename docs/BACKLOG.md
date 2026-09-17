@@ -389,7 +389,7 @@ UI가 멈춘다.** Windows 이벤트 로그가 `AppHangB1`을 남긴다 — 크�
 끝낸 뒤 빌드한다(자막은 `.work/`에 있어 잃는 것이 없다).
 
 ```
-cmd.exe /c "..\korean-subtitle-corrector\.venv\Scripts\python.exe -m PyInstaller \
+cmd.exe /c ".venv\Scripts\python.exe -m PyInstaller \
   --noconfirm --distpath dist --workpath .tmp\build 자막생성기.spec"
 ```
 
@@ -767,7 +767,7 @@ genre variety 병합 상한만으론 부족했다. 한국어 쪽 병합 개수�
 
 ```bash
 python3 tests/run_tests.py                                    # 건수는 CLAUDE.md 규칙 9 (GUI 제외)
-cmd.exe /c "..\korean-subtitle-corrector\.venv\Scripts\python.exe tests\run_tests.py"   # PySide6 포함(더 많다)
+cmd.exe /c ".venv\Scripts\python.exe tests\run_tests.py"   # PySide6 포함(더 많다)
 ```
 
 시스템 `python3`에는 PySide6가 없다. GUI를 건드리면 반드시 venv 쪽으로도 돌린다.
@@ -1109,6 +1109,7 @@ whisper 대사 1개 + OCR 캡션 2개가 정상 병합, `“…”`로 감싸짐
 
 **GUI 검증: 시스템 파이썬엔 PySide6가 없지만, 옆 리포
 `korean-subtitle-corrector/.venv/Scripts/python.exe`에 이미 깔려 있다**
+(2026-09-17부터는 옆 리포 venv를 빌리지 않는다 — 이 리포 전용 `.venv`, `tools/setup-venv.bat`)
 (pre-commit 훅이 이 경로를 직접 알려준다 — app/를 건드리면 뜨는
 "PySide6까지 도는 776건은 훅이 못 돌린다" 메시지에 포함돼 있다). 그
 파이썬으로 `tests/run_tests.py`를 돌리면 839→871건(PySide6라 건너뛰던

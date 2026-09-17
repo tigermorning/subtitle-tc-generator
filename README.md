@@ -92,7 +92,7 @@ dist/자막생성기/자막생성기.exe
 빌드:
 
 ```
-cmd.exe /c "..\korean-subtitle-corrector\.venv\Scripts\python.exe -m PyInstaller \
+cmd.exe /c ".venv\Scripts\python.exe -m PyInstaller \
   --noconfirm --distpath dist --workpath .tmp\build 자막생성기.spec"
 ```
 
@@ -442,10 +442,14 @@ kiwi를 부르면 적재에 1~2분이 걸린다. **애매하면 말하지 않는
 
 ```bash
 python3 tests/run_tests.py     # 1205건 (GUI 제외)
-cmd.exe /c "..\korean-subtitle-corrector\.venv\Scripts\python.exe tests\run_tests.py"   # 1205건
+cmd.exe /c ".venv\Scripts\python.exe tests\run_tests.py"   # 1205건
 ```
 
 시스템 파이썬에는 PySide6가 없다. `app/`을 건드리면 venv 쪽으로도 돌린다.
+
+`.venv`는 이 리포 전용이다. 처음 한 번 `tools\setup-venv.bat`으로 만든다(목록은
+`requirements-venv.txt`). 한국어 교정기의 venv를 빌려 쓰지 않는다 — 전에 그렇게 했다가
+두 프로젝트의 패키지와 경로가 섞였다(`CLAUDE.md` 규칙 0).
 
 커밋은 훅이 막는다. 새 클론·워크트리에서 한 번 켠다:
 
