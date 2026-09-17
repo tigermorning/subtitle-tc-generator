@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 
 from .model import Event
@@ -629,7 +630,10 @@ def _gap(events: list[Event], ctx: dict):
     frames = limits.get("min_gap_frames")
     if frames:
         fps = ctx.get("fps") or 23.976
-        min_gap = max(min_gap, frames * 1000.0 / fps)
+        # SRT는 밀리초 정수라 정확히 2프레임(83.4ms)이 83ms로 적힌다. 소수 그대로
+        # 비교하면 규정을 딱 지킨 간격이 전부 위반이 된다 — 정답지 자기검증에서
+        # 드라마B E01~05 805건이 모두 이 83ms였다(2026-09-16). 내린다.
+        min_gap = max(min_gap, math.floor(frames * 1000.0 / fps))
     if not min_gap:
         return []
     out = []
