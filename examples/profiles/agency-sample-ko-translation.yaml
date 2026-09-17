@@ -32,7 +32,7 @@ limits:
   chars_per_line: 14       # 넷플릭스는 16자지만 이 발주처는 14자로 조인다
                            # (덮어쓰지 않은 CPS·표시 시간 등은 넷플릭스 값 그대로)
   optimal_cps: 10          # 상한(12)과 별개로 "가능하면 이 이하"
-  min_gap_ms: 84           # 자막 간 최소 간격(넷플릭스는 이 규정을 삭제했다)
+  min_gap_ms: 84           # 자막 간 최소 간격(넷플릭스 공식은 2프레임 — 이 발주처는 ms로 고정)
   merge_shorter_than_ms: 1000   # 이보다 짧은 자막은 병합 검토
   words_per_minute: 160
 

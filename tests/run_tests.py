@@ -474,7 +474,10 @@ r = check_events([{"index": 1, "start_ms": 0, "end_ms": 2000, "text": "첫 줄"}
                   {"index": 2, "start_ms": 1900, "end_ms": 4000, "text": "둘째 줄"}], gap_profile)
 ok("겹침도 잡는다", any("겹칩니다" in v["detail"] for v in r["violations"]))
 
-ok("넷플릭스에는 간격 규정을 넣지 않았다", "min_gap_ms" not in ko_tr["limits"])
+# 넷플릭스 간격 규정은 삭제되지 않았다 — General Requirements에서 빠져 Subtitle Timing
+# Guidelines §5로 옮겨졌다(2026-09-17 확인). 프레임 단위라 밀리초로 굳혀 두지 않는다.
+ok("넷플릭스 간격 규정은 프레임 단위로 공식 판에 있다",
+   ko_tr["limits"].get("min_gap_frames") and "min_gap_ms" not in ko_tr["limits"])
 
 try:
     load_profile_file(rule_file("netflix/common"))
@@ -653,10 +656,13 @@ r = check_events(gap_events, coupang2, fps=23.976)
 ok("2프레임 간격을 잰다", "CP08" in ids(r))
 r = check_events(gap_events, coupang2, fps=59.94)
 ok("프레임레이트가 높으면 같은 간격도 통과한다", "CP08" not in ids(r))
-r = check_events(gap_events, practice2, fps=23.976)
-ok("넷플릭스 실무 판에도 간격 규정이 있다", "S23" in ids(r))
 r = check_events(gap_events, ko_sdh, fps=23.976)
-ok("공식 판에는 간격 규정을 넣지 않았다", not any(v["rule_id"] == "S23" for v in r["violations"]))
+ok("넷플릭스 공식 SDH 판이 간격을 잰다", "C05" in ids(r))
+r = check_events(gap_events, ko_tr, fps=23.976)
+ok("넷플릭스 공식 번역 판도 간격을 잰다", "C05" in ids(r))
+r = check_events(gap_events, practice2, fps=23.976)
+ok("실무 판은 공식 간격 규정을 물려받고 따로 겹쳐 세지 않는다",
+   "C05" in ids(r) and "S23" not in ids(r))
 
 
 # --- 문장부호 표(이미지)에서 읽은 규칙 ---------------------------------------

@@ -86,10 +86,13 @@ source:
 | Dialog style | `dual_speaker.marker` | 있음 |
 | Continuation style | `continuity.*` | 있음(부분) |
 
-**자막 간 간격 주의**: 넷플릭스는 이 규정을 삭제했다(General Requirements change log
-2020-07-24 "Timing and frame gap sections removed"). 그래서 넷플릭스 프로파일에는
-`min_gap_ms`를 넣지 않는다. SubtitleEdit의 2프레임 갭 검사는 옛 판본을 따르고 있다 —
-근거 없는 지적을 그대로 옮기지 않는다. 발주처가 요구하면 그때 프로파일에 넣는다.
+**자막 간 간격 주의**:
+
+- 넷플릭스 규정은 **살아 있다** — Subtitle Timing Guidelines §5, 최소 2프레임(모든 프레임레이트).
+- General Requirements 변경 이력 2020-07-24 "Timing and frame gap sections removed"는
+  그 문서에서 빼 사흘 뒤(2020-07-27) 별도 문서로 옮긴 것이다. 예전엔 이걸 "삭제"로 잘못 적었다.
+- 프레임 규정은 `limits.min_gap_frames`로 넣는다. `min_gap_ms`로 굳히면 다른 프레임레이트에서 틀린다.
+- 같은 절의 "24fps에서 3~11프레임 간격은 2프레임으로 닫는다"는 아직 미구현이다.
 
 값을 담되 검사가 없는 항목은 리포트의 `미구현 검사`로 드러난다. 숨기지 않는다.
 
