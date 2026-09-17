@@ -36,7 +36,7 @@ ffmpeg -v error -i <파일> -map 0:v:0 -f null - 2>&1 | head -30
   보일 수 있다. 반드시 전체 디코드 시도까지 한다.
 - `invalid as first byte of an EBML number`, `h264 decode MB errors`가 파일 전반에
   걸쳐 나오면 손상이다. 재다운로드 전까지 이 영상은 학습하지 않는다(예능A 19회,
-  Money Heist S04E01 사례 — 둘 다 이 단계에서 걸러졌다).
+  드라마F S04E01 사례 — 둘 다 이 단계에서 걸러졌다).
 
 ### 2. 발주처를 특정한다
 
@@ -68,8 +68,14 @@ OCR은 타임코드도 글자도 근사값이다(실측, 2026-08-31: "그럼에�
 ### 4. 추출하고 100% 일치를 확인한다
 
 ```bash
-python -m tools.corpus_build --video <파일> --lang <lang> [--sdh] [--target-title-hint <힌트>]
+python -m tools.corpus_build --video <파일> --out <출력폴더> [--pivot <원어코드>] \
+    [--target <목표언어코드>] [-p <발주처>] [-k sdh|translation] \
+    [--target-title-hint <힌트>]
 ```
+
+(`--pivot` 기본 `eng`, `--target` 기본 `kor`, `-k` 기본 `translation` — 언어 코드는
+`--lang` 하나가 아니라 원어 `--pivot`/목표 `--target` 둘로 나뉜다. `--sdh` 플래그는
+없고 `-k sdh`로 준다.)
 
 - 트랙이 여럿이고 제목이 없으면 `pick()`이 `None`을 돌려준다(추측 거부) — 이때는
   사용자에게 실제 플랫폼 화면 스크린샷으로 어느 트랙이 진짜인지 확인받는다
@@ -83,14 +89,19 @@ python -m tools.corpus_build --video <파일> --lang <lang> [--sdh] [--target-ti
 - `source.official: false`, `source.origin: learned`
 - `source.from.작품`에 제목·형태·**공개(방영/출시) 연도**·표본 크기(줄_합계)를 적는다.
   연도가 없으면 나중에 "이 작업자 자료가 낡았는지" 판단할 근거가 없어진다(규칙 11).
-- `lines.전체_대사자막`은 `stats_for()`의 `lines_sum`(한줄+두줄+세줄이상)을 쓴다.
-  raw `cues`와 다르면 반드시 `lines_sum`을 검증하고 그 값을 쓴다 — 효과음 전용
-  큐가 raw cues에는 섞여 있다.
+- `lines.전체_대사자막`은 `stats_for()`가 돌려주는 `lines`(`한 줄`+`두 줄`+
+  `세 줄 이상`)를 합산한 값을 쓴다. raw `cues`와 다르면 반드시 이 합산값을
+  검증하고 그 값을 쓴다 — 효과음 전용 큐가 raw cues에는 섞여 있다.
 - 같은 발주처의 기존 학습값과 값이 어긋나면: 여러 작품이 가리키는 값과 최신 작품
   하나가 다르면 **지적**으로 보고한다(자동 채택 아님). 최신 작품 쪽에 무게를
   싣되, 승격(공식 규정으로 굳히기)은 별도로 사람 확인을 거친다.
 - **`rules/<platform>/`(공식 규정 파일)는 절대 고치지 않는다.** 학습값이 규정과
   충돌해도 규정이 이기는 게 아니라 애초에 겨루지 않는다.
+- **원장에 어느 학습값에 넣었는지 적는다.** 반영한 회차의 kind 항목마다
+  `learned_into: [<platform>/<lang>-<kind>]`를 `rules/private/corpus/corpus_status.yaml`에
+  남긴다. 학습값 파일은 공개라 가명만 적히므로 원장이 유일한 연결고리다.
+  안 적으면 그 회차로 `--against`를 돌려도 학습·평가 누수 경고가 뜨지 않는다
+  (`checker/answerkey.py`의 `learned_state` — 기록이 없으면 모른다로 보고 침묵한다).
 
 ### 6. 테스트 통과 확인 후 커밋한다
 

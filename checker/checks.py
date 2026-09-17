@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 
 from .model import Event
@@ -614,10 +615,13 @@ def _position(events: list[Event], ctx: dict):
 def _gap(events: list[Event], ctx: dict):
     """앞 자막이 끝나고 다음이 시작하기까지의 간격.
 
-    넷플릭스는 이 규정을 **삭제했다**(General Requirements change log 2020-07-24
-    "Timing and frame gap sections removed"). 그래서 넷플릭스 프로파일에는 값이
-    없고, 발주처가 요구할 때만 `limits.min_gap_ms`로 켠다. SubtitleEdit의 2프레임
-    갭 검사는 옛 판본 기준이라 지금 넷플릭스에는 근거가 없다.
+    넷플릭스 공식 규정이다 — Subtitle Timing Guidelines §5 "Subtitles must have a
+    minimum of 2 frames between them"(모든 프레임레이트, 확인 2026-09-17). General
+    Requirements 변경 이력 2020-07-24 "Timing and frame gap sections removed"는 그
+    문서에서 빼 사흘 뒤 이 문서로 옮긴 것이지 삭제가 아니다. 값은 프로파일의
+    `limits.min_gap_frames`(프레임) 또는 `limits.min_gap_ms`로 켠다.
+    같은 절의 "24fps에서 3~11프레임 간격은 2프레임으로 닫는다"는 여기서 보지 않는다
+    (미구현, docs/BACKLOG.md).
     """
     limits = ctx["limits"] or {}
     min_gap = limits.get("min_gap_ms") or 0
@@ -626,7 +630,10 @@ def _gap(events: list[Event], ctx: dict):
     frames = limits.get("min_gap_frames")
     if frames:
         fps = ctx.get("fps") or 23.976
-        min_gap = max(min_gap, frames * 1000.0 / fps)
+        # SRT는 밀리초 정수라 정확히 2프레임(83.4ms)이 83ms로 적힌다. 소수 그대로
+        # 비교하면 규정을 딱 지킨 간격이 전부 위반이 된다 — 정답지 자기검증에서
+        # 드라마B E01~05 805건이 모두 이 83ms였다(2026-09-16). 내린다.
+        min_gap = max(min_gap, math.floor(frames * 1000.0 / fps))
     if not min_gap:
         return []
     out = []

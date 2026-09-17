@@ -27,6 +27,7 @@ import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from . import word_sense
 from .model import Event
@@ -65,7 +66,6 @@ class Glossary:
 
     def merge_file(self, path) -> "Glossary":
         """`원어<탭 또는 =>한국어` 한 줄에 하나. 주석은 #."""
-        from pathlib import Path
         for line in Path(path).read_text(encoding="utf-8").splitlines():
             line = line.strip()
             if not line or line.startswith("#"):

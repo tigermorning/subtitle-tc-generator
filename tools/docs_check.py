@@ -45,7 +45,8 @@ ROOT = Path(__file__).resolve().parent.parent
 
 # 지금 상태를 말하는 문서. 경로·grep·숫자를 다 본다.
 LIVING = ["CLAUDE.md", "AGENTS.md", "README.md",
-          "docs/HANDOFF.md", "docs/MVP.md", "docs/PRD.md"]
+          "docs/HANDOFF.md", "docs/MVP.md", "docs/PRD.md",
+          "docs/STAGE_CONTRACTS.md"]
 # 그때의 기록. 낡는 것이 정상이라 **경로만** 본다.
 HISTORICAL = ["docs/BACKLOG.md", "docs/AGENT_INCIDENTS.md",
               "docs/COMMERCIALIZATION.md", "docs/SE_PLUGIN.md",

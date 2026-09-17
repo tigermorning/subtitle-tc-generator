@@ -474,7 +474,24 @@ r = check_events([{"index": 1, "start_ms": 0, "end_ms": 2000, "text": "첫 줄"}
                   {"index": 2, "start_ms": 1900, "end_ms": 4000, "text": "둘째 줄"}], gap_profile)
 ok("겹침도 잡는다", any("겹칩니다" in v["detail"] for v in r["violations"]))
 
-ok("넷플릭스에는 간격 규정을 넣지 않았다", "min_gap_ms" not in ko_tr["limits"])
+# 프레임 규정은 SRT 밀리초로 내려 적힌 값을 통과시켜야 한다 — 2프레임(23.976fps)은
+# 83.4ms인데 파일에는 83ms로 남는다. 정답지 805건이 이것 하나로 위반이 됐었다.
+frame_profile = dict(gap_profile)
+frame_profile["limits"] = {k: v for k, v in agency["limits"].items() if k != "min_gap_ms"}
+frame_profile["limits"]["min_gap_frames"] = 2
+r = check_events([{"index": 1, "start_ms": 0, "end_ms": 2000, "text": "첫 줄"},
+                  {"index": 2, "start_ms": 2083, "end_ms": 4000, "text": "둘째 줄"}],
+                 frame_profile, fps=23.976)
+ok("정확히 2프레임(83ms로 적힌)은 통과한다", "A02" not in ids(r), str(r["violations"]))
+r = check_events([{"index": 1, "start_ms": 0, "end_ms": 2000, "text": "첫 줄"},
+                  {"index": 2, "start_ms": 2082, "end_ms": 4000, "text": "둘째 줄"}],
+                 frame_profile, fps=23.976)
+ok("2프레임에 못 미치면 잡는다", "A02" in ids(r))
+
+# 넷플릭스 간격 규정은 삭제되지 않았다 — General Requirements에서 빠져 Subtitle Timing
+# Guidelines §5로 옮겨졌다(2026-09-17 확인). 프레임 단위라 밀리초로 굳혀 두지 않는다.
+ok("넷플릭스 간격 규정은 프레임 단위로 공식 판에 있다",
+   ko_tr["limits"].get("min_gap_frames") and "min_gap_ms" not in ko_tr["limits"])
 
 try:
     load_profile_file(rule_file("netflix/common"))
@@ -653,10 +670,13 @@ r = check_events(gap_events, coupang2, fps=23.976)
 ok("2프레임 간격을 잰다", "CP08" in ids(r))
 r = check_events(gap_events, coupang2, fps=59.94)
 ok("프레임레이트가 높으면 같은 간격도 통과한다", "CP08" not in ids(r))
-r = check_events(gap_events, practice2, fps=23.976)
-ok("넷플릭스 실무 판에도 간격 규정이 있다", "S23" in ids(r))
 r = check_events(gap_events, ko_sdh, fps=23.976)
-ok("공식 판에는 간격 규정을 넣지 않았다", not any(v["rule_id"] == "S23" for v in r["violations"]))
+ok("넷플릭스 공식 SDH 판이 간격을 잰다", "C05" in ids(r))
+r = check_events(gap_events, ko_tr, fps=23.976)
+ok("넷플릭스 공식 번역 판도 간격을 잰다", "C05" in ids(r))
+r = check_events(gap_events, practice2, fps=23.976)
+ok("실무 판은 공식 간격 규정을 물려받고 따로 겹쳐 세지 않는다",
+   "C05" in ids(r) and "S23" not in ids(r))
 
 
 # --- 문장부호 표(이미지)에서 읽은 규칙 ---------------------------------------
@@ -1139,6 +1159,16 @@ ok("각 조각이 한계 안이다", all(count_chars(p, W2) <= 14 for p in piece
 ok("짧으면 그대로 둔다", split_text("짧다", 16, W2) == ["짧다"])
 ok("끊을 자리가 없으면 자르지 않는다", len(split_text("가" * 40, 16, W2)) == 1)
 
+# **남은 오른쪽 조각에도 같은 조건으로 자른다.** 폴백 재귀가 `force_clause_split`·
+# `min_piece_chars`를 빠뜨려서, 앞에서 짧다고 막은 "네."가 오른쪽 조각에서는
+# 따로 떨어져 나왔다.
+_mp_pieces = split_text("그러니까 내 말은 지금 여기서 할 수 있는 게 하나도 없다는 거야. 네.",
+                        20, W2, force_sentence_split=True, min_piece_chars=3)
+ok("폴백 재귀도 최소 조각 길이를 지킨다",
+   all(count_chars(p, W2) >= 3 for p in _mp_pieces), str(_mp_pieces))
+ok("폴백 재귀도 각 조각이 한계 안이다",
+   all(count_chars(p, W2) <= 20 for p in _mp_pieces), str(_mp_pieces))
+
 ev = Event(1, 0, 6000, "안녕하세요. 오늘 날씨가 참 좋습니다. 산책이나 갈까요?")
 out = resplit(ev, 12, W2)
 ok("나눈 만큼 자막이 늘어난다", len(out) > 1)
@@ -1308,6 +1338,38 @@ ok("소리를 못 찾은 스크립트 줄을 지우지 않는다", len(_events) 
 ok("소리 없는 줄은 길이 0으로 남는다", _events[1].start_ms == _events[1].end_ms)
 ok("그 자리를 봐야 할 곳으로 표시한다", any(i == 2 for i, _ in _notes))
 
+# **대조가 남긴 길이 0 표식이 스포팅·수렴을 지나도 살아남는가**(docs/STAGE_CONTRACTS.md
+# 구멍 1). 위 시험은 `_to_events` 출력만 봤다 — 뒤 단계가 그 약속을 모른 채 맨 뒤
+# 표식을 867ms짜리 자막으로 늘리던 것을 못 잡았다. 이음매를 가로질러 본다.
+from checker.generate import settle_timecodes  # noqa: E402
+
+def _marker_run(no_audio_on: bool):
+    cues = align([Segment(0, 1000, "hello there"), Segment(1500, 2500, "how are you")],
+                 ["Hello there.", "Where have you been?", "How are you?", "Goodbye."])
+    events = _to_events(cues, [])
+    markers = {e.index for e in events if e.start_ms == e.end_ms}
+    limits = TimingLimits(min_duration_ms=833, max_duration_ms=7000, min_gap_ms=83, max_cps=15)
+    result, _moved = settle_timecodes(events, [(50, 950), (1200, 2400)], 23.976, "vad", limits,
+                                      no_audio=markers if no_audio_on else None)
+    return markers, {e.index: (e.start_ms, e.end_ms) for e in result.events}, result.events
+
+_markers, _times, _settled = _marker_run(True)
+ok("대조 결과에 소리 없음 표식이 둘 있다(가운데·맨 뒤)", _markers == {2, 4})
+ok("스포팅·수렴 뒤에도 가운데 표식은 길이 0, 다음 대사 인점에 붙는다",
+   _times[2] == (_times[3][0], _times[3][0]))
+ok("스포팅·수렴 뒤에도 맨 뒤 표식은 길이 0, 마지막 대사 아웃점에 붙는다",
+   _times[4] == (_times[3][1], _times[3][1]))
+ok("표식을 되돌린 뒤 대본 순서(번호순)다", [e.index for e in _settled] == [1, 2, 3, 4])
+# 번호순이 시간순이기도 해야 한다 — 스포팅이 #3 인점을 당겼는데 표식이 옛 시각(1500)에
+# 남으면 #2가 #3보다 늦게 시작하는 SRT가 나온다.
+ok("번호순이 곧 시간순이다", all(a.start_ms <= b.start_ms for a, b in zip(_settled, _settled[1:])))
+ok("(시험 전제) 스포팅이 #3 인점을 표식보다 앞으로 당겼다", _times[3][0] < 1500)
+ok("진짜 자막은 여전히 수렴한다", _times[1][1] - _times[1][0] >= 833
+   and _times[3][1] - _times[3][0] >= 833)
+# 이 시험이 구멍을 실제로 잡는지 — 표식을 안 빼면 맨 뒤 표식이 늘어난다.
+_, _times_off, _ = _marker_run(False)
+ok("(대조군) 표식을 안 빼면 수렴이 맨 뒤 표식을 늘린다", _times_off[4][1] > _times_off[4][0])
+
 _draft = Draft([Event(1, 0, 1000, "가"), Event(2, 1000, 2000, "나")],
                notes=[(2, "스크립트에 없는 대사입니다")])
 _out = notes_srt(_draft)
@@ -1322,6 +1384,116 @@ ok("자막 수만큼 노트를 낸다", _out.count("-->") == 2)
 _merged = merge_notes([(1, "align 노트"), (2, "sfx 노트")], [(1, "규정 위반")])
 ok("겹치는 번호는 이어 붙인다", dict(_merged)[1] == "align 노트 / 규정 위반")
 ok("안 겹치는 번호는 그대로 남는다", dict(_merged)[2] == "sfx 노트")
+
+# **환각 의심 자막이 notes에 남는가 — generate()를 끝까지 돌려 본다**(docs/STAGE_CONTRACTS.md
+# 구멍 4). 전에는 콘솔에 20곳까지만 찍고 notes에는 안 넣었다. 영상 읽기·말소리·전사만
+# 가짜로 바꾸고 나머지 단계는 진짜로 돈다 — 검사가 notes까지 가는 이음매를 보려는 것이다.
+import checker.generate as _gen_mod  # noqa: E402
+import checker.paths as _paths_mod  # noqa: E402
+import checker.transcribe as _tr_mod  # noqa: E402
+from checker.generate import hallucination_suspects  # noqa: E402
+from types import SimpleNamespace as _NS  # noqa: E402
+
+_sus_segs = [Segment(0, 3000, "잡음", confidence=-0.8),
+             Segment(4000, 5000, "또렷하게 말한 대사입니다", confidence=-0.1)]
+_sus, _basis = hallucination_suspects([Event(1, 0, 3000, "잡음"), Event(2, 4000, 5000, "또렷하게 말한 대사입니다")],
+                                      _sus_segs, {})
+ok("신뢰도 낮고 글자가 성긴 자막만 환각 의심이다", [e.index for e in _sus] == [1])
+ok("신뢰도가 있으면 근거에 그렇게 적는다", "신뢰도" in _basis)
+
+_N = 25
+_fake_segs = [Segment(i * 5000, i * 5000 + 3000, f"잡음 {i}", confidence=-0.8) for i in range(_N)]
+# 마지막 조각만 VAD 밖에 둔다 — 환각 의심과 VAD 노트가 같은 번호에 겹치게.
+_fake_speech = [(s.start_ms, s.end_ms) for s in _fake_segs[:-1]]
+_saved = (_gen_mod.probe, _gen_mod.find_speech, _tr_mod.transcribe, _paths_mod.user_data)
+with _tf3.TemporaryDirectory() as _d:
+    try:
+        _gen_mod.probe = lambda _v: _NS(fps=23.976, duration_ms=_N * 5000)
+        _gen_mod.find_speech = lambda *_a, **_k: (list(_fake_speech), "vad")
+        _tr_mod.transcribe = lambda *_a, **_k: list(_fake_segs)
+        _paths_mod.user_data = lambda: Path(_d)
+        _draft = _gen_mod.generate(Path(_d) / "fake.mkv",
+                                   {"kind": "sdh", "language": "ko",
+                                    "limits": {"chars_per_line": 16, "max_lines": 2,
+                                               "duration_ms": {"min": 833, "max": 7000}}},
+                                   transcript_cache=Path(_d) / "cache.json")
+    finally:
+        _gen_mod.probe, _gen_mod.find_speech, _tr_mod.transcribe, _paths_mod.user_data = _saved
+_by = dict(_draft.notes)
+ok("(시험 전제) 조각마다 자막 하나", len(_draft.events) == _N)
+ok("콘솔 20곳을 넘는 환각 의심도 전부 notes에 남는다",
+   sum(1 for t in _by.values() if "환각 의심" in t) == _N, str(len(_by)))
+ok("같은 번호에 VAD 노트가 겹쳐도 둘 다 남는다",
+   "환각 의심" in _by.get(_N, "") and "VAD" in _by.get(_N, ""), _by.get(_N))
+ok("notes에 같은 번호가 두 번 나오지 않는다", len(_draft.notes) == len(_by))
+
+# **감수 내역의 번호가 최종 자막 번호를 가리키는가**(docs/STAGE_CONTRACTS.md 구멍 3).
+# 감수는 재분할 전에 돈다 — 전에는 그때 번호가 리포트에 그대로 나가, 그 번호로 최종
+# SRT를 찾으면 다른 자막이 나왔다.
+from checker.revise import Revision, renumber, report as _rev_report  # noqa: E402
+
+_rn = renumber([Revision(1, "a", "b", "2차"), Revision(2, "c", "d", "2차")], {1: [1, 2], 2: [3]})
+ok("나뉜 자막의 감수 내역은 조각 번호를 다 가진다", _rn[0].indices == (1, 2) and _rn[0].index == 1)
+ok("뒤 자막의 감수 내역은 밀린 번호로 간다", _rn[1].index == 3)
+ok("리포트는 최종 번호로 적는다", "#1·2" in _rev_report(_rn) and "#3" in _rev_report(_rn))
+_rn2 = renumber(_rn, {1: [1], 2: [3], 3: [4]})
+ok("두 번 옮겨도 이어서 옮긴다(재분할 뒤 캡션 합치기)", _rn2[0].indices == (1, 3) and _rn2[1].index == 4)
+ok("옮길 곳이 없는 번호는 그대로 둔다", renumber([Revision(9, "a", "b", "2차")], {1: [2]})[0].index == 9)
+
+# CLI가 캡션 합치기 뒤에 쓰는 방식 그대로 — 대사 자막 객체로 옛 번호를 기억한다.
+_dlg = [Event(1, 0, 1000, "첫 대사"), Event(2, 5000, 6000, "둘째 대사")]
+_before_merge = {id(e): e.index for e in _dlg}
+_cap = captions_to_events([OcrCaption(start_ms=2000, end_ms=3000, text="간판", confidence=0.9)],
+                          start_index=3)
+_merged_events, _ = merge_captions(_dlg, [], _cap, {3: 0.9}, "bracket")
+_rn3 = renumber([Revision(2, "둘째", "둘째 대사", "2차")],
+                {_before_merge[id(e)]: [e.index] for e in _merged_events if id(e) in _before_merge})
+ok("캡션이 끼어든 뒤 감수 내역이 같은 대사를 가리킨다",
+   next(e.text for e in _merged_events if e.index == _rn3[0].index) == "둘째 대사")
+
+# generate()를 끝까지 — 번역·감수만 가짜로 바꾸고, 감수가 늘린 자막을 재분할이 나누게 한다.
+import checker.pipeline as _pipe_mod  # noqa: E402
+import checker.translate as _trans_mod  # noqa: E402
+
+_LONG = "첫 번째 문장은 꽤 길게 늘어났습니다. 두 번째 문장도 이어서 붙었습니다."
+_rev_segs = [Segment(0, 6000, "one", confidence=-0.1), Segment(8000, 9000, "two", confidence=-0.1)]
+
+def _fake_revise(events, profile, **_k):
+    out = [Event(e.index, e.start_ms, e.end_ms, _LONG if e.index == 1 else "두 번째 자막")
+           for e in events]
+    return _pipe_mod.StageResult(events=out, extra={
+        "revisions": [Revision(1, events[0].text, _LONG, "2차"),
+                      Revision(2, events[1].text, "두 번째 자막", "2차")],
+        "rounds": [], "stopped_because": ""})
+
+_saved = (_gen_mod.probe, _gen_mod.find_speech, _tr_mod.transcribe, _paths_mod.user_data,
+          _trans_mod.translate_events, _trans_mod.to_events, _pipe_mod.stage_revise)
+with _tf3.TemporaryDirectory() as _d:
+    try:
+        _gen_mod.probe = lambda _v: _NS(fps=23.976, duration_ms=10000)
+        _gen_mod.find_speech = lambda *_a, **_k: ([(0, 6000), (8000, 9000)], "vad")
+        _tr_mod.transcribe = lambda *_a, **_k: list(_rev_segs)
+        _paths_mod.user_data = lambda: Path(_d)
+        _trans_mod.translate_events = lambda events, *_a, **_k: []
+        _trans_mod.to_events = lambda _cues, events: [Event(e.index, e.start_ms, e.end_ms, "번역")
+                                                      for e in events]
+        _pipe_mod.stage_revise = _fake_revise
+        _rdraft = _gen_mod.generate(Path(_d) / "fake.mkv",
+                                    {"kind": "translation", "language": "ko",
+                                     "limits": {"chars_per_line": 16, "max_lines": 2,
+                                                "duration_ms": {"min": 833, "max": 7000}}},
+                                    translator=object(), passes=2,
+                                    transcript_cache=Path(_d) / "cache.json")
+    finally:
+        (_gen_mod.probe, _gen_mod.find_speech, _tr_mod.transcribe, _paths_mod.user_data,
+         _trans_mod.translate_events, _trans_mod.to_events, _pipe_mod.stage_revise) = _saved
+_rtext = {e.index: e.text for e in _rdraft.events}
+_r1, _r2 = _rdraft.revisions
+ok("(시험 전제) 감수가 늘린 자막을 재분할이 나눴다", len(_rdraft.events) == 3, str(_rtext))
+ok("나뉜 자막의 감수 내역이 그 조각들을 가리킨다",
+   " ".join(_rtext[i] for i in _r1.indices).replace("\n", " ") == _LONG, str((_r1.indices, _rtext)))
+ok("뒤 자막의 감수 내역이 밀린 번호를 가리킨다", _rtext.get(_r2.index) == "두 번째 자막",
+   str((_r2.index, _rtext)))
 ok("순서가 안 섞인다(1번이 먼저)", [i for i, _ in _merged] == [1, 2])
 ok("빈 추가 목록이면 원본과 같다",
    merge_notes([(3, "그대로")], []) == [(3, "그대로")])
@@ -2767,6 +2939,59 @@ ok("번역이 타임코드를 물려받는다",
 # 전에는 CLI만 확인했다. 이제 단계가 확인하므로 GUI도 얻는다.
 ok("타임코드가 그대로면 위반이 없다", _first.violations == [], str(_first.violations))
 ok("확인이 필요한 자리를 낸다", "notes_by_index" in _first.extra)
+
+# **1차도 프로파일 언어로 옮긴다.** 전에는 `target_lang`을 넘기지 않아 `-l en`이어도
+# 1차만 한국어 프롬프트로 나갔다(2차는 프로파일 언어).
+from checker.translate import SYSTEM_BY_LANG as _tl_system  # noqa: E402
+
+_tl_tr = _EchoTranslator()
+_pl.stage_translate(_trevs, dict(_trprof, language="en"), translator=_tl_tr, verify=False)
+ok("1차 번역이 프로파일 언어 프롬프트를 쓴다",
+   bool(_tl_tr.systems) and all(s == _tl_system["en"] for s in _tl_tr.systems),
+   str([s[:40] for s in _tl_tr.systems]))
+_tl_tr = _EchoTranslator()
+_pl.stage_translate(_trevs, _trprof, translator=_tl_tr, verify=False)
+ok("한국어 프로파일은 그대로 한국어 프롬프트",
+   bool(_tl_tr.systems) and all(s == _tl_system["ko"] for s in _tl_tr.systems),
+   str([s[:40] for s in _tl_tr.systems]))
+
+# **`Path`는 모듈 수준 import다.** 전에는 `Glossary.merge_file` 안에만 있어서
+# `find_app`·`ensure_server`가 NameError로 죽었다 — `ensure_server`는 그걸 삼키고
+# Ollama를 이미 띄워 놓고도 "띄우지 못했습니다"라고 했다.
+import checker.translate as _tlmod  # noqa: E402
+import tempfile as _tl_tf  # noqa: E402
+
+_tl_dir = Path(_tl_tf.mkdtemp())
+_tl_exe = _tl_dir / "ollama.exe"
+_tl_exe.write_bytes(b"")
+_tl_saved = (_tlmod.OllamaCliTranslator.WINDOWS_PATHS, _tlmod._windows_user_paths,
+             _tlmod.server_running, _tlmod.subprocess.Popen, _tlmod.find_app)
+_tl_which = __import__("shutil").which
+_tl_popen = []
+_tl_msgs = []
+try:
+    __import__("shutil").which = lambda _n: None
+    _tlmod.OllamaCliTranslator.WINDOWS_PATHS = (str(_tl_exe),)
+    _tlmod._windows_user_paths = lambda _p: []
+    try:
+        _tl_found = _tlmod.find_app()
+    except NameError as _tl_exc:
+        _tl_found = repr(_tl_exc)
+    ok("find_app이 NameError 없이 경로를 찾는다", _tl_found == str(_tl_exe), str(_tl_found))
+    # `find_app`과 떼어서 `ensure_server` 자신의 `Path(exe).name`을 본다.
+    _tlmod.find_app = lambda: str(_tl_exe)
+    _tlmod.server_running = lambda timeout=1.5: False
+    _tlmod.subprocess.Popen = lambda *a, **k: _tl_popen.append(a)
+    _tl_ok = _tlmod.ensure_server(progress=_tl_msgs.append, wait_seconds=0)
+    ok("ensure_server가 띄운 뒤 실패로 알리지 않는다",
+       _tl_popen and not any("띄우지 못했습니다" in m for m in _tl_msgs)
+       and any("ollama.exe" in m for m in _tl_msgs), str(_tl_msgs))
+    ok("기다리지 않으면 준비됐다고 말하지 않는다", _tl_ok is False, str(_tl_ok))
+finally:
+    __import__("shutil").which = _tl_which
+    (_tlmod.OllamaCliTranslator.WINDOWS_PATHS, _tlmod._windows_user_paths,
+     _tlmod.server_running, _tlmod.subprocess.Popen, _tlmod.find_app) = _tl_saved
+    __import__("shutil").rmtree(_tl_dir, ignore_errors=True)
 
 # **회차는 인자다.** 전에는 `("2차","3차")[:passes-1]`이라 3차가 상한이었다.
 _later = _pl.stage_revise(_first.events, _trprof, translator=_tr,
@@ -4328,6 +4553,37 @@ with _tempfile.TemporaryDirectory() as _aktmp:
     ok("캐시 폴더(_로 시작)는 정답지로 세지 않는다",
        all("_whisper_cache" not in str(k.path) for k in _akkeys))
 
+    # 학습·평가 누수 — 원장에 `learned_into`가 없으면 모른다, 있으면 짚는다.
+    ok("학습 기록이 없으면 누수를 말하지 않는다", "누수" not in _akmsg, _akmsg)
+    _akleak = _ak.learned_state(Path("넷플릭스_시험 작품/E03_한국어_SDH.srt"), status_file=_akstatus)
+    ok("원장에 있는 정답지인데 학습 기록이 없으면 빈 튜플(모른다)",
+       _akleak is not None and _akleak[0] == () and
+       _ak.leak_warning(_akleak[0], _akleak[1], "netflix/ko-sdh") is None, str(_akleak))
+    ok("이름이 같아도 다른 작품 폴더면 남의 기록을 가져오지 않는다",
+       _ak.learned_state(Path("넷플릭스_다른 작품/E03_한국어_SDH.srt"),
+                         status_file=_akstatus) is None)
+    ok("원장에 없는 정답지는 None",
+       _ak.learned_state(Path("없는정답.srt"), status_file=_akstatus) is None)
+
+    _akstatus.write_text(
+        _akstatus.read_text(encoding="utf-8")
+        + "            learned_into: [netflix/ko-sdh]\n", encoding="utf-8")
+    _akleak = _ak.learned_state(Path("넷플릭스_시험 작품/E03_한국어_SDH.srt"), status_file=_akstatus)
+    ok("원장의 learned_into를 읽는다", _akleak and _akleak[0] == ("netflix/ko-sdh",),
+       str(_akleak))
+    _aknote = _ak.leak_warning(_akleak[0], _akleak[1], "netflix/ko-sdh")
+    ok("같은 프로파일 학습값에 들어갔으면 누수로 경고한다",
+       _aknote and _aknote.startswith("경고") and "누수" in _aknote, str(_aknote))
+    _aknote = _ak.leak_warning(_akleak[0], _akleak[1], "disney/ko-sdh")
+    ok("다른 프로파일 학습값이면 경고가 아니라 참고로 말한다",
+       _aknote and _aknote.startswith("참고") and "무관" in _aknote, str(_aknote))
+    ok("learned_into를 문자열 하나로 적어도 받는다",
+       _ak._learned_refs({"learned_into": "disney/ko-sdh"}) == ("disney/ko-sdh",))
+    _akkeys, _akdone = _ak.find(_akvideo, truth_root=_akroot, status_file=_akstatus)
+    _akmsg = _ak.warning(_akkeys, _akdone)
+    ok("--generate 경고에도 학습값 누수를 함께 적는다",
+       "netflix/ko-sdh" in _akmsg and "누수" in _akmsg, _akmsg)
+
     # 같은 작품 다른 회차뿐일 때 — 있는 것을 없다고 하지도, 있다고 단정하지도 않는다.
     _ak2, _akdone2 = _ak.find(Path("시험 작품.E09.1080p.NF.WEB-DL.mkv"),
                               truth_root=_akroot, status_file=_akstatus)
@@ -4379,6 +4635,84 @@ ok("VAD 기본값이 이름 붙은 상수와 같다",
    == (_a4_vad.THRESHOLD, _a4_vad.MIN_SPEECH_MS, _a4_vad.MIN_SILENCE_MS))
 ok("VAD 상수가 실측 당시 값 그대로다(바꾸려면 주석의 표부터 갱신한다)",
    (_a4_vad.THRESHOLD, _a4_vad.MIN_SPEECH_MS, _a4_vad.MIN_SILENCE_MS) == (0.5, 120, 100))
+# --- 줄바꿈을 만든다(place_line_break) --------------------------------------
+# 생성 경로에 줄을 나누는 단계가 없어서 초안에 두 줄 자막이 0개였고 한 줄이
+# 63자까지 갔다(2026-09-13, 드라마B E02). 검사 함수를 심판으로 써서 자리를 고른다.
+
+from checker.korean_break import place_line_break as _wrap  # noqa: E402
+
+_NL = chr(10)
+ok("한 줄에 들어가면 안 나눈다", _wrap("짧은 말", 16) == "짧은 말")
+ok("이미 나뉜 것은 안 건드린다", _wrap("위" + _NL + "아래", 3) == "위" + _NL + "아래")
+ok("한 줄 한계가 없으면 안 나눈다", _wrap("아주 아주 긴 문장이다", 0) == "아주 아주 긴 문장이다")
+_w1 = _wrap("오늘 회의는 세 시에 시작합니다", 10)
+ok("한계를 넘으면 두 줄로 나눈다", _NL in _w1)
+ok("나눈 두 줄이 한계 안에 든다", all(len(line) <= 10 for line in _w1.split(_NL)))
+ok("역피라미드를 고른다(아랫줄이 더 길게)",
+   len(_w1.split(_NL)[0]) <= len(_w1.split(_NL)[1]))
+ok("단어 중간에서 끊지 않는다",
+   set(_w1.replace(_NL, " ").split()) == set("오늘 회의는 세 시에 시작합니다".split()))
+_w2 = _wrap("- 어디 갔었어? - 그냥 산책 좀 했어", 12)
+ok("2인 화자는 두 번째 대시 앞에서 끊는다", _w2.split(_NL)[1].startswith("-"))
+ok("띄어쓰기가 없으면 나누지 않는다", _wrap("아주아주긴한낱말이야", 4) == "아주아주긴한낱말이야")
+
+
+# --- 경계를 구간으로 잡는다(speech_bands) -----------------------------------
+# 값을 고르는 시험이 아니다. **구간이 core를 감싸고 이웃을 안 삼키는지**만 본다.
+# 실측 결과(합성에서는 낫고 실사 TC로는 안 넘어옴)는 docs/HANDOFF.md 8절.
+
+_band_probs = ([0.02] * 5 + [0.25, 0.4, 0.55, 0.8, 0.95, 0.9, 0.7, 0.45, 0.3]
+               + [0.02] * 5)
+_bands = _a4_vad.speech_bands(_band_probs, total_ms=len(_band_probs) * 32)
+ok("말소리 하나를 구간 하나로 낸다", len(_bands) == 1)
+_b = _bands[0]
+ok("인점 구간이 core 시작을 감싼다", _b["start_low"] <= _b["core_start"] <= _b["start_high"])
+ok("아웃점 구간이 core 끝을 감싼다", _b["end_low"] <= _b["core_end"] <= _b["end_high"])
+ok("분위수 0은 구간의 이른 끝", _a4_vad.pick_in_band(100, 200, 0.0) == 100)
+ok("분위수 1은 구간의 늦은 끝", _a4_vad.pick_in_band(100, 200, 1.0) == 200)
+ok("구간 폭이 불확실도로 나온다", _a4_vad.band_width_ms(_b)[0] >= 0)
+_hyst = _a4_vad.bands_to_spans(_bands, 0.0, 1.0)[0]
+ok("히스테리시스는 core보다 넓다",
+   _hyst[0] <= _b["core_start"] and _hyst[1] >= _b["core_end"])
+
+# 말소리 둘이 붙어 있으면 낮은 문턱에서 하나로 이어진다. 그때도 **이웃을 삼키지
+# 않는다** — 2026-09-11에 고친 "이웃 말 꼬리에 걸린 인점"과 같은 자리다.
+_two = ([0.02] * 4 + [0.3, 0.9, 0.9, 0.3] + [0.3, 0.3] + [0.3, 0.9, 0.9, 0.3]
+        + [0.02] * 4)
+_two_bands = _a4_vad.speech_bands(_two, min_speech_ms=32, min_silence_ms=32,
+                                  total_ms=len(_two) * 32)
+ok("붙은 말 둘을 각각 낸다", len(_two_bands) == 2)
+if len(_two_bands) == 2:
+    ok("뒤 말의 인점 구간이 앞 말의 끝을 넘지 않는다",
+       _two_bands[1]["start_low"] >= _two_bands[0]["core_end"])
+    ok("앞 말의 아웃점 구간이 뒤 말의 시작을 넘지 않는다",
+       _two_bands[0]["end_high"] <= _two_bands[1]["core_start"])
+
+# 검출기 이름마다 여유가 따로 있어야 한다 — 모르는 이름이면 loudness로 되돌아가
+# 엉뚱한 여유가 걸린다(2026-09-13에 실제로 그렇게 재서 한 판을 버렸다).
+from checker.timing import LEADS as _band_leads  # noqa: E402
+ok("vad-band 여유가 따로 있다", "vad-band" in _band_leads)
+ok("vad-band 아웃 여유가 vad보다 작다",
+   _band_leads["vad-band"]["out"] < _band_leads["vad"]["out"])
+
+# --- VAD 입력 오디오: 5.1이면 센터(대사) 채널만 듣는다 ----------------------
+# 근거는 `checker/vad.py`의 주석(합성 시험 + 실사 2편). 여기서는 **어느 오디오를
+# 고르는지의 판단**만 못박는다 — ffprobe·ffmpeg 없이 돌아야 하므로 파싱과 판정을
+# 뗀 순수 함수로 본다.
+
+ok("5.1은 센터가 있다", _a4_vad._layout_has_center("6,5.1(side)"))
+ok("7.1도 센터가 있다", _a4_vad._layout_has_center("8,7.1"))
+ok("스테레오는 센터가 없다", not _a4_vad._layout_has_center("2,stereo"))
+ok("모노는 센터가 없다", not _a4_vad._layout_has_center("1,mono"))
+ok("레이아웃을 모르면 채널 수로 본다(6채널)", _a4_vad._layout_has_center("6,unknown"))
+ok("레이아웃을 모르고 2채널이면 센터가 없다", not _a4_vad._layout_has_center("2,unknown"))
+ok("ffprobe가 빈 줄을 내면 다운믹스로 간다", not _a4_vad._layout_has_center(""))
+ok("센터가 거의 비면 다운믹스로 되돌린다", _a4_vad._center_is_empty(0.01, 1.0))
+ok("센터에 소리가 있으면 센터를 쓴다", not _a4_vad._center_is_empty(0.5, 1.0))
+ok("다운믹스가 무음이면 되돌리지 않는다", not _a4_vad._center_is_empty(0.0, 0.0))
+ok("오디오 고르기 기본값은 auto다",
+   _a4_inspect.signature(_a4_vad.detect_speech).parameters["audio_source"].default == "auto")
+
 ok("침묵 당김 폭이 이름 붙은 상수와 같다",
    _a4_inspect.signature(_a4_resplit._snap_to_silence).parameters["tolerance_ms"].default
    == _a4_resplit.SNAP_TOLERANCE_MS == 400)
@@ -4583,6 +4917,52 @@ ok("같은 id가 두 번 적히면 문제로 낸다",
                                       {"state": "정독함", "ids": ["A-1"]}]})["problems"])
 ok("적힌 수가 전체보다 많으면 문제로 낸다",
    _rp.tally({"total": 1, "records": [{"state": "반영함", "count": 5}]})["problems"])
+
+
+# --- 정답지 자기검증: 검사기를 정답지로 먼저 잰다 ---------------------------
+
+_ts_spec = _a4_iu.spec_from_file_location("truth_self_check", Path("tools/truth_self_check.py"))
+_ts = _a4_iu.module_from_spec(_ts_spec)
+sys.modules["truth_self_check"] = _ts   # dataclass가 제 모듈을 찾는다
+_ts_spec.loader.exec_module(_ts)
+
+_ts_eps = {"가 [netflix/ko-sdh]": ["가 E1 sdh", "가 E2 sdh"],
+           "나 [netflix/ko-sdh]": ["나 E1 sdh"]}
+ok("두 작품에서 걸리면 검사기·프로파일을 먼저 의심한다",
+   _ts.classify({"가 [netflix/ko-sdh]": 1, "나 [netflix/ko-sdh]": 1},
+                {"가 E1 sdh": 1, "나 E1 sdh": 1}, _ts_eps) == _ts.SYSTEMIC)
+ok("한 작품의 모든 회차에서 반복되면 그 작품 관행으로 본다(비율이 낮아도)",
+   _ts.classify({"가 [netflix/ko-sdh]": 6}, {"가 E1 sdh": 3, "가 E2 sdh": 3}, _ts_eps)
+   == _ts.ONE_WORK)
+ok("일부 회차에만 드물게 걸리면 사람 실수 후보다",
+   _ts.classify({"가 [netflix/ko-sdh]": 5}, {"가 E1 sdh": 5}, _ts_eps) == _ts.SCATTERED)
+ok("회차가 하나뿐인 작품은 반복을 말할 수 없다",
+   _ts.classify({"나 [netflix/ko-sdh]": 9}, {"나 E1 sdh": 9}, _ts_eps) == _ts.SCATTERED)
+
+_ts_dir = Path(tempfile.mkdtemp())
+(_ts_dir / "a.srt").write_text("1\n00:00:01,000 --> 00:00:02,000\n가\n", encoding="utf-8")
+_ts_found, _ts_skip = _ts.targets_from_ledger({"works": {"작품": {
+    "platform": "netflix", "genre": "variety", "episodes": {"1": {"kinds": {
+        "sdh": {"lang": "ko", "truth": "a.srt"},
+        "translation_fr": {"lang": "fr", "truth": "없는파일.srt"},
+        "translation_other": {"lang": "da/nl", "truth": "a.srt"},
+        "translation": {"lang": "en"}}}}}}}, root=_ts_dir)
+ok("원장에서 읽을 수 있는 정답지만 고른다",
+   [(t.kind, t.language) for t in _ts_found] == [("sdh", "ko")], str(_ts_found))
+ok("못 고른 것은 이유를 남긴다(조용히 빠지지 않는다)", len(_ts_skip) == 3, str(_ts_skip))
+
+_ts_res = _ts.run_one(_ts.Target("작품", "1", "없는발주처", "ko", "sdh", None,
+                                 _ts_dir / "a.srt"), 23.976)
+ok("프로파일이 없으면 위반 0이 아니라 오류로 남긴다", bool(_ts_res.error), str(_ts_res))
+import contextlib as _ts_ctx  # noqa: E402
+import io as _ts_io  # noqa: E402
+
+with _ts_ctx.redirect_stdout(_ts_io.StringIO()), _ts_ctx.redirect_stderr(_ts_io.StringIO()):
+    _ts_code = _ts.main(["--file", str(_ts_dir / "a.srt"), "--profile", "없는발주처/ko-sdh"])
+ok("검사한 정답지가 없으면 2로 끝난다", _ts_code == 2, str(_ts_code))
+import shutil as _ts_shutil  # noqa: E402
+
+_ts_shutil.rmtree(_ts_dir, ignore_errors=True)
 
 
 # --- 일본어 2차·3차 검수 ----------------------------------------------------

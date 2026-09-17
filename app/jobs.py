@@ -227,6 +227,7 @@ class TranslateJob(Job):
                                      source={e.index: e.text for e in source},
                                      glossary=glossary, rounds=self.passes - 1,
                                      cast=self.cast,
+                                     target_lang=self.profile.get("language") or "ko",
                                      on_round=((lambda label, role, evs, changed:
                                                 work.save(f"03-revise-{label}", evs,
                                                           model=translator.model,
@@ -284,6 +285,7 @@ class ReviseJob(Job):
                 events, self.profile, translator=translator, source=self.sources,
                 glossary=glossary, rounds=self.rounds, first_role=self.first_role,
                 cast=self.cast,
+                target_lang=self.profile.get("language") or "ko",
                 on_round=((lambda label, role, evs, changed:
                            work.save(f"{self.step_prefix}-{label}", evs,
                                      model=translator.model,

@@ -181,10 +181,34 @@ class Revision:
     before: str
     after: str
     stage: str          # 2차 | 3차
+    # 번호가 다시 매겨진 뒤의 **최종 자막 번호들**. 비어 있으면 `index` 하나다.
+    # 감수는 재분할 전에 돌아서, 고친 자막 하나가 뒤에서 여럿으로 나뉠 수 있다.
+    indices: tuple[int, ...] = ()
 
     @property
     def changed(self) -> bool:
         return self.before.strip() != self.after.strip()
+
+    @property
+    def label(self) -> str:
+        """사람이 최종 SRT에서 찾을 번호. 나뉜 자막은 조각 번호를 다 적는다."""
+        return "#" + "·".join(str(i) for i in (self.indices or (self.index,)))
+
+
+def renumber(revisions: list[Revision], mapping: dict[int, list[int]]) -> list[Revision]:
+    """자막 번호가 다시 매겨진 뒤 감수 내역의 번호를 옮긴다.
+
+    `mapping`은 `옛 번호 -> 새 번호들`이다. 재분할·화면 캡션·소리 후보 합치기가
+    번호를 다시 매기는데, 전에는 아무도 이 내역을 안 옮겨서 리포트의 `#번호`로
+    최종 SRT를 찾으면 **다른 자막**이 나왔다(`docs/STAGE_CONTRACTS.md` 구멍 3).
+    여러 번 불러도 된다 — 이미 옮긴 번호들(`indices`)을 다시 옮긴다. `mapping`에
+    없는 번호는 그대로 둔다(지어내지 않는다).
+    """
+    out = []
+    for r in revisions:
+        new = tuple(n for i in (r.indices or (r.index,)) for n in mapping.get(i, [i]))
+        out.append(Revision(new[0], r.before, r.after, r.stage, new))
+    return out
 
 
 # 하위 호환: 옛 이름이 한국어 프롬프트를 가리킨다.
@@ -450,7 +474,7 @@ def report(revisions: list[Revision], show: int = 20) -> str:
     summary = ", ".join(f"{stage} {n}개" for stage, n in by_stage.items())
     lines = [f"고쳤습니다 — {summary} (합계 {len(revisions)}개)"]
     for revision in revisions[:show]:
-        lines.append(f"  #{revision.index}")
+        lines.append(f"  {revision.label}")
         lines.append(f"    전: {revision.before}")
         lines.append(f"    후: {revision.after}")
     if len(revisions) > show:
