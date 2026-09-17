@@ -1154,6 +1154,10 @@ def _generate_mode(args, ap) -> int:
         "move_to": args.collision_move_to,
     })
 
+    # 아래 캡션·소리 후보 합치기가 번호를 다시 매긴다. 대사 자막은 같은 객체로 남으므로
+    # 객체로 옛 번호를 기억해 두었다가 감수 내역을 옮긴다(`docs/STAGE_CONTRACTS.md` 구멍 3).
+    number_before_merge = {id(e): e.index for e in draft.events}
+
     if args.ocr:
         # **--ocr-scan(독립 진단)과 다르다.** 여기서는 실제로 최종 자막에
         # 합친다 — 마커 없이 합치면 방금 만든 캡션을 `is_forced_narrative()`가
@@ -1218,6 +1222,12 @@ def _generate_mode(args, ap) -> int:
                 draft.events, draft.notes, sfx_events, draft.sources)
             print(f"소리 후보 {len(sfx_events)}개를 자막에 얹었습니다"
                   " — 전부 확인 필요로 표시됩니다")
+
+    if draft.revisions:
+        from .revise import renumber
+        draft.revisions = renumber(draft.revisions, {
+            number_before_merge[id(e)]: [e.index]
+            for e in draft.events if id(e) in number_before_merge})
 
     # **여기서 끝내지 않는다.** 예전에는 초안만 쓰고 검사·교정은 사용자가 다시
     # 돌려야 했는데, 그러면 버튼 이름만 보고는 어디까지 된 것인지 알 수 없다
@@ -1522,9 +1532,11 @@ def main(argv: list[str] | None = None) -> int:
                           "가장 큰 것). large-v3-turbo 권장")
     gen.add_argument("--whisper-lang", default="auto",
                      help="말소리 언어(ko, en, auto…). 아는 값을 주면 정확해진다")
-    gen.add_argument("--speech", choices=["auto", "vad", "loudness"], default="auto",
+    gen.add_argument("--speech", choices=["auto", "vad", "vad-band", "loudness"],
+                     default="auto",
                      help="말소리를 어떻게 찾을지. auto는 모델(VAD)을 먼저 쓰고 "
-                          "없으면 음량으로 돌아간다")
+                          "없으면 음량으로 돌아간다. vad-band는 검출은 문턱 0.5로 "
+                          "하되 경계는 낮은 문턱까지 늘려 잡는다(시험 중)")
     gen.add_argument("--diarize", action="store_true",
                      help="화자가 바뀌는 자리를 찾아 병합 때 넘지 않는다(pyannote.audio "
                           "필요, 없으면 오류 — 조용히 건너뛰지 않는다). 화자 '이름'은 "

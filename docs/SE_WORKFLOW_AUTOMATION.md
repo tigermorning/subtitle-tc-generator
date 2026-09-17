@@ -28,12 +28,14 @@ SE 기능: `MoveStartOneFrameBack/Forward`(+`KeepGapPrev`), `MoveEndOneFrame*`(+
 "최소 표시 시간 미달이면 늘린다", "샷 체인지 ±N프레임 안이면 붙인다", "갭이 기준보다
 좁으면 벌린다", "CPS 초과면 표시 시간을 늘린다".
 
-**지금 우리**: 위반을 **찾기만** 한다(C01 표시 시간, `gap_too_short`, 읽기 속도).
-고치지는 않는다.
+**지금 우리**: 찾기만 하는 데서 끝나지 않는다. `timing.converge`(`--fix-timing`)가
+겹침 없음 > 최소 시간 > 간격 > 최대 시간 > 읽기 속도 순으로 규칙끼리 충돌하는 것을
+수렴시키고 남은 위반은 `unresolved`로 보고한다. 샷 체인지는 우리가 ffmpeg로
+뽑고(`media.detect_shot_changes`), `timing.suggest_shot_snap`이 SDH에서 아웃점을
+장면전환에 붙인다.
 
-**다음 할 일**: 타임코드 수렴 파이프라인. 규칙끼리 충돌하므로(늘리면 갭이 좁아지고,
-갭을 벌리면 CPS가 올라간다) **순서와 우선순위를 정해 수렴시키고 남은 위반을 보고**해야 한다.
-샷 체인지 목록은 SE가 뽑아 주거나(`GenerateImportShotChanges`) 우리가 ffmpeg로 뽑는다.
+**남은 일**: 수렴이 장면전환 스냅을 다시 풀 수 있는 경우(`docs/STAGE_CONTRACTS.md`
+확인 안 함 B)가 아직 실측 전이다.
 
 ---
 
@@ -51,11 +53,10 @@ SE 기능: `MergeSelectedLines`, `GeneralMergeSelectedLinesAndUnbreak(Cjk)`, `Me
 **자동화 가능성**: 중간. 어디서 끊을지는 **의미 단위**를 알아야 하는데, 그 판정을
 우리가 이미 시작했다(`checker/korean_break.py`).
 
-**지금 우리**: 나쁜 줄바꿈을 **지적**한다(T16·S16). 다시 끊어 주지는 않는다.
-
-**다음 할 일**: `--resplit`. 글자 수를 넘는 자막을 의미 단위로 다시 끊고, 그에 맞춰
-TC를 글자 비율로 나눈다. 짧은 자막은 병합 후보로 제안한다(`too_short_to_stand_alone`이
-이미 찾는다). **자동 적용이 아니라 제안 → 확인**이 기본이어야 한다.
+**지금 우리**: 지적에서 끝나지 않는다. `resplit.resplit_all`이 `--generate` 경로
+안에서 글자 수를 넘는 자막을 의미 단위로 다시 끊고, 그에 맞춰 TC를 글자 비율로
+나눈다(별도 `--resplit` 플래그는 없다 — `--generate` 파이프라인의 한 단계다).
+짧은 자막은 병합 후보로 제안한다(`too_short_to_stand_alone`이 이미 찾는다).
 
 ---
 
@@ -130,8 +131,8 @@ SE 기능: `BatchConvert`, `MultipleReplace`, `ChangeCasing`, `Renumber`, `Remov
 
 | 순위 | 항목 | 근거 |
 |---|---|---|
-| 1 | 타임코드 수렴 파이프라인 | 반복 횟수가 제일 많고 전부 규칙으로 정해진다 |
-| 2 | 다시 끊기(`--resplit`) 제안 | 시간을 제일 많이 먹는 단계 |
+| 1 | 타임코드 수렴 파이프라인 — **완료**(`timing.converge`/`--fix-timing`) | 반복 횟수가 제일 많고 전부 규칙으로 정해진다 |
+| 2 | 다시 끊기 제안 — **완료**(`resplit.resplit_all`, `--generate` 경로) | 시간을 제일 많이 먹는 단계 |
 | 3 | 줄바꿈 제안(지적 → 제안) | 재료가 이미 있다 |
-| 4 | 샷 체인지 연동 | 1번의 정확도를 좌우한다 |
+| 4 | 샷 체인지 연동 — **완료**(`suggest_shot_snap`) | 1번의 정확도를 좌우한다 |
 | 5 | 받아쓰기 검수 | 제일 비싸고 제일 크다 |

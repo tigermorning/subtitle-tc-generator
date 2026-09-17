@@ -80,7 +80,7 @@ Ollama가 한다. 사람에게 "이 자리 확인해 주세요"라고 보여줄 
 ```
 트리거   사용자가 srt 파일 업로드 + 발주처·종류(SDH/번역)·언어 선택
               │
-① 검사      [도구] checker --check  →  위반 목록(규칙ID·건수·자동/확인 구분)
+① 검사      [도구] python -m checker (기본 동작)  →  위반 목록(규칙ID·건수·자동/확인 구분)
               │
 ② 계획      [AI 판단] 자동 교정 가능한 위반이 남아 있으면 ③으로,
              없고 확인 필요만 남았으면 ④로, 위반 0건이면 ⑥으로
@@ -102,7 +102,7 @@ Ollama가 한다. 사람에게 "이 자리 확인해 주세요"라고 보여줄 
 
 | 단계 | 하는 일 | 자리 | 근거 |
 |---|---|---|---|
-| 검사 실행, 자동교정 적용 | 결정론적 규칙 계산 | **도구**(`checker`) | 이미 `--check`/`--fix`로 존재, LLM이 재발명할 이유 없음 |
+| 검사 실행, 자동교정 적용 | 결정론적 규칙 계산 | **도구**(`checker`) | 이미 기본 동작(검사)/`--fix`(교정)로 존재, LLM이 재발명할 이유 없음 |
 | "자동 가능 남았나 vs 확인만 남았나" 분기 | 구조화된 카운트 비교 | **AI 판단**(가벼움) | `docs/SE_WORKFLOW_AUTOMATION.md`가 이미 "제안 → 확인"을 목표로 명시 |
 | 확인 카드를 사람에게 어떻게 묶어 보여줄지(우선순위·그룹핑) | 여러 위반 중 어떤 걸 먼저 물을지 | **AI 판단** | 카드뉴스 예시의 "방향이 모호할 때만 선택지" 원칙과 동일 |
 | 실제 승인/거부/수정 | 최종 판단 | **사람** | `docs/PRD.md` 원칙 — 확실한 근거만 자동, 나머지는 사람 |
@@ -111,7 +111,7 @@ Ollama가 한다. 사람에게 "이 자리 확인해 주세요"라고 보여줄 
 
 | 도구 | 내부 구현 | 입력 스키마 | 출력 스키마 | 권한/위험도 |
 |---|---|---|---|---|
-| `run_check` | `checker/checks.py::run_checks()`가 실제 엔진이다 — `cli.py`의 `_run_one()`은 그걸 부르는 private wrapper(밑줄 시작, 외부 호출용 아님). **구현 시 이 함수를 감싸는 public wrapper를 새로 만들어야 한다**(예: `checker/api.py::check()`), 서브프로세스는 안 씀 | `{file_path, platform, kind, language}` | `{violations: [{rule_id, article, count, severity: "auto"\|"confirm", locations: [cue_index]}], passed: bool}` | 읽기 전용, 승인 불필요. 단 기본값으로 `.work/`에 중간 결과를 남긴다(원본은 안 건드림, 새 디렉터리일 뿐이라 저위험) |
+| `run_check` | `checker/checks.py::run_checks()`가 실제 엔진이다. **public wrapper는 이미 있다** — `agent/tools.py::check()`, 서브프로세스는 안 씀(`checker/api.py`는 없음) | `{file_path, platform, kind, language}` | `{violations: [{rule_id, article, count, severity: "auto"\|"confirm", locations: [cue_index]}], passed: bool}` | 읽기 전용, 승인 불필요. 단 기본값으로 `.work/`에 중간 결과를 남긴다(원본은 안 건드림, 새 디렉터리일 뿐이라 저위험) |
 | `run_fix` | 위 wrapper의 `--fix` 경로 | `{file_path, platform, kind, language}` | `{output_path, applied: [{rule_id, count}], still_violating: [{rule_id, reason}]}` | **원본 대신 새 파일 생성**(`CLAUDE.md` 규칙7 원본 불변) — 파일 시스템 쓰기이므로 실행 전 1회 사용자 동의 필요, 이후 같은 세션 내 반복 호출은 자동 승인 |
 | `run_korean_review` | `checker --korean` (내부적으로 `korean-subtitle-corrector` 호출, `CLAUDE.md` 규칙0 — 별개 리포) | `{file_path}` | `{suggestions: [{cue_index, rule: "K01"\|"K02"}]}` (교정기가 없으면 스킵 표시, 에러 아님) | 읽기 전용 |
 | `ask_human` | 웹앱 자체 기능(외부 API 아님) | `{question_id, cards: [{rule_id, article, cue_index}], options: ["승인","거부","직접수정"]}` | `{question_id, answers: [{cue_index, decision, edited_text?}]}` | 상태를 `waiting_for_user`로 저장, 답변 전 다음 단계로 진행하지 않음 |
@@ -128,9 +128,11 @@ Ollama가 한다. 사람에게 "이 자리 확인해 주세요"라고 보여줄 
 
 ## 사람 개입 지점
 
-1. **세션 시작 시**: 발주처·SDH/번역·언어가 자동 감지 안 되면(`checker`의
-   기존 `decisions.py` 결정표 동작과 동일) 반드시 사람이 고른다 — 기본값으로
-   조용히 채우지 않는다.
+1. **세션 시작 시**: 발주처·SDH/번역·언어가 자동 감지 안 되면 반드시 사람이
+   고른다 — 기본값으로 조용히 채우지 않는다. **CLI의 `decisions.py` 결정표와는
+   다르다** — CLI는 값이 비면 경고와 함께 기본값을 채우고 계속 돌지만
+   (`agent/api.py`는 `missing_platform` 등으로 400을 던져 반려한다), 이
+   웹앱은 사람 확인 전까지 진행하지 않는다.
 2. **최초 자동교정 적용 전**: 1회 동의.
 3. **`[확인]` 표시된 위반마다**: 카드로 묶어 승인/거부/직접수정 요청. 같은
    질문(`question_id`+`version`)에 이미 답했으면 다시 묻지 않는다.
@@ -194,7 +196,7 @@ Ollama가 한다. 사람에게 "이 자리 확인해 주세요"라고 보여줄 
 ## 실험 & 평가
 
 - 평가셋: `examples/`의 샘플 srt + 정답지 대조가 이미 있는 코퍼스
-  (`docs/corpus_status.yaml`)에서 발주처·장르별로 5~10편 추출.
+  (`rules/private/corpus/corpus_status.yaml`)에서 발주처·장르별로 5~10편 추출.
 - 지표: 완료까지 걸린 루프 회차, 사람에게 넘어간 확인 카드 수(적을수록
   좋음 — 단 자동 교정 오답이 늘면 안 됨), `run_fix` 후 새로 생긴 위반 수(0이어야
   함, `docs/PRD.md`의 "자동 교정 오답 0" 기준 그대로 상속).
