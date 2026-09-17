@@ -97,6 +97,11 @@ python -m tools.corpus_build --video <파일> --out <출력폴더> [--pivot <원
   싣되, 승격(공식 규정으로 굳히기)은 별도로 사람 확인을 거친다.
 - **`rules/<platform>/`(공식 규정 파일)는 절대 고치지 않는다.** 학습값이 규정과
   충돌해도 규정이 이기는 게 아니라 애초에 겨루지 않는다.
+- **원장에 어느 학습값에 넣었는지 적는다.** 반영한 회차의 kind 항목마다
+  `learned_into: [<platform>/<lang>-<kind>]`를 `rules/private/corpus/corpus_status.yaml`에
+  남긴다. 학습값 파일은 공개라 가명만 적히므로 원장이 유일한 연결고리다.
+  안 적으면 그 회차로 `--against`를 돌려도 학습·평가 누수 경고가 뜨지 않는다
+  (`checker/answerkey.py`의 `learned_state` — 기록이 없으면 모른다로 보고 침묵한다).
 
 ### 6. 테스트 통과 확인 후 커밋한다
 
