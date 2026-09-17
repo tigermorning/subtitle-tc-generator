@@ -127,9 +127,9 @@ class GenerateJob(Job):
                         cues = translate_events(caption_events, translator, None,
                                                 target_lang=target_lang, progress=self.say)
                         caption_events = to_events(cues, caption_events)
-                    draft.events, draft.notes = merge_captions(
+                    draft.events, draft.notes, draft.sources = merge_captions(
                         draft.events, draft.notes, caption_events, confidences,
-                        self.job_rules.marker)
+                        self.job_rules.marker, dialogue_sources=draft.sources)
                     self.say(f"화면 캡션 {len(captions)}개를 자막에 얹었습니다")
             return draft
         self._guarded(work)
