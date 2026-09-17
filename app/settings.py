@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
     QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget)
 
 from checker import load_profile
+from checker.checks import render_message
 from checker.profile import available_profiles, user_root
 
 # 사람이 자주 고치는 값들. (프로파일 경로, 이름, 최소, 최대)
@@ -150,10 +151,11 @@ class SettingsDialog(QDialog):
         page = QWidget()
         layout = QVBoxLayout(page)
         rules = self.profile.get("rules") or []
-        table = QTableWidget(len(rules), 3)
-        table.setHorizontalHeaderLabels(["씀", "번호", "무엇을 보는가"])
+        # **규칙 번호 칸은 두지 않는다**(사용자 결정 2026-09-17) — 작업자는 번호를
+        # 모른다. 켜고 끄는 값은 여전히 번호로 저장되고, 번호는 도구설명에 남는다.
+        table = QTableWidget(len(rules), 2)
+        table.setHorizontalHeaderLabels(["씀", "무엇을 보는가"])
         table.setColumnWidth(0, 40)
-        table.setColumnWidth(1, 70)
         table.horizontalHeader().setStretchLastSection(True)
 
         self.rule_checks = {}
@@ -166,9 +168,11 @@ class SettingsDialog(QDialog):
             box.setAlignment(Qt.AlignCenter)
             box.setContentsMargins(0, 0, 0, 0)
             table.setCellWidget(row, 0, holder)
-            table.setItem(row, 1, QTableWidgetItem(rule["id"]))
-            table.setItem(row, 2, QTableWidgetItem(
-                f"{rule.get('clause', '')} — {rule.get('message', '')}"))
+            # 자리표시자를 채워서 보인다 — `{max_lines}`는 작업자가 읽을 수 있는 말이 아니다.
+            message = render_message(rule.get("message", ""), self.profile)
+            what = QTableWidgetItem(f"{rule.get('clause', '')} — {message}")
+            what.setToolTip(rule["id"])
+            table.setItem(row, 1, what)
             self.rule_checks[rule["id"]] = check
         layout.addWidget(table)
         return page

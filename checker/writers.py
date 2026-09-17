@@ -44,6 +44,8 @@ def to_review_srt(events: list[Event], violations: list[dict],
     **모든 자막에 대해 한 칸씩 낸다.** 위반이 있는 것만 내면 번호가 어긋나 짝이
     맞지 않는다. 깨끗한 줄은 `clean_mark` 한 글자로 조용히 채운다.
     """
+    from .labels import check_name
+
     by_index: dict[int, list[dict]] = {}
     for v in violations:
         by_index.setdefault(v["event_index"], []).append(v)
@@ -60,7 +62,10 @@ def to_review_srt(events: list[Event], violations: list[dict],
                 detail = (v.get("detail") or "").strip()
                 detail = detail[:40] + "…" if len(detail) > 40 else detail
                 mark = "[자동]" if v.get("auto_fixable") else ""
-                parts.append(f"{mark}{v['rule_id']} {where}{detail or v['message'][:30]}")
+                # 규칙 번호가 아니라 무엇을 보는 검사인지 적는다(`labels.py` 첫머리).
+                name = check_name(v)
+                name = name[:30] + "…" if len(name) > 30 else name
+                parts.append(f"{mark}{where}{name}" + (f" — {detail}" if detail else ""))
             text = "\n".join(parts[:4])
             if len(found) > 4:
                 text += f"\n… 외 {len(found) - 4}건"

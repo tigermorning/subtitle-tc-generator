@@ -2480,7 +2480,38 @@ else:
     # 잡이가 보여야 잡는다. 가는 선은 있는 줄도 모른다.
     ok("잡이가 잡을 만큼 두껍다", _win.main_splitter.handleWidth() >= 6)
     ok("칸이 완전히 접히지는 않는다", not _win.main_splitter.childrenCollapsible())
+
+    # 검사 결과 표 — 규칙 번호가 아니라 무엇을 보는 검사인지 보인다.
+    _win._show_violations([{"event_index": 1, "rule_id": "S05", "clause": "II.6",
+                            "message": "실제 언어를 조사하세요.", "detail": "",
+                            "text": "[외국어로 말한다]", "auto_fixable": False}])
+    _cell = _win.results.item(0, 1)
+    ok("검사 결과 칸에 규칙 번호가 안 보인다", "S05" not in _cell.text())
+    ok("검사 결과 칸에 검사 내용이 보인다", "실제 언어" in _cell.text())
+    ok("규칙 번호는 도구설명에 남는다", "S05" in _cell.toolTip())
+    ok("검사 결과 머리글이 번호를 말하지 않는다",
+       _win.results.horizontalHeaderItem(1).text() == "검사")
     _win.close()
+
+    # 작업 기준 창 — 규칙 끄기 표도 번호 칸 없이 무엇을 보는지만 보인다.
+    from app.settings import SettingsDialog  # noqa: E402
+    from PySide6.QtWidgets import QTableWidget as _QTable  # noqa: E402
+
+    _dlg = SettingsDialog("netflix", "translation")
+    _rules_table = [t for t in _dlg.findChildren(_QTable)
+                    if t.horizontalHeaderItem(0) and t.horizontalHeaderItem(0).text() == "씀"][0]
+    _heads = [_rules_table.horizontalHeaderItem(c).text()
+              for c in range(_rules_table.columnCount())]
+    ok("규칙 표에 번호 칸이 없다", _heads == ["씀", "무엇을 보는가"], str(_heads))
+    _first_id = _dlg.profile["rules"][0]["id"]
+    ok("규칙 표의 번호는 도구설명에 남는다",
+       _rules_table.item(0, 1).toolTip() == _first_id
+       and _first_id not in _rules_table.item(0, 1).text())
+    ok("규칙 켜고 끄기는 여전히 번호로 잡는다", _first_id in _dlg.rule_checks)
+    _texts = [_rules_table.item(r, 1).text() for r in range(_rules_table.rowCount())]
+    ok("규칙 표에 채우지 않은 자리표시자가 없다",
+       not any("{max_lines}" in t or "{chars_per_line}" in t for t in _texts))
+    _dlg.close()
 
 
 # --- 발주처 기준(사용자 프로파일) ------------------------------------------
@@ -2664,6 +2695,38 @@ with _tf3.TemporaryDirectory() as _d:
                                             encoding="utf-8")
     ok("자료형이 다르면 기본값을 지킨다", _prefs.load()["waveform_ms_per_pixel"] == 20)
     _os3.environ.pop("SUBTITLE_EDITOR_HOME", None)
+
+
+# --- 검사 결과에 보이는 이름 -------------------------------------------------
+# **규칙 번호를 화면에 내지 않는다**(사용자 결정 2026-09-17). 작업자는 `S05`가 무엇인지
+# 모른다 — 무엇을 보는 검사인지가 보여야 한다. 번호는 도구설명으로만 남긴다.
+
+from checker.labels import check_detail, check_label, check_tooltip  # noqa: E402
+from checker.writers import to_review_srt  # noqa: E402
+
+_v = check_events([{"index": 1, "start_ms": 0, "end_ms": 3000,
+                   "text": "[외국어로 말한다]"}], ko_sdh)["violations"]
+_v = [x for x in _v if x["rule_id"] == "S05"][0]
+ok("검사 이름에 규칙 문구가 나온다", "외국어로 말한다" in check_label(_v))
+ok("검사 이름에 규칙 번호가 없다", "S05" not in check_label(_v))
+ok("확인할 것인지 자동인지 앞에 붙는다", check_label(_v).startswith("확인 · "))
+ok("번호는 도구설명에 남는다", "S05" in check_tooltip(_v))
+ok("내용 칸이 규칙 문구를 되풀이하지 않는다", check_detail(_v) != _v["message"])
+ok("문구가 없어도 번호는 내지 않는다",
+   check_label({"rule_id": "TC00", "auto_fixable": False}) == "확인 · 기타 지적")
+ok("용어 갈래는 한국어로 보인다",
+   check_label({"rule_id": "person", "auto_fixable": True}) == "자동 · 인물")
+ok("붙어 온 이름이 낱말이면 그대로 쓴다",
+   check_label({"rule_id": "번역", "detail": "x"}) == "확인 · 번역")
+
+# 확인용 SRT도 작업자가 SE 그리드에서 읽는다 — 같은 원칙이다.
+_review = to_review_srt(
+    [Event(1, 0, 3000, "갔어."), Event(2, 3000, 6000, "왔어")],
+    [{"event_index": 1, "rule_id": "T05", "line_no": 1, "detail": "'갔어.'",
+      "message": "번역 자막은 마침표를 쓰지 않습니다.", "auto_fixable": True}])
+ok("확인용 SRT에 규칙 번호가 없다", "T05" not in _review)
+ok("확인용 SRT에 검사 내용이 나온다", "마침표" in _review and "'갔어.'" in _review)
+ok("확인용 SRT에 자동 표시가 남는다", "[자동]" in _review)
 
 
 # --- 일을 다른 실에서 돌릴 때 객체가 사라지지 않는지 ---------------------------

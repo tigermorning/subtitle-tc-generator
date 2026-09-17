@@ -313,6 +313,31 @@ def excerpt(event: Event, line_no: int | None, limit: int = 60) -> str:
     return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
+def render_message(message: str, profile: dict, children: bool = False) -> str:
+    """규칙 문구의 자리표시자(`{chars_per_line}` 등)를 프로파일 값으로 채운다.
+
+    문구에 숫자를 박아 두면 발주처가 값을 조였을 때 리포트가 거짓말을 한다.
+    프로파일 값으로 채우게 하고, 자리표시자가 없는 문구는 그대로 둔다.
+    검사 결과와 작업 기준 창이 같은 문구를 보여야 하므로 여기 한곳에 둔다.
+    """
+    limits = profile.get("limits") or {}
+    speeds = limits.get("reading_speed_cps") or {}
+    duration = limits.get("duration_ms") or {}
+    fields = {
+        "chars_per_line": limits.get("chars_per_line"),
+        "max_lines": limits.get("max_lines"),
+        "cps_adult": speeds.get("adult"),
+        "cps_children": speeds.get("children"),
+        "cps": speeds.get("children" if children else "adult"),
+        "duration_min_ms": duration.get("min"),
+        "duration_max_ms": duration.get("max"),
+    }
+    try:
+        return message.format(**fields)
+    except (KeyError, IndexError, ValueError):
+        return message
+
+
 def run_checks(events: list[Event], profile: dict, children: bool = False,
                fps: float | None = None,
                busy_spans: list[tuple[int, int]] | None = None,
@@ -336,26 +361,9 @@ def run_checks(events: list[Event], profile: dict, children: bool = False,
            # 미구현과 다르지만, 조용히 빠지면 똑같이 "통과"로 보인다(규칙 9).
            "skipped": []}
 
-    limits = ctx["limits"]
-    speeds = limits.get("reading_speed_cps") or {}
-    duration = limits.get("duration_ms") or {}
-    # 문구에 숫자를 박아 두면 발주처가 값을 조였을 때 리포트가 거짓말을 한다.
-    # 프로파일 값으로 채우게 하고, 자리표시자가 없는 문구는 그대로 둔다.
-    fields = {
-        "chars_per_line": limits.get("chars_per_line"),
-        "max_lines": limits.get("max_lines"),
-        "cps_adult": speeds.get("adult"),
-        "cps_children": speeds.get("children"),
-        "cps": speeds.get("children" if children else "adult"),
-        "duration_min_ms": duration.get("min"),
-        "duration_max_ms": duration.get("max"),
-    }
-
     def render(message: str) -> str:
-        try:
-            return message.format(**fields)
-        except (KeyError, IndexError, ValueError):
-            return message
+        return render_message(message, profile, children)
+
     violations: list[Violation] = []
     unimplemented: list[str] = []
 

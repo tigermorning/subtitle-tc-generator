@@ -383,10 +383,11 @@ class MainWindow(QMainWindow):
         """지적 목록. **두 번 누르면 그 자막으로 간다** — 목록과 영상이 이어져야
         사람이 확인할 수 있다."""
         self.results = QTableWidget(0, 3)
-        self.results.setHorizontalHeaderLabels(["자막", "규칙", "내용"])
+        # **규칙 번호가 아니라 무엇을 보는 검사인지 보인다**(`checker/labels.py` 첫머리).
+        self.results.setHorizontalHeaderLabels(["자막", "검사", "내용"])
         self.results.horizontalHeader().setStretchLastSection(True)
         self.results.setColumnWidth(0, 60)
-        self.results.setColumnWidth(1, 70)
+        self.results.setColumnWidth(1, 320)
         self.results.doubleClicked.connect(self._jump_to_violation)
 
         dock = QDockWidget("검사 결과", self)
@@ -396,13 +397,20 @@ class MainWindow(QMainWindow):
         self.results_dock = dock
 
     def _show_violations(self, violations) -> None:
+        from checker.labels import check_detail, check_label, check_tooltip
+
         self.results.setRowCount(len(violations))
         for row, violation in enumerate(violations):
-            mark = "자동" if violation.get("auto_fixable") else "확인"
             self.results.setItem(row, 0, QTableWidgetItem(str(violation["event_index"])))
-            self.results.setItem(row, 1, QTableWidgetItem(f"{violation['rule_id']} {mark}"))
-            detail = violation.get("detail") or violation.get("message") or ""
-            self.results.setItem(row, 2, QTableWidgetItem(str(detail)[:120]))
+            label = QTableWidgetItem(check_label(violation))
+            # 번호는 화면에 내지 않고 도구설명·숨은 값으로만 남긴다 — 개발자가 찾을 수 있게.
+            # 문구가 길면 칸에서 잘린다 — 전체 문구를 함께 띄운다.
+            label.setToolTip(check_label(violation) + "\n" + check_tooltip(violation))
+            label.setData(Qt.UserRole, violation.get("rule_id"))
+            self.results.setItem(row, 1, label)
+            detail = QTableWidgetItem(check_detail(violation)[:120])
+            detail.setToolTip(check_detail(violation))
+            self.results.setItem(row, 2, detail)
         self.results_dock.setVisible(bool(violations))
 
     def _jump_to_violation(self, index) -> None:
@@ -652,7 +660,7 @@ class MainWindow(QMainWindow):
                 + (f" — 봐야 할 자리 {notes}곳" if notes else ""))
             if draft.notes:
                 self._show_violations([
-                    {"event_index": i, "rule_id": "확인", "detail": note,
+                    {"event_index": i, "rule_id": "자막 생성", "detail": note,
                      "auto_fixable": False} for i, note in draft.notes])
 
         self._start(job, done, "영상에서 자막을 만드는 중입니다...")
