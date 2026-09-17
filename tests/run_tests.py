@@ -1445,7 +1445,7 @@ _dlg = [Event(1, 0, 1000, "첫 대사"), Event(2, 5000, 6000, "둘째 대사")]
 _before_merge = {id(e): e.index for e in _dlg}
 _cap = captions_to_events([OcrCaption(start_ms=2000, end_ms=3000, text="간판", confidence=0.9)],
                           start_index=3)
-_merged_events, _ = merge_captions(_dlg, [], _cap, {3: 0.9}, "bracket")
+_merged_events, _, _ = merge_captions(_dlg, [], _cap, {3: 0.9}, "bracket")
 _rn3 = renumber([Revision(2, "둘째", "둘째 대사", "2차")],
                 {_before_merge[id(e)]: [e.index] for e in _merged_events if id(e) in _before_merge})
 ok("캡션이 끼어든 뒤 감수 내역이 같은 대사를 가리킨다",
@@ -4102,8 +4102,9 @@ ok("captions_to_events의 인덱스가 start_index부터 이어진다",
 
 _dialogue = [Event(1, 0, 1000, "안녕"), Event(2, 4000, 4500, "잘가")]
 _confidences = {e.index: c.confidence for e, c in zip(_cap_events, _caps)}
-_merged_events, _merged_notes = merge_captions(
-    _dialogue, [(1, "환각 의심")], _cap_events, _confidences, "bracket")
+_merged_events, _merged_notes, _merged_sources = merge_captions(
+    _dialogue, [(1, "환각 의심")], _cap_events, _confidences, "bracket",
+    dialogue_sources={1: "hello", 2: "bye"})
 
 ok("합쳐진 이벤트가 시간순이다",
    [e.start_ms for e in _merged_events] == sorted(e.start_ms for e in _merged_events))
@@ -4120,6 +4121,18 @@ _expected_dialogue_new_index = next(
     e.index for e in _merged_events if e.kind == "dialogue" and e.start_ms == 0)
 ok("기존 대사 노트가 밀린 번호로 옮겨진다(안 옮기면 엉뚱한 자막을 가리킨다)",
    _dialogue_note_idx == _expected_dialogue_new_index)
+
+# **원문도 새 번호로 옮긴다**(docs/STAGE_CONTRACTS.md 구멍 2). 전에는 events·notes만
+# 옮겨, 캡션이 끼어든 뒤의 대사가 다른 자막의 원문을 가리켰다.
+_merged_text = {e.index: e.text for e in _merged_events}
+ok("합친 뒤 원문이 같은 대사를 가리킨다",
+   {_merged_text[i]: src for i, src in _merged_sources.items()} == {"안녕": "hello", "잘가": "bye"},
+   str((_merged_sources, _merged_text)))
+ok("캡션 번호에는 원문을 지어 붙이지 않는다",
+   not any(i in _merged_sources for i, e in ((e.index, e) for e in _merged_events)
+           if e.kind == "caption"))
+ok("원문을 안 주면 빈 원문을 돌려준다",
+   merge_captions([Event(1, 0, 1000, "안녕")], [], [], {}, "bracket")[2] == {})
 
 _low_conf_idx = next(
     e.index for e in _merged_events if e.kind == "caption" and "흐릿한" in e.text)

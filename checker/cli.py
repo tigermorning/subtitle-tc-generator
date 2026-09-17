@@ -1186,8 +1186,9 @@ def _generate_mode(args, ap) -> int:
                 cues = translate_events(caption_events, translator, glossary,
                                         target_lang=target_lang, progress=print)
                 caption_events = to_events(cues, caption_events)
-            draft.events, draft.notes = merge_captions(
-                draft.events, draft.notes, caption_events, confidences, rules.marker)
+            draft.events, draft.notes, draft.sources = merge_captions(
+                draft.events, draft.notes, caption_events, confidences, rules.marker,
+                dialogue_sources=draft.sources)
             print(f"화면 캡션 {len(captions)}개를 자막에 얹었습니다")
 
     if args.sfx:

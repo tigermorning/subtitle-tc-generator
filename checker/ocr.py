@@ -484,7 +484,8 @@ def captions_to_events(captions: list[OcrCaption], start_index: int = 1) -> list
 def merge_captions(dialogue_events: list[Event], dialogue_notes: list[tuple[int, str]],
                    caption_events: list[Event], confidences: dict[int, float],
                    marker: str, note_below: float = 0.6,
-                   ) -> tuple[list[Event], list[tuple[int, str]]]:
+                   dialogue_sources: dict[int, str] | None = None,
+                   ) -> tuple[list[Event], list[tuple[int, str]], dict[int, str]]:
     """화면 캡션(`Event`, 아직 번역·마커 전)을 대사 이벤트에 합친다. **순수 함수.**
 
     - `position.apply_marker()`로 최종 텍스트를 만든다(그래야 `is_forced_narrative()`
@@ -493,6 +494,11 @@ def merge_captions(dialogue_events: list[Event], dialogue_notes: list[tuple[int,
     - 시간순으로 정렬하고 번호를 1..N으로 다시 매긴다.
     - `dialogue_notes`(대사 쪽, `generate()`가 이미 만든 것)도 새 번호로 옮긴다
       — 안 옮기면 캡션이 끼어들며 밀린 번호가 엉뚱한 자막을 가리키게 된다.
+    - `dialogue_sources`(`Draft.sources`, 번호 -> 번역 전 원어)도 새 번호로 옮겨
+      돌려준다(2026-09-14, `docs/STAGE_CONTRACTS.md` 구멍 2). 전에는 events·notes만
+      옮겨서, 번역과 화면 캡션을 함께 켜면 첫 캡션 뒤부터 원문이 **다른 자막의 원문**을
+      가리켰다 — GUI는 그 원문을 감수에 넘기므로 감수가 엉뚱한 원문과 견줬다.
+      `merge_sound_events()`(`sfx.py`)는 이미 이렇게 한다. 캡션에는 원문을 붙이지 않는다.
     - `confidences`(임시 인덱스 -> 신뢰도)가 `note_below` 미만인 캡션은 "확인
       필요" 노트를 남긴다(규칙4 — 화면 글자 검출은 추정이니 표시만 하고 자동
       반영은 여기까지, 값 자체를 고치지 않는다).
@@ -514,7 +520,8 @@ def merge_captions(dialogue_events: list[Event], dialogue_notes: list[tuple[int,
         e.index = new_i
 
     merged_notes = [(remap.get(i, i), msg) for i, msg in dialogue_notes] + caption_notes
-    return combined, merged_notes
+    merged_sources = {remap.get(i, i): text for i, text in (dialogue_sources or {}).items()}
+    return combined, merged_notes, merged_sources
 
 
 def captions_to_draft_srt_events(captions: list[OcrCaption], min_confidence_note: float = 0.6,
