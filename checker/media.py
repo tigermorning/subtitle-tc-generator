@@ -284,15 +284,16 @@ def find_speech(video: Path, method: str = "auto", duration_ms: int | None = Non
     모델이나 onnxruntime이 없으면 조용히 음량으로 돌아간다.
     """
     say = progress or (lambda _m: None)
-    if method in ("auto", "vad"):
+    if method in ("auto", "vad", "vad-band"):
         try:
             from .vad import detect_speech as vad_speech
-            spans = vad_speech(video, progress=say)
+            boundary = "band" if method == "vad-band" else "threshold"
+            spans = vad_speech(video, progress=say, boundary=boundary)
             if spans:
-                return spans, "vad"
+                return spans, method if method != "auto" else "vad"
             say("모델이 말소리를 찾지 못했습니다. 음량으로 다시 봅니다.")
         except Exception as exc:      # 모델·실행기가 없거나 도중에 실패
-            if method == "vad":
+            if method in ("vad", "vad-band"):
                 raise
             say(f"말소리 모델을 쓰지 못해 음량으로 찾습니다: {exc}")
     return detect_speech(video, duration_ms=duration_ms), "loudness"

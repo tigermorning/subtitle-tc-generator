@@ -2,7 +2,7 @@
 
 작성일: 2026-08-11
 근거: SE 실사용자(본 프로젝트 소유자)의 페인 포인트 4건 + SubtitleEdit 코드 실측
-관련 문서: `SUBTITLEEDIT_ARCHITECTURE_ANALYSIS.md`, `SUBTITLE_GUIDE_SDH.md`, `SUBTITLE_GUIDE_TRANSLATION.md`
+관련 문서: `SUBTITLEEDIT_ARCHITECTURE_ANALYSIS.md`, `rules/private/sources/SUBTITLE_GUIDE_SDH.md`, `rules/private/sources/SUBTITLE_GUIDE_TRANSLATION.md`
 
 > **이 문서는 결정이 내려지던 시점의 기록이다. 두 가지가 그 뒤에 바뀌었다.**
 >

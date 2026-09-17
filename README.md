@@ -119,9 +119,9 @@ python -m checker --generate --video ep01.mkv --script ep01.docx \
                   -l ko -k translation --translate                   # 원어 대조 + 한국어 초벌
 ```
 
-전사는 ffmpeg 내장 whisper, 말소리 구간은 Silero VAD(없으면 음량), 번역은 로컬
-Ollama다. **원고가 이 컴퓨터 밖으로 나가지 않는다.** 원어 스크립트는 워드·텍스트·PDF를
-읽는다.
+전사는 faster-whisper가 깔려 있으면 그것을 먼저 쓰고, 없거나 실패하면 ffmpeg 내장
+whisper 필터로 돌아간다. 말소리 구간은 Silero VAD(없으면 음량), 번역은 로컬 Ollama다.
+**원고가 이 컴퓨터 밖으로 나가지 않는다.** 원어 스크립트는 워드·텍스트·PDF를 읽는다.
 
 전사와 스크립트는 **어느 쪽도 정답으로 두지 않는다.** 어긋난 자리는 기계가 정하지 않고
 표시한다. 소리를 못 찾은 스크립트 줄은 지우지 않고 길이 0으로 남긴다.
@@ -280,8 +280,8 @@ coupang-ko-translation-check.bat / -fix.bat
 
 디즈니·쿠팡의 **공식 문건**은 아직 못 구했다(파트너·벤더 전용이고 공개 웹에는 2차
 정보뿐이다 — `rules/*/UNAVAILABLE.yaml`에 확보 경로와 미확인 항목을 적어 두었다).
-그래서 웹에 도는 수치는 넣지 않았고, 실무 자료가 정한 것만 넣었다. 규칙 수가 넷플릭스
-(16개)보다 적은 것은 그 때문이다 — **빈칸을 추측으로 채우지 않은 결과다.** 발주처가
+그래서 웹에 도는 수치는 넣지 않았고, 실무 자료가 정한 것만 넣었다 —
+**빈칸을 추측으로 채우지 않은 결과다.** 발주처가
 다른 값을 주면 그쪽이 우선이고, 공식 문건을 구하면 `official` 프로파일로 갈아 끼운다.
 
 ## 규정 프로파일
@@ -293,9 +293,9 @@ rules/
   lexicon/      효과음 사전 등
   learned/      코퍼스에서 관측한 값(발주처별 버킷). 규정 파일이 아니다 — 아래 참고
   private/      *** 이 저장소에 없다. 아래 참고 ***
-    netflix/    common / ko-sdh / ko-translation / en-translation
-    disney/     ko-sdh / ko-translation
-    coupang/    ko-sdh / ko-translation
+    netflix/    common / ko-sdh / ko-sdh-practice / ko-translation / en-sdh / en-template / en-translation
+    disney/     common / ko-sdh / ko-translation
+    coupang/    common / ko-sdh / ko-translation
     sources/    사람이 읽는 근거 문서 — 위 YAML은 여기서 파생된다
 ```
 
@@ -347,7 +347,7 @@ learned`로 출처를 구분하고, 규정으로 승격하려면 사람 확인�
 
 ### 발주처 기준 (상속)
 
-규정은 절대적 정답이 아니라 발주처가 요구하는 틀이다.
+규정 자체는 절대적 기준이다 — 다만 어떤 규정을 지금 버전으로 알고 있는지는 수시로 바뀐다. 발주처가 요구하는 틀을 따르는 것이 작업자의 일이라 프로파일이 상속된다.
 
 ```yaml
 extends: netflix/ko-translation.yaml   # 자리 대신 이름 — 로더가 뒤져 찾는다
@@ -421,13 +421,13 @@ kiwi를 부르면 적재에 1~2분이 걸린다. **애매하면 말하지 않는
 
 ## 원칙
 
-전체는 [`CLAUDE.md`](CLAUDE.md)(규칙 13개)에 있다. 요약:
+전체는 [`CLAUDE.md`](CLAUDE.md)(규칙 0~18)에 있다. 요약:
 
 - 단계 순서를 섞지 않는다. **글자 수는 마지막이다**
 - 원어에 한국어 규정을 적용하지 않는다
 - **어느 쪽도 정답으로 두지 않는다** — 어긋나면 기계가 정하지 않고 표시한다
 - 확실한 근거와 추정을 구분한다. 추정으로 자동 교정하지 않는다
-- 규정은 절대적 정답이 아니다. 공식 문건과 실무 자료를 구분하고 개정일을 적는다
+- **규정 자체는 절대적 기준이다.** 다만 수시로 개정되니 공식 문건과 실무 자료를 구분하고 개정일을 적는다
 - **미공개 자료는 밖으로 내보내지 않는다.** 전사·번역 전부 로컬
 - 원본을 덮어쓰지 않는다 / 받은 타임코드는 건드리지 않는다
 - 자료가 없는 프로파일·임계값을 추측해서 만들지 않는다
@@ -441,8 +441,8 @@ kiwi를 부르면 적재에 1~2분이 걸린다. **애매하면 말하지 않는
 ## 개발
 
 ```bash
-python3 tests/run_tests.py     # 1116건 (GUI 제외)
-cmd.exe /c "..\korean-subtitle-corrector\.venv\Scripts\python.exe tests\run_tests.py"   # 1116건
+python3 tests/run_tests.py     # 1172건 (GUI 제외)
+cmd.exe /c "..\korean-subtitle-corrector\.venv\Scripts\python.exe tests\run_tests.py"   # 1172건
 ```
 
 시스템 파이썬에는 PySide6가 없다. `app/`을 건드리면 venv 쪽으로도 돌린다.
