@@ -2480,6 +2480,17 @@ else:
     # 잡이가 보여야 잡는다. 가는 선은 있는 줄도 모른다.
     ok("잡이가 잡을 만큼 두껍다", _win.main_splitter.handleWidth() >= 6)
     ok("칸이 완전히 접히지는 않는다", not _win.main_splitter.childrenCollapsible())
+
+    # 검사 결과 표 — 규칙 번호가 아니라 무엇을 보는 검사인지 보인다.
+    _win._show_violations([{"event_index": 1, "rule_id": "S05", "clause": "II.6",
+                            "message": "실제 언어를 조사하세요.", "detail": "",
+                            "text": "[외국어로 말한다]", "auto_fixable": False}])
+    _cell = _win.results.item(0, 1)
+    ok("검사 결과 칸에 규칙 번호가 안 보인다", "S05" not in _cell.text())
+    ok("검사 결과 칸에 검사 내용이 보인다", "실제 언어" in _cell.text())
+    ok("규칙 번호는 도구설명에 남는다", "S05" in _cell.toolTip())
+    ok("검사 결과 머리글이 번호를 말하지 않는다",
+       _win.results.horizontalHeaderItem(1).text() == "검사")
     _win.close()
 
 
@@ -2664,6 +2675,28 @@ with _tf3.TemporaryDirectory() as _d:
                                             encoding="utf-8")
     ok("자료형이 다르면 기본값을 지킨다", _prefs.load()["waveform_ms_per_pixel"] == 20)
     _os3.environ.pop("SUBTITLE_EDITOR_HOME", None)
+
+
+# --- 검사 결과에 보이는 이름 -------------------------------------------------
+# **규칙 번호를 화면에 내지 않는다**(사용자 결정 2026-09-17). 작업자는 `S05`가 무엇인지
+# 모른다 — 무엇을 보는 검사인지가 보여야 한다. 번호는 도구설명으로만 남긴다.
+
+from app.labels import check_detail, check_label, check_tooltip  # noqa: E402
+
+_v = check_events([{"index": 1, "start_ms": 0, "end_ms": 3000,
+                   "text": "[외국어로 말한다]"}], ko_sdh)["violations"]
+_v = [x for x in _v if x["rule_id"] == "S05"][0]
+ok("검사 이름에 규칙 문구가 나온다", "외국어로 말한다" in check_label(_v))
+ok("검사 이름에 규칙 번호가 없다", "S05" not in check_label(_v))
+ok("확인할 것인지 자동인지 붙는다", check_label(_v).endswith("· 확인"))
+ok("번호는 도구설명에 남는다", "S05" in check_tooltip(_v))
+ok("내용 칸이 규칙 문구를 되풀이하지 않는다", check_detail(_v) != _v["message"])
+ok("문구가 없어도 번호는 내지 않는다",
+   check_label({"rule_id": "TC00", "auto_fixable": False}) == "기타 지적 · 확인")
+ok("용어 갈래는 한국어로 보인다",
+   check_label({"rule_id": "person", "auto_fixable": True}) == "인물 · 자동")
+ok("붙어 온 이름이 낱말이면 그대로 쓴다",
+   check_label({"rule_id": "번역", "detail": "x"}) == "번역 · 확인")
 
 
 # --- 일을 다른 실에서 돌릴 때 객체가 사라지지 않는지 ---------------------------
