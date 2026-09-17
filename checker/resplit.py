@@ -152,7 +152,7 @@ def split_text(text: str, max_chars: float, weights: dict | None = None,
             continue
         if count_chars(left, weights) <= max_chars:
             return [left] + split_text(right, max_chars, weights, force_sentence_split,
-                                       target_chars=target_chars)
+                                       force_clause_split, min_piece_chars, target_chars)
 
     # 끊을 자리가 없다(한 어절이 너무 길다). 자르지 않고 그대로 둔다 —
     # 억지로 글자 중간을 자르면 말이 깨진다. 검사가 길다고 잡아 줄 것이다.

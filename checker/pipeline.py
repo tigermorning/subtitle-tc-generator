@@ -125,12 +125,16 @@ def stage_translate(events: list[Event], profile: dict, *, translator,
     건드리면 안 됨!" 그래서 여기서 잰다 — 전에는 CLI만 확인하고 GUI는 확인하지
     않았다. 어긋나면 `violations`에 넣어 어댑터가 막을 수 있게 한다.
     """
-    from .translate import Glossary, to_events, translate_events
+    from .translate import LANG_NAMES, Glossary, to_events, translate_events
 
     say = progress or _silent
     glossary = glossary if glossary is not None else Glossary.from_profile(profile)
-    say(f"한국어로 옮깁니다 — 자막 {len(events)}개")
-    cues = translate_events(events, translator, glossary, progress=say)
+    # 목표 언어는 프로파일이 정한다 — 2차(`stage_revise`)·화면 캡션 번역과 같은 값.
+    # 전에는 넘기지 않아 `-l en`이어도 1차만 한국어로 나갔다.
+    target_lang = profile.get("language") or "ko"
+    say(f"{LANG_NAMES.get(target_lang, target_lang)}로 옮깁니다 — 자막 {len(events)}개")
+    cues = translate_events(events, translator, glossary, target_lang=target_lang,
+                            progress=say)
     translated = to_events(cues, events)
 
     violations: list[dict] = []

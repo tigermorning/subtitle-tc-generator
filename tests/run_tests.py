@@ -1159,6 +1159,16 @@ ok("각 조각이 한계 안이다", all(count_chars(p, W2) <= 14 for p in piece
 ok("짧으면 그대로 둔다", split_text("짧다", 16, W2) == ["짧다"])
 ok("끊을 자리가 없으면 자르지 않는다", len(split_text("가" * 40, 16, W2)) == 1)
 
+# **남은 오른쪽 조각에도 같은 조건으로 자른다.** 폴백 재귀가 `force_clause_split`·
+# `min_piece_chars`를 빠뜨려서, 앞에서 짧다고 막은 "네."가 오른쪽 조각에서는
+# 따로 떨어져 나왔다.
+_mp_pieces = split_text("그러니까 내 말은 지금 여기서 할 수 있는 게 하나도 없다는 거야. 네.",
+                        20, W2, force_sentence_split=True, min_piece_chars=3)
+ok("폴백 재귀도 최소 조각 길이를 지킨다",
+   all(count_chars(p, W2) >= 3 for p in _mp_pieces), str(_mp_pieces))
+ok("폴백 재귀도 각 조각이 한계 안이다",
+   all(count_chars(p, W2) <= 20 for p in _mp_pieces), str(_mp_pieces))
+
 ev = Event(1, 0, 6000, "안녕하세요. 오늘 날씨가 참 좋습니다. 산책이나 갈까요?")
 out = resplit(ev, 12, W2)
 ok("나눈 만큼 자막이 늘어난다", len(out) > 1)
@@ -2885,6 +2895,59 @@ ok("번역이 타임코드를 물려받는다",
 ok("타임코드가 그대로면 위반이 없다", _first.violations == [], str(_first.violations))
 ok("확인이 필요한 자리를 낸다", "notes_by_index" in _first.extra)
 
+# **1차도 프로파일 언어로 옮긴다.** 전에는 `target_lang`을 넘기지 않아 `-l en`이어도
+# 1차만 한국어 프롬프트로 나갔다(2차는 프로파일 언어).
+from checker.translate import SYSTEM_BY_LANG as _tl_system  # noqa: E402
+
+_tl_tr = _EchoTranslator()
+_pl.stage_translate(_trevs, dict(_trprof, language="en"), translator=_tl_tr, verify=False)
+ok("1차 번역이 프로파일 언어 프롬프트를 쓴다",
+   bool(_tl_tr.systems) and all(s == _tl_system["en"] for s in _tl_tr.systems),
+   str([s[:40] for s in _tl_tr.systems]))
+_tl_tr = _EchoTranslator()
+_pl.stage_translate(_trevs, _trprof, translator=_tl_tr, verify=False)
+ok("한국어 프로파일은 그대로 한국어 프롬프트",
+   bool(_tl_tr.systems) and all(s == _tl_system["ko"] for s in _tl_tr.systems),
+   str([s[:40] for s in _tl_tr.systems]))
+
+# **`Path`는 모듈 수준 import다.** 전에는 `Glossary.merge_file` 안에만 있어서
+# `find_app`·`ensure_server`가 NameError로 죽었다 — `ensure_server`는 그걸 삼키고
+# Ollama를 이미 띄워 놓고도 "띄우지 못했습니다"라고 했다.
+import checker.translate as _tlmod  # noqa: E402
+import tempfile as _tl_tf  # noqa: E402
+
+_tl_dir = Path(_tl_tf.mkdtemp())
+_tl_exe = _tl_dir / "ollama.exe"
+_tl_exe.write_bytes(b"")
+_tl_saved = (_tlmod.OllamaCliTranslator.WINDOWS_PATHS, _tlmod._windows_user_paths,
+             _tlmod.server_running, _tlmod.subprocess.Popen, _tlmod.find_app)
+_tl_which = __import__("shutil").which
+_tl_popen = []
+_tl_msgs = []
+try:
+    __import__("shutil").which = lambda _n: None
+    _tlmod.OllamaCliTranslator.WINDOWS_PATHS = (str(_tl_exe),)
+    _tlmod._windows_user_paths = lambda _p: []
+    try:
+        _tl_found = _tlmod.find_app()
+    except NameError as _tl_exc:
+        _tl_found = repr(_tl_exc)
+    ok("find_app이 NameError 없이 경로를 찾는다", _tl_found == str(_tl_exe), str(_tl_found))
+    # `find_app`과 떼어서 `ensure_server` 자신의 `Path(exe).name`을 본다.
+    _tlmod.find_app = lambda: str(_tl_exe)
+    _tlmod.server_running = lambda timeout=1.5: False
+    _tlmod.subprocess.Popen = lambda *a, **k: _tl_popen.append(a)
+    _tl_ok = _tlmod.ensure_server(progress=_tl_msgs.append, wait_seconds=0)
+    ok("ensure_server가 띄운 뒤 실패로 알리지 않는다",
+       _tl_popen and not any("띄우지 못했습니다" in m for m in _tl_msgs)
+       and any("ollama.exe" in m for m in _tl_msgs), str(_tl_msgs))
+    ok("기다리지 않으면 준비됐다고 말하지 않는다", _tl_ok is False, str(_tl_ok))
+finally:
+    __import__("shutil").which = _tl_which
+    (_tlmod.OllamaCliTranslator.WINDOWS_PATHS, _tlmod._windows_user_paths,
+     _tlmod.server_running, _tlmod.subprocess.Popen, _tlmod.find_app) = _tl_saved
+    __import__("shutil").rmtree(_tl_dir, ignore_errors=True)
+
 # **회차는 인자다.** 전에는 `("2차","3차")[:passes-1]`이라 3차가 상한이었다.
 _later = _pl.stage_revise(_first.events, _trprof, translator=_tr,
                           source={1: "Find them", 2: "Before we fight"}, rounds=3)
@@ -4444,6 +4507,37 @@ with _tempfile.TemporaryDirectory() as _aktmp:
     ok("규칙 13(학습이 먼저)을 근거로 댄다", "규칙 13" in _akmsg)
     ok("캐시 폴더(_로 시작)는 정답지로 세지 않는다",
        all("_whisper_cache" not in str(k.path) for k in _akkeys))
+
+    # 학습·평가 누수 — 원장에 `learned_into`가 없으면 모른다, 있으면 짚는다.
+    ok("학습 기록이 없으면 누수를 말하지 않는다", "누수" not in _akmsg, _akmsg)
+    _akleak = _ak.learned_state(Path("넷플릭스_시험 작품/E03_한국어_SDH.srt"), status_file=_akstatus)
+    ok("원장에 있는 정답지인데 학습 기록이 없으면 빈 튜플(모른다)",
+       _akleak is not None and _akleak[0] == () and
+       _ak.leak_warning(_akleak[0], _akleak[1], "netflix/ko-sdh") is None, str(_akleak))
+    ok("이름이 같아도 다른 작품 폴더면 남의 기록을 가져오지 않는다",
+       _ak.learned_state(Path("넷플릭스_다른 작품/E03_한국어_SDH.srt"),
+                         status_file=_akstatus) is None)
+    ok("원장에 없는 정답지는 None",
+       _ak.learned_state(Path("없는정답.srt"), status_file=_akstatus) is None)
+
+    _akstatus.write_text(
+        _akstatus.read_text(encoding="utf-8")
+        + "            learned_into: [netflix/ko-sdh]\n", encoding="utf-8")
+    _akleak = _ak.learned_state(Path("넷플릭스_시험 작품/E03_한국어_SDH.srt"), status_file=_akstatus)
+    ok("원장의 learned_into를 읽는다", _akleak and _akleak[0] == ("netflix/ko-sdh",),
+       str(_akleak))
+    _aknote = _ak.leak_warning(_akleak[0], _akleak[1], "netflix/ko-sdh")
+    ok("같은 프로파일 학습값에 들어갔으면 누수로 경고한다",
+       _aknote and _aknote.startswith("경고") and "누수" in _aknote, str(_aknote))
+    _aknote = _ak.leak_warning(_akleak[0], _akleak[1], "disney/ko-sdh")
+    ok("다른 프로파일 학습값이면 경고가 아니라 참고로 말한다",
+       _aknote and _aknote.startswith("참고") and "무관" in _aknote, str(_aknote))
+    ok("learned_into를 문자열 하나로 적어도 받는다",
+       _ak._learned_refs({"learned_into": "disney/ko-sdh"}) == ("disney/ko-sdh",))
+    _akkeys, _akdone = _ak.find(_akvideo, truth_root=_akroot, status_file=_akstatus)
+    _akmsg = _ak.warning(_akkeys, _akdone)
+    ok("--generate 경고에도 학습값 누수를 함께 적는다",
+       "netflix/ko-sdh" in _akmsg and "누수" in _akmsg, _akmsg)
 
     # 같은 작품 다른 회차뿐일 때 — 있는 것을 없다고 하지도, 있다고 단정하지도 않는다.
     _ak2, _akdone2 = _ak.find(Path("시험 작품.E09.1080p.NF.WEB-DL.mkv"),
