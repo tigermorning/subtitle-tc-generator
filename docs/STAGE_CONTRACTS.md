@@ -23,7 +23,7 @@
 
 ## 흐름 한눈에
 
-    probe ─ find_speech ─ transcribe ─ 환각 문구 제거
+    probe ─ find_speech ─ transcribe ─ (세그먼트 의심되면 한 번 재전사) ─ 환각 문구 제거
         ├─ 대본 있음: align ─ _to_events
         └─ 대본 없음: collapse_internal_duplicates ─ compress_reaction_runs ─ merge_cues
     ─ (외국어 대사) ─ (문맥 확인) ─ (번역) ─ (감수·윤문)
@@ -38,6 +38,7 @@
 | 1 | 영상 정보 `media.probe` | 영상 경로 | fps(없으면 23.976), 길이 ms | ✔ |
 | 2 | 말소리 구간 `media.find_speech` | 영상, 방법 | 시간순 `(시작, 끝)` 목록 + 쓴 검출기 이름. **영상 끝까지 간다는 보장은 없다**(도중에 멎을 수 있음) | ✔ 뒤 단계가 `undetected_after`로 멎은 뒤를 따로 다룬다 |
 | 3 | 전사 `transcribe.transcribe` | 영상 | `Segment` 목록. `confidence`·`words`는 **faster-whisper일 때만** 있고 아니면 `None` | ✔ 쓰는 쪽(환각 의심, 재분할)이 `None`을 따로 처리한다 |
+| 3b | 세그먼트 부족 시 재전사 `generate()` (`checker/generate.py` ~347) | 3의 세그먼트, 말소리 구간 | 세그먼트 수가 말소리 구간의 90%(`SUSPECT_RATIO`)보다 뚜렷이 적으면 **한 번만** 다시 전사하고, 더 늘면 그 결과로 바꾼다. 캐시 사용 시(`transcript_cache`)는 재시도 안 함 | ✔ 실측이 5회뿐이라 판단 자체가 가설(`docs/whisper_retry_log.jsonl`에 계속 기록) |
 | 4 | 환각 문구 제거 `_is_known_hallucination` | 전사 조각 | 알려진 크레딧 문구만 지운다. 나머지는 지우지 않는다 | ✔ |
 | 5a | 대본 대조 `align.align` → `_to_events` | 전사 조각, 대본 줄 | 대본 순서 유지. **소리 못 찾은 대본 줄은 길이 0으로 남긴다**(= "소리 없음" 표식). 봐야 할 자리는 notes | ✔ 표식 번호를 `no_audio`로 들고 가 재분할 뒤 번호로 옮긴다(구멍 1, 고침) |
 | 5b | 묶기 `regroup` 3종 | 전사 조각 | 겹친 말 정리 → 반응 반복 압축 → 한 호흡 병합. 텍스트는 들은 것만 | ✔ |
@@ -62,7 +63,7 @@
 
 **고친 방법**: `generate()`가 대조 직후 표식 번호를 `no_audio`로 모으고, 재분할 뒤 번호로
 옮긴 다음, `settle_timecodes`가 표식을 빼고 스포팅·수렴을 돌린 뒤 번호순으로 되돌린다.
-`converge`는 안 고쳤다 — `--check`에서 사람이 만든 길이 0 자막을 늘리는 것은 정당한
+`converge`는 안 고쳤다 — 검사 경로에서 사람이 만든 길이 0 자막을 늘리는 것은 정당한
 교정이라서다. 되돌릴 때 표식 시각은 **정리된 이웃**에 다시 붙인다(가운데는 다음 대사
 인점, 맨 뒤는 마지막 대사 아웃점 — `align`이 처음 붙인 기준과 같다). 옛 시각을 두면
 스포팅이 다음 대사 인점을 당겼을 때 번호순과 시간순이 어긋난다(리뷰에서 지적).

@@ -105,7 +105,7 @@ BridgeGaps / DialogHyphenSpace / EllipsesNotThreeDots / Glyph / Italics / MaxCps
 | SDH 아동 CPS | 규정값 | 일치 ✓ |
 | 한 줄 최대 글자 수 | 규정값 | 일치 ✓ |
 
-네 값 모두 비공개 규정 프로파일(`rules/private/netflix/`)에 있다.
+이 표의 값 모두 비공개 규정 프로파일(`rules/private/netflix/`)에 있다.
 
 `NetflixCheckMaxLineLength`는 `ko`일 때 `CalcCjk`로 세도록 분기까지 돼 있다.
 
@@ -171,4 +171,4 @@ SE의 자동화는 **"기능 단위 수동 실행"**이다. 사용자가 메뉴�
 - NuGet: https://www.nuget.org/packages/libse (5.1.0, 2026-07-29)
 - CLI(별도, LGPL-3.0): https://github.com/SubtitleEdit/subtitleedit-cli
 - 로컬 클론: `/mnt/c/Users/user/Documents/subtitleedit-src`
-- 관련 문서: `SUBTITLE_GUIDE_SDH.md`, `SUBTITLE_GUIDE_TRANSLATION.md`
+- 관련 문서: `rules/private/sources/SUBTITLE_GUIDE_SDH.md`, `rules/private/sources/SUBTITLE_GUIDE_TRANSLATION.md`
