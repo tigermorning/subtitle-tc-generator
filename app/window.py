@@ -383,7 +383,7 @@ class MainWindow(QMainWindow):
         """지적 목록. **두 번 누르면 그 자막으로 간다** — 목록과 영상이 이어져야
         사람이 확인할 수 있다."""
         self.results = QTableWidget(0, 3)
-        # **규칙 번호가 아니라 무엇을 보는 검사인지 보인다**(`app/labels.py` 첫머리).
+        # **규칙 번호가 아니라 무엇을 보는 검사인지 보인다**(`checker/labels.py` 첫머리).
         self.results.setHorizontalHeaderLabels(["자막", "검사", "내용"])
         self.results.horizontalHeader().setStretchLastSection(True)
         self.results.setColumnWidth(0, 60)
@@ -397,7 +397,7 @@ class MainWindow(QMainWindow):
         self.results_dock = dock
 
     def _show_violations(self, violations) -> None:
-        from .labels import check_detail, check_label, check_tooltip
+        from checker.labels import check_detail, check_label, check_tooltip
 
         self.results.setRowCount(len(violations))
         for row, violation in enumerate(violations):

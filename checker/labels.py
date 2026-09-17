@@ -7,7 +7,8 @@
 
 번호는 버리지 않는다. 도구설명에 남겨 두면 개발자가 어느 규칙인지 찾을 수 있다.
 
-**화면에서 떼어 놓는다.** Qt를 모르는 함수라 PySide6 없이도 시험한다.
+**화면에서 떼어 놓는다.** Qt를 모르는 함수라 PySide6 없이도 시험하고, 화면 밖
+출력(확인용 SRT, `writers.to_review_srt`)도 같은 이름을 쓴다.
 """
 
 from __future__ import annotations

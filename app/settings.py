@@ -150,10 +150,11 @@ class SettingsDialog(QDialog):
         page = QWidget()
         layout = QVBoxLayout(page)
         rules = self.profile.get("rules") or []
-        table = QTableWidget(len(rules), 3)
-        table.setHorizontalHeaderLabels(["씀", "번호", "무엇을 보는가"])
+        # **규칙 번호 칸은 두지 않는다**(사용자 결정 2026-09-17) — 작업자는 번호를
+        # 모른다. 켜고 끄는 값은 여전히 번호로 저장되고, 번호는 도구설명에 남는다.
+        table = QTableWidget(len(rules), 2)
+        table.setHorizontalHeaderLabels(["씀", "무엇을 보는가"])
         table.setColumnWidth(0, 40)
-        table.setColumnWidth(1, 70)
         table.horizontalHeader().setStretchLastSection(True)
 
         self.rule_checks = {}
@@ -166,9 +167,9 @@ class SettingsDialog(QDialog):
             box.setAlignment(Qt.AlignCenter)
             box.setContentsMargins(0, 0, 0, 0)
             table.setCellWidget(row, 0, holder)
-            table.setItem(row, 1, QTableWidgetItem(rule["id"]))
-            table.setItem(row, 2, QTableWidgetItem(
-                f"{rule.get('clause', '')} — {rule.get('message', '')}"))
+            what = QTableWidgetItem(f"{rule.get('clause', '')} — {rule.get('message', '')}")
+            what.setToolTip(rule["id"])
+            table.setItem(row, 1, what)
             self.rule_checks[rule["id"]] = check
         layout.addWidget(table)
         return page
