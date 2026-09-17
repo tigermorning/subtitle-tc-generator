@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+import bisect
 import json
 import re
 from dataclasses import dataclass, field
@@ -195,6 +196,202 @@ def summarize(comparison: Comparison, fps: float = 23.976,
     }
 
 
+SPLIT_KINDS = ("one_to_one", "ours_split", "ours_merged", "tangled", "missing", "extra")
+SPLIT_LABELS = {
+    "one_to_one": "1:1",
+    "ours_split": "우리가 쪼갬(정답 1 : 우리 2+)",
+    "ours_merged": "우리가 합침(정답 2+ : 우리 1)",
+    "tangled": "뒤엉킴(정답 2+ : 우리 2+)",
+    "missing": "빠뜨림(절반 이상 덮은 우리 자막 없음)",
+    "extra": "군더더기(절반 이상 겹친 정답 없음)",
+}
+# 두 자막이 "같은 자리"라고 보는 겹침. 짧은 쪽 길이의 절반 이상이 겹쳐야 한다.
+# 절대값(ms)으로 두면 앞뒤로 조금 번진 것(80ms)까지 이어져 1:1이 전부 뒤엉킴이 된다.
+STRUCTURE_MIN_OVERLAP_SHARE = 0.5
+
+
+def _overlaps(a: Event, b: Event, share: float) -> bool:
+    shared = min(a.end_ms, b.end_ms) - max(a.start_ms, b.start_ms)
+    if shared <= 0:
+        return False
+    shorter = min(a.end_ms - a.start_ms, b.end_ms - b.start_ms)
+    return shorter > 0 and shared >= share * shorter
+
+
+def structure(ours: list[Event], truth: list[Event], fps: float = 23.976,
+              share: float = STRUCTURE_MIN_OVERLAP_SHARE, examples: int = 5) -> dict:
+    """분할 구조를 **텍스트 없이** 시간 겹침만으로 나눈다.
+
+    `compare()`는 1:1로만 짝지어서, 우리 자막 하나가 정답 둘을 덮으면 하나만 짝이
+    되고 나머지는 "빠뜨림"으로 센다 — 쪼갬·합침이 빠뜨림·군더더기로 둔해진다.
+    여기서는 겹치는 자막끼리 묶음(연결 요소)을 만들어 모양으로 가른다.
+
+        1:1        정답 1 : 우리 1
+        우리가 쪼갬  정답 1 : 우리 2+
+        우리가 합침  정답 2+ : 우리 1
+        뒤엉킴      정답 2+ : 우리 2+
+        빠뜨림      정답만 있음
+        군더더기    우리만 있음
+
+    **정답 자막과 우리 자막을 각각 100%로 센다.** 한 묶음이 정답 1개·우리 3개면 정답
+    쪽에서는 1개, 우리 쪽에서는 3개가 "쪼갬"이다 — 한쪽 기준 하나로만 내면 두 비율이
+    더해서 100%가 안 되는 표가 나온다(2026-09-13 일회성 분석이 그랬다).
+
+    1:1 묶음은 인점·아웃점을 **이르다 / 맞다(1프레임 안) / 늦다**로 나눈다.
+
+    **어느 쪽이 위험한지 판정하지 않는다**(규칙 4). 쪼갬과 합침, 이름과 늦음 중 무엇이
+    납품에 더 해로운지는 사람이 정한다 — 이 함수는 섞이지 않게 나눠 줄 뿐이다.
+    """
+    frame = 1000.0 / fps
+    # 길이 0 자막은 뺀다 — 소리를 못 찾은 대본 줄을 지우지 않고 길이 0으로 남기므로
+    # (규칙 3) 초안에 흔하다. 자리를 차지하지 않으니 쪼갬·군더더기로 세면 거짓이 된다.
+    zero = {"ours": sum(1 for e in ours if e.end_ms <= e.start_ms),
+            "truth": sum(1 for e in truth if e.end_ms <= e.start_ms)}
+    ours = [e for e in ours if e.end_ms > e.start_ms]
+    truth = [e for e in truth if e.end_ms > e.start_ms]
+    nodes = [("o", i) for i in range(len(ours))] + [("t", j) for j in range(len(truth))]
+    parent = {n: n for n in nodes}
+
+    def find(n):
+        while parent[n] != n:
+            parent[n] = parent[parent[n]]
+            n = parent[n]
+        return n
+
+    ordered_truth = sorted(range(len(truth)), key=lambda j: truth[j].start_ms)
+    starts = [truth[j].start_ms for j in ordered_truth]
+    for i, o in enumerate(ours):
+        # 정답은 인점 순으로 정렬해 두고, 우리 자막 끝보다 늦게 시작하는 것에서 멈춘다.
+        hi = bisect.bisect_right(starts, o.end_ms)
+        for k in range(hi - 1, -1, -1):
+            t = truth[ordered_truth[k]]
+            if o.start_ms - t.start_ms > 60_000:
+                break           # 1분 넘게 앞서 시작한 자막은 더 볼 필요가 없다
+            if _overlaps(o, t, share):
+                parent[find(("o", i))] = find(("t", ordered_truth[k]))
+
+    groups: dict = {}
+    for n in nodes:
+        groups.setdefault(find(n), []).append(n)
+
+    counts = {k: {"truth": 0, "ours": 0, "groups": 0} for k in SPLIT_KINDS}
+    samples = {k: [] for k in SPLIT_KINDS}
+    ours_sorted = sorted(ours, key=lambda e: e.start_ms)
+    ours_starts = [e.start_ms for e in ours_sorted]
+    partial = 0
+    in_dir = {"early": 0, "ok": 0, "late": 0}
+    out_dir = {"early": 0, "ok": 0, "late": 0}
+
+    def direction(diff: int) -> str:
+        if abs(diff) <= frame:
+            return "ok"
+        return "late" if diff > 0 else "early"
+
+    for members in groups.values():
+        o_idx = sorted(i for side, i in members if side == "o")
+        t_idx = sorted(j for side, j in members if side == "t")
+        no, nt = len(o_idx), len(t_idx)
+        if nt == 0:
+            kind = "extra"
+        elif no == 0:
+            kind = "missing"
+        elif no == 1 and nt == 1:
+            kind = "one_to_one"
+            o, t = ours[o_idx[0]], truth[t_idx[0]]
+            in_dir[direction(o.start_ms - t.start_ms)] += 1
+            out_dir[direction(o.end_ms - t.end_ms)] += 1
+        elif nt == 1:
+            kind = "ours_split"
+        elif no == 1:
+            kind = "ours_merged"
+        else:
+            kind = "tangled"
+        if kind == "missing":
+            # 절반 이상은 아니어도 조금이라도 걸친 우리 자막이 있는가 — "아예 못 덮음"과
+            # "어긋나게 덮음"은 원인이 다르다(전사 공백 vs 경계 위치).
+            t = truth[t_idx[0]]
+            lo = bisect.bisect_left(ours_starts, t.start_ms - 60_000)
+            hi = bisect.bisect_left(ours_starts, t.end_ms)
+            if any(_overlaps(ours_sorted[k], t, 0.0) for k in range(lo, hi)):
+                partial += 1
+        counts[kind]["truth"] += nt
+        counts[kind]["ours"] += no
+        counts[kind]["groups"] += 1
+        if kind != "one_to_one" and len(samples[kind]) < examples:
+            anchor = truth[t_idx[0]] if t_idx else ours[o_idx[0]]
+            samples[kind].append({
+                "start_ms": anchor.start_ms,
+                "truth": [truth[j].text.replace("\n", " / ") for j in t_idx],
+                "ours": [ours[i].text.replace("\n", " / ") for i in o_idx]})
+
+    for k in SPLIT_KINDS:
+        samples[k].sort(key=lambda s: s["start_ms"])
+
+    def pct(n, total):
+        return round(100 * n / total, 1) if total else 0.0
+
+    return {
+        "overlap_share": share,
+        "totals": {"truth": len(truth), "ours": len(ours)},
+        "zero_length_excluded": zero,
+        "kinds": {k: dict(counts[k], truth_pct=pct(counts[k]["truth"], len(truth)),
+                          ours_pct=pct(counts[k]["ours"], len(ours)))
+                  for k in SPLIT_KINDS},
+        "missing_partially_covered": partial,
+        "one_to_one_in": in_dir,
+        "one_to_one_out": out_dir,
+        "examples": samples,
+    }
+
+
+def structure_of(comparison: Comparison, fps: float = 23.976) -> dict:
+    """`compare()` 결과에 든 자막으로 `structure()`를 부른다(짝짓기와 무관하게 다시 묶는다)."""
+    ours = sorted({id(p.ours): p.ours for p in comparison.pairs if p.ours}.values(),
+                  key=lambda e: e.start_ms)
+    truth = sorted({id(p.truth): p.truth for p in comparison.pairs if p.truth}.values(),
+                   key=lambda e: e.start_ms)
+    return structure(ours, truth, fps)
+
+
+def structure_report(data: dict, show: int = 3) -> str:
+    """`structure()` 결과를 사람이 읽는 표로."""
+    totals = data["totals"]
+    lines = [f"분할 구조 (시간 겹침만으로 묶음, 텍스트 안 봄 — 짧은 쪽의 "
+             f"{int(data['overlap_share'] * 100)}% 이상 겹치면 같은 자리)"]
+    for k in SPLIT_KINDS:
+        c = data["kinds"][k]
+        parts = []
+        if k != "extra":
+            parts.append(f"정답 {c['truth']}개({c['truth_pct']}%)")
+        if k != "missing":
+            parts.append(f"우리 {c['ours']}개({c['ours_pct']}%)")
+        lines.append(f"  {SPLIT_LABELS[k]}: {' / '.join(parts)}")
+    if data["kinds"]["missing"]["truth"]:
+        lines.append(f"    └ 빠뜨림 중 우리 자막이 조금이라도 걸친 것 "
+                     f"{data['missing_partially_covered']}개, 아예 안 덮은 것 "
+                     f"{data['kinds']['missing']['truth'] - data['missing_partially_covered']}개")
+    zero = data.get("zero_length_excluded") or {}
+    skipped = (f", 길이 0 자막 제외 — 정답 {zero.get('truth', 0)}개 / 우리 {zero.get('ours', 0)}개"
+               if zero.get("truth") or zero.get("ours") else "")
+    lines.append(f"  (합계: 정답 {totals['truth']}개 / 우리 {totals['ours']}개{skipped})")
+    n = data["kinds"]["one_to_one"]["groups"]
+    if n:
+        for label, key in (("인점", "one_to_one_in"), ("아웃점", "one_to_one_out")):
+            d = data[key]
+            lines.append(f"  1:1 {label}  이르다 {d['early']}({100 * d['early'] // n}%) / "
+                         f"1프레임 안 {d['ok']}({100 * d['ok'] // n}%) / "
+                         f"늦다 {d['late']}({100 * d['late'] // n}%)")
+    lines.append("  어느 쪽이 더 해로운지는 판정하지 않습니다 — 섞이지 않게 나눠 보여 줄 뿐입니다.")
+    for k in ("ours_split", "ours_merged", "tangled"):
+        for s in data["examples"][k][:show]:
+            ms = s["start_ms"]
+            tc = f"{ms // 3_600_000:02d}:{ms // 60_000 % 60:02d}:{ms // 1000 % 60:02d}"
+            lines.append(f"  예) {SPLIT_LABELS[k].split('(')[0]} {tc}  "
+                         f"정답 {' | '.join(x[:20] for x in s['truth'])}  "
+                         f"↔ 우리 {' | '.join(x[:20] for x in s['ours'])}")
+    return "\n".join(lines)
+
+
 def genuine_pairs(comparison: Comparison, min_similarity: float = 0.5,
                    min_chars_for_partial: int = 20) -> list[Pair]:
     """시간이 가깝다고 짝지어진 것 중 **내용도 진짜 같은** 짝만 남긴다.
@@ -268,6 +465,12 @@ def report(comparison: Comparison, fps: float = 23.976, show: int = 12,
             f" / 100ms 안 {data['within_100ms']}개({data['within_100ms'] * 100 // max(data['count'], 1)}%)"
             f" / 최악 {data['worst']:+}ms")
 
+    # 1:1 짝짓기는 쪼갬·합침을 빠뜨림·군더더기로 뭉갠다. 모양을 따로 낸다.
+    if comparison.pairs:
+        lines.append("")
+        lines.append(structure_report(structure_of(comparison, fps)))
+        lines.append("")
+
     duration = stats["duration_ms"]
     if duration["ours_median"] is not None:
         lines.append(f"표시 시간  우리 {duration['ours_median']}ms / 정답 {duration['truth_median']}ms")
@@ -334,6 +537,7 @@ def save(comparison: Comparison, path: Path, fps: float = 23.976,
         "note": note,
         "fps": fps,
         "summary": summarize(comparison, fps, char_weights),
+        "structure": structure_of(comparison, fps),
         "pairs": [
             {"truth_index": p.truth.index if p.truth else None,
              "ours_index": p.ours.index if p.ours else None,
