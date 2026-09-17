@@ -1314,6 +1314,38 @@ ok("소리를 못 찾은 스크립트 줄을 지우지 않는다", len(_events) 
 ok("소리 없는 줄은 길이 0으로 남는다", _events[1].start_ms == _events[1].end_ms)
 ok("그 자리를 봐야 할 곳으로 표시한다", any(i == 2 for i, _ in _notes))
 
+# **대조가 남긴 길이 0 표식이 스포팅·수렴을 지나도 살아남는가**(docs/STAGE_CONTRACTS.md
+# 구멍 1). 위 시험은 `_to_events` 출력만 봤다 — 뒤 단계가 그 약속을 모른 채 맨 뒤
+# 표식을 867ms짜리 자막으로 늘리던 것을 못 잡았다. 이음매를 가로질러 본다.
+from checker.generate import settle_timecodes  # noqa: E402
+
+def _marker_run(no_audio_on: bool):
+    cues = align([Segment(0, 1000, "hello there"), Segment(1500, 2500, "how are you")],
+                 ["Hello there.", "Where have you been?", "How are you?", "Goodbye."])
+    events = _to_events(cues, [])
+    markers = {e.index for e in events if e.start_ms == e.end_ms}
+    limits = TimingLimits(min_duration_ms=833, max_duration_ms=7000, min_gap_ms=83, max_cps=15)
+    result, _moved = settle_timecodes(events, [(50, 950), (1200, 2400)], 23.976, "vad", limits,
+                                      no_audio=markers if no_audio_on else None)
+    return markers, {e.index: (e.start_ms, e.end_ms) for e in result.events}, result.events
+
+_markers, _times, _settled = _marker_run(True)
+ok("대조 결과에 소리 없음 표식이 둘 있다(가운데·맨 뒤)", _markers == {2, 4})
+ok("스포팅·수렴 뒤에도 가운데 표식은 길이 0, 다음 대사 인점에 붙는다",
+   _times[2] == (_times[3][0], _times[3][0]))
+ok("스포팅·수렴 뒤에도 맨 뒤 표식은 길이 0, 마지막 대사 아웃점에 붙는다",
+   _times[4] == (_times[3][1], _times[3][1]))
+ok("표식을 되돌린 뒤 대본 순서(번호순)다", [e.index for e in _settled] == [1, 2, 3, 4])
+# 번호순이 시간순이기도 해야 한다 — 스포팅이 #3 인점을 당겼는데 표식이 옛 시각(1500)에
+# 남으면 #2가 #3보다 늦게 시작하는 SRT가 나온다.
+ok("번호순이 곧 시간순이다", all(a.start_ms <= b.start_ms for a, b in zip(_settled, _settled[1:])))
+ok("(시험 전제) 스포팅이 #3 인점을 표식보다 앞으로 당겼다", _times[3][0] < 1500)
+ok("진짜 자막은 여전히 수렴한다", _times[1][1] - _times[1][0] >= 833
+   and _times[3][1] - _times[3][0] >= 833)
+# 이 시험이 구멍을 실제로 잡는지 — 표식을 안 빼면 맨 뒤 표식이 늘어난다.
+_, _times_off, _ = _marker_run(False)
+ok("(대조군) 표식을 안 빼면 수렴이 맨 뒤 표식을 늘린다", _times_off[4][1] > _times_off[4][0])
+
 _draft = Draft([Event(1, 0, 1000, "가"), Event(2, 1000, 2000, "나")],
                notes=[(2, "스크립트에 없는 대사입니다")])
 _out = notes_srt(_draft)
@@ -1328,6 +1360,116 @@ ok("자막 수만큼 노트를 낸다", _out.count("-->") == 2)
 _merged = merge_notes([(1, "align 노트"), (2, "sfx 노트")], [(1, "규정 위반")])
 ok("겹치는 번호는 이어 붙인다", dict(_merged)[1] == "align 노트 / 규정 위반")
 ok("안 겹치는 번호는 그대로 남는다", dict(_merged)[2] == "sfx 노트")
+
+# **환각 의심 자막이 notes에 남는가 — generate()를 끝까지 돌려 본다**(docs/STAGE_CONTRACTS.md
+# 구멍 4). 전에는 콘솔에 20곳까지만 찍고 notes에는 안 넣었다. 영상 읽기·말소리·전사만
+# 가짜로 바꾸고 나머지 단계는 진짜로 돈다 — 검사가 notes까지 가는 이음매를 보려는 것이다.
+import checker.generate as _gen_mod  # noqa: E402
+import checker.paths as _paths_mod  # noqa: E402
+import checker.transcribe as _tr_mod  # noqa: E402
+from checker.generate import hallucination_suspects  # noqa: E402
+from types import SimpleNamespace as _NS  # noqa: E402
+
+_sus_segs = [Segment(0, 3000, "잡음", confidence=-0.8),
+             Segment(4000, 5000, "또렷하게 말한 대사입니다", confidence=-0.1)]
+_sus, _basis = hallucination_suspects([Event(1, 0, 3000, "잡음"), Event(2, 4000, 5000, "또렷하게 말한 대사입니다")],
+                                      _sus_segs, {})
+ok("신뢰도 낮고 글자가 성긴 자막만 환각 의심이다", [e.index for e in _sus] == [1])
+ok("신뢰도가 있으면 근거에 그렇게 적는다", "신뢰도" in _basis)
+
+_N = 25
+_fake_segs = [Segment(i * 5000, i * 5000 + 3000, f"잡음 {i}", confidence=-0.8) for i in range(_N)]
+# 마지막 조각만 VAD 밖에 둔다 — 환각 의심과 VAD 노트가 같은 번호에 겹치게.
+_fake_speech = [(s.start_ms, s.end_ms) for s in _fake_segs[:-1]]
+_saved = (_gen_mod.probe, _gen_mod.find_speech, _tr_mod.transcribe, _paths_mod.user_data)
+with _tf3.TemporaryDirectory() as _d:
+    try:
+        _gen_mod.probe = lambda _v: _NS(fps=23.976, duration_ms=_N * 5000)
+        _gen_mod.find_speech = lambda *_a, **_k: (list(_fake_speech), "vad")
+        _tr_mod.transcribe = lambda *_a, **_k: list(_fake_segs)
+        _paths_mod.user_data = lambda: Path(_d)
+        _draft = _gen_mod.generate(Path(_d) / "fake.mkv",
+                                   {"kind": "sdh", "language": "ko",
+                                    "limits": {"chars_per_line": 16, "max_lines": 2,
+                                               "duration_ms": {"min": 833, "max": 7000}}},
+                                   transcript_cache=Path(_d) / "cache.json")
+    finally:
+        _gen_mod.probe, _gen_mod.find_speech, _tr_mod.transcribe, _paths_mod.user_data = _saved
+_by = dict(_draft.notes)
+ok("(시험 전제) 조각마다 자막 하나", len(_draft.events) == _N)
+ok("콘솔 20곳을 넘는 환각 의심도 전부 notes에 남는다",
+   sum(1 for t in _by.values() if "환각 의심" in t) == _N, str(len(_by)))
+ok("같은 번호에 VAD 노트가 겹쳐도 둘 다 남는다",
+   "환각 의심" in _by.get(_N, "") and "VAD" in _by.get(_N, ""), _by.get(_N))
+ok("notes에 같은 번호가 두 번 나오지 않는다", len(_draft.notes) == len(_by))
+
+# **감수 내역의 번호가 최종 자막 번호를 가리키는가**(docs/STAGE_CONTRACTS.md 구멍 3).
+# 감수는 재분할 전에 돈다 — 전에는 그때 번호가 리포트에 그대로 나가, 그 번호로 최종
+# SRT를 찾으면 다른 자막이 나왔다.
+from checker.revise import Revision, renumber, report as _rev_report  # noqa: E402
+
+_rn = renumber([Revision(1, "a", "b", "2차"), Revision(2, "c", "d", "2차")], {1: [1, 2], 2: [3]})
+ok("나뉜 자막의 감수 내역은 조각 번호를 다 가진다", _rn[0].indices == (1, 2) and _rn[0].index == 1)
+ok("뒤 자막의 감수 내역은 밀린 번호로 간다", _rn[1].index == 3)
+ok("리포트는 최종 번호로 적는다", "#1·2" in _rev_report(_rn) and "#3" in _rev_report(_rn))
+_rn2 = renumber(_rn, {1: [1], 2: [3], 3: [4]})
+ok("두 번 옮겨도 이어서 옮긴다(재분할 뒤 캡션 합치기)", _rn2[0].indices == (1, 3) and _rn2[1].index == 4)
+ok("옮길 곳이 없는 번호는 그대로 둔다", renumber([Revision(9, "a", "b", "2차")], {1: [2]})[0].index == 9)
+
+# CLI가 캡션 합치기 뒤에 쓰는 방식 그대로 — 대사 자막 객체로 옛 번호를 기억한다.
+_dlg = [Event(1, 0, 1000, "첫 대사"), Event(2, 5000, 6000, "둘째 대사")]
+_before_merge = {id(e): e.index for e in _dlg}
+_cap = captions_to_events([OcrCaption(start_ms=2000, end_ms=3000, text="간판", confidence=0.9)],
+                          start_index=3)
+_merged_events, _ = merge_captions(_dlg, [], _cap, {3: 0.9}, "bracket")
+_rn3 = renumber([Revision(2, "둘째", "둘째 대사", "2차")],
+                {_before_merge[id(e)]: [e.index] for e in _merged_events if id(e) in _before_merge})
+ok("캡션이 끼어든 뒤 감수 내역이 같은 대사를 가리킨다",
+   next(e.text for e in _merged_events if e.index == _rn3[0].index) == "둘째 대사")
+
+# generate()를 끝까지 — 번역·감수만 가짜로 바꾸고, 감수가 늘린 자막을 재분할이 나누게 한다.
+import checker.pipeline as _pipe_mod  # noqa: E402
+import checker.translate as _trans_mod  # noqa: E402
+
+_LONG = "첫 번째 문장은 꽤 길게 늘어났습니다. 두 번째 문장도 이어서 붙었습니다."
+_rev_segs = [Segment(0, 6000, "one", confidence=-0.1), Segment(8000, 9000, "two", confidence=-0.1)]
+
+def _fake_revise(events, profile, **_k):
+    out = [Event(e.index, e.start_ms, e.end_ms, _LONG if e.index == 1 else "두 번째 자막")
+           for e in events]
+    return _pipe_mod.StageResult(events=out, extra={
+        "revisions": [Revision(1, events[0].text, _LONG, "2차"),
+                      Revision(2, events[1].text, "두 번째 자막", "2차")],
+        "rounds": [], "stopped_because": ""})
+
+_saved = (_gen_mod.probe, _gen_mod.find_speech, _tr_mod.transcribe, _paths_mod.user_data,
+          _trans_mod.translate_events, _trans_mod.to_events, _pipe_mod.stage_revise)
+with _tf3.TemporaryDirectory() as _d:
+    try:
+        _gen_mod.probe = lambda _v: _NS(fps=23.976, duration_ms=10000)
+        _gen_mod.find_speech = lambda *_a, **_k: ([(0, 6000), (8000, 9000)], "vad")
+        _tr_mod.transcribe = lambda *_a, **_k: list(_rev_segs)
+        _paths_mod.user_data = lambda: Path(_d)
+        _trans_mod.translate_events = lambda events, *_a, **_k: []
+        _trans_mod.to_events = lambda _cues, events: [Event(e.index, e.start_ms, e.end_ms, "번역")
+                                                      for e in events]
+        _pipe_mod.stage_revise = _fake_revise
+        _rdraft = _gen_mod.generate(Path(_d) / "fake.mkv",
+                                    {"kind": "translation", "language": "ko",
+                                     "limits": {"chars_per_line": 16, "max_lines": 2,
+                                                "duration_ms": {"min": 833, "max": 7000}}},
+                                    translator=object(), passes=2,
+                                    transcript_cache=Path(_d) / "cache.json")
+    finally:
+        (_gen_mod.probe, _gen_mod.find_speech, _tr_mod.transcribe, _paths_mod.user_data,
+         _trans_mod.translate_events, _trans_mod.to_events, _pipe_mod.stage_revise) = _saved
+_rtext = {e.index: e.text for e in _rdraft.events}
+_r1, _r2 = _rdraft.revisions
+ok("(시험 전제) 감수가 늘린 자막을 재분할이 나눴다", len(_rdraft.events) == 3, str(_rtext))
+ok("나뉜 자막의 감수 내역이 그 조각들을 가리킨다",
+   " ".join(_rtext[i] for i in _r1.indices).replace("\n", " ") == _LONG, str((_r1.indices, _rtext)))
+ok("뒤 자막의 감수 내역이 밀린 번호를 가리킨다", _rtext.get(_r2.index) == "두 번째 자막",
+   str((_r2.index, _rtext)))
 ok("순서가 안 섞인다(1번이 먼저)", [i for i, _ in _merged] == [1, 2])
 ok("빈 추가 목록이면 원본과 같다",
    merge_notes([(3, "그대로")], []) == [(3, "그대로")])

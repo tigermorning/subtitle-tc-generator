@@ -25,9 +25,11 @@
 
 ### 자막 초벌 생성 (`--generate`)
 
-- 영상 → ffmpeg 내장 whisper 전사 → (스크립트 있으면 대조) → 의미 단위 재분할
-  → Silero VAD(없으면 음량) 기반 스포팅 제안 → 규정 자동 교정 → 검사까지 한 번에
-- 화자명은 스크립트 없이는 못 넣는다(whisper가 화자 분리를 못 함 — 정직하게 표시)
+- 영상 → whisper 전사(faster-whisper 우선, 없으면 ffmpeg 내장 whisper) → (스크립트
+  있으면 대조) → 의미 단위 재분할 → Silero VAD(없으면 음량) 기반 스포팅 제안 →
+  규정 자동 교정 → 검사까지 한 번에
+- 화자명은 스크립트 없이는 못 넣는다(`--diarize`로 화자를 나눌 수는 있지만 번호만
+  나오고 이름까지는 못 채운다 — 정직하게 표시)
 - 번역은 `--translate`로 로컬 Ollama 다차 검수(1차 정확도 → 2차 용어·맥락 →
   3차 윤문·글자 수), 드리프트 가드·역번역 검증 포함
 
@@ -48,7 +50,7 @@
 
 - `tools/corpus_build.py`로 시판·방영 영상의 정답 자막 트랙에서 통계(글자 수·CPS·
   듀레이션·간격 분포)를 추출
-- 2026-08-26 기준 10개 발주처 버킷(netflix·disney·coupang·amazon·appletv·hbo·
+- 11개 발주처 버킷(netflix·disney·coupang·amazon·appletv·hbo·itv·
   viki·viu·bluray·unknown) 아래 학습값 존재 — `platform: unknown`은 발주처를
   특정 못 한 자료(예: 다발매 PVOD 영화)를 위한 임시 버킷
 - **공식 규정 파일(`rules/<platform>/`)을 절대 건드리지 않는다** — 학습값은
@@ -69,7 +71,9 @@
   `netflix/en-translation`(28.0)·`disney/ko-translation`(17.0)·
   `coupang/ko-sdh`(11.0). 기존 항목을 함께 다시 재서 적힌 값과 전부
   일치함을 확인했다(`tools/learned_chars_per_cue.py`)
-- **아직 안 쓰는 곳**: `--check`의 판정, 스포팅 듀레이션 선택. 프로파일이 없는
+- **스포팅 듀레이션 선택도 쓴다(`ccb4213`).** `load_learned_short_cue_floor`가
+  짧은 자막의 실무 바닥값을 읽어 생성 경로(`generate.py`)의 스포팅에 반영한다
+- **아직 안 쓰는 곳**: `--check`의 판정. 프로파일이 없는
   발주처(amazon·bluray 등)의 학습값도 소비되지 않는다 — 그 조합은 애초에
   `--generate`가 못 도는 조합이다
 
