@@ -404,7 +404,8 @@ class MainWindow(QMainWindow):
             self.results.setItem(row, 0, QTableWidgetItem(str(violation["event_index"])))
             label = QTableWidgetItem(check_label(violation))
             # 번호는 화면에 내지 않고 도구설명·숨은 값으로만 남긴다 — 개발자가 찾을 수 있게.
-            label.setToolTip(check_tooltip(violation))
+            # 문구가 길면 칸에서 잘린다 — 전체 문구를 함께 띄운다.
+            label.setToolTip(check_label(violation) + "\n" + check_tooltip(violation))
             label.setData(Qt.UserRole, violation.get("rule_id"))
             self.results.setItem(row, 1, label)
             detail = QTableWidgetItem(check_detail(violation)[:120])

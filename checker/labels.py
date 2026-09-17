@@ -42,9 +42,13 @@ def check_name(violation: dict) -> str:
 
 
 def check_label(violation: dict) -> str:
-    """검사 결과 표의 `검사` 칸. 예: `번역 자막은 마침표를 쓰지 않고… · 자동`."""
+    """검사 결과 표의 `검사` 칸. 예: `자동 · 번역 자막은 마침표를 쓰지 않고…`.
+
+    **자동/확인을 앞에 둔다.** 규칙 문구는 길어서 칸 끝에서 잘린다 — 뒤에 붙이면
+    사람이 고쳐야 하는지 알려 주는 표시가 먼저 사라진다(실제 창에서 확인 2026-09-17).
+    """
     mark = "자동" if violation.get("auto_fixable") else "확인"
-    return f"{check_name(violation)} · {mark}"
+    return f"{mark} · {check_name(violation)}"
 
 
 def check_detail(violation: dict) -> str:

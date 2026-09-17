@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
     QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget)
 
 from checker import load_profile
+from checker.checks import render_message
 from checker.profile import available_profiles, user_root
 
 # 사람이 자주 고치는 값들. (프로파일 경로, 이름, 최소, 최대)
@@ -167,7 +168,9 @@ class SettingsDialog(QDialog):
             box.setAlignment(Qt.AlignCenter)
             box.setContentsMargins(0, 0, 0, 0)
             table.setCellWidget(row, 0, holder)
-            what = QTableWidgetItem(f"{rule.get('clause', '')} — {rule.get('message', '')}")
+            # 자리표시자를 채워서 보인다 — `{max_lines}`는 작업자가 읽을 수 있는 말이 아니다.
+            message = render_message(rule.get("message", ""), self.profile)
+            what = QTableWidgetItem(f"{rule.get('clause', '')} — {message}")
             what.setToolTip(rule["id"])
             table.setItem(row, 1, what)
             self.rule_checks[rule["id"]] = check

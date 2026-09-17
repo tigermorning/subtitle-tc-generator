@@ -2508,6 +2508,9 @@ else:
        _rules_table.item(0, 1).toolTip() == _first_id
        and _first_id not in _rules_table.item(0, 1).text())
     ok("규칙 켜고 끄기는 여전히 번호로 잡는다", _first_id in _dlg.rule_checks)
+    _texts = [_rules_table.item(r, 1).text() for r in range(_rules_table.rowCount())]
+    ok("규칙 표에 채우지 않은 자리표시자가 없다",
+       not any("{max_lines}" in t or "{chars_per_line}" in t for t in _texts))
     _dlg.close()
 
 
@@ -2706,15 +2709,15 @@ _v = check_events([{"index": 1, "start_ms": 0, "end_ms": 3000,
 _v = [x for x in _v if x["rule_id"] == "S05"][0]
 ok("검사 이름에 규칙 문구가 나온다", "외국어로 말한다" in check_label(_v))
 ok("검사 이름에 규칙 번호가 없다", "S05" not in check_label(_v))
-ok("확인할 것인지 자동인지 붙는다", check_label(_v).endswith("· 확인"))
+ok("확인할 것인지 자동인지 앞에 붙는다", check_label(_v).startswith("확인 · "))
 ok("번호는 도구설명에 남는다", "S05" in check_tooltip(_v))
 ok("내용 칸이 규칙 문구를 되풀이하지 않는다", check_detail(_v) != _v["message"])
 ok("문구가 없어도 번호는 내지 않는다",
-   check_label({"rule_id": "TC00", "auto_fixable": False}) == "기타 지적 · 확인")
+   check_label({"rule_id": "TC00", "auto_fixable": False}) == "확인 · 기타 지적")
 ok("용어 갈래는 한국어로 보인다",
-   check_label({"rule_id": "person", "auto_fixable": True}) == "인물 · 자동")
+   check_label({"rule_id": "person", "auto_fixable": True}) == "자동 · 인물")
 ok("붙어 온 이름이 낱말이면 그대로 쓴다",
-   check_label({"rule_id": "번역", "detail": "x"}) == "번역 · 확인")
+   check_label({"rule_id": "번역", "detail": "x"}) == "확인 · 번역")
 
 # 확인용 SRT도 작업자가 SE 그리드에서 읽는다 — 같은 원칙이다.
 _review = to_review_srt(
