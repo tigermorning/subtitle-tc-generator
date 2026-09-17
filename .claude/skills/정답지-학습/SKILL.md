@@ -36,7 +36,7 @@ ffmpeg -v error -i <파일> -map 0:v:0 -f null - 2>&1 | head -30
   보일 수 있다. 반드시 전체 디코드 시도까지 한다.
 - `invalid as first byte of an EBML number`, `h264 decode MB errors`가 파일 전반에
   걸쳐 나오면 손상이다. 재다운로드 전까지 이 영상은 학습하지 않는다(예능A 19회,
-  Money Heist S04E01 사례 — 둘 다 이 단계에서 걸러졌다).
+  드라마F S04E01 사례 — 둘 다 이 단계에서 걸러졌다).
 
 ### 2. 발주처를 특정한다
 
