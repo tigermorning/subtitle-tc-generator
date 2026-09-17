@@ -25,8 +25,9 @@ from .align import AlignedCue, Segment, align, summary
 from .media import find_speech, probe
 from .model import Event
 from .text import chars_per_second
+from .korean_break import place_line_break
 from .resplit import resplit_all
-from .timing import TimingLimits, converge
+from .timing import TimingLimits, TimingResult, converge
 
 
 @dataclass
@@ -181,6 +182,91 @@ def has_vad_support(start_ms: int, end_ms: int, speech: list[tuple[int, int]],
     if undetected_after and start_ms >= speech_end:
         return True
     return any(s < end_ms and start_ms < e for s, e in speech)
+
+
+# 환각 의심 기준 — 근거는 `generate()`의 "환각 의심 자막을 알린다" 주석.
+CONFIDENCE_THRESHOLD = -0.4
+SPARSE_CPS = 3.0
+
+
+def hallucination_suspects(events: list[Event], segments: list[Segment],
+                           profile: dict) -> tuple[list[Event], str]:
+    """통계(신뢰도·글자 밀도)로 환각이 의심되는 자막과 그 근거를 돌려준다.
+
+    신뢰도가 있으면 **신뢰도 낮음 + 글자 밀도 낮음**이 같이 있을 때만, 없으면
+    **최대 표시 시간을 꽉 채웠는데 글자가 적을 때**만 잡는다. 기준의 근거는
+    `generate()`의 호출부 주석에 있다. 고치지 않고 알리기만 한다(규칙 4).
+    """
+    limits = profile.get("limits") or {}
+    dur_max = (limits.get("duration_ms") or {}).get("max")
+    weights = limits.get("char_weights")
+    has_confidence = any(s.confidence is not None for s in segments)
+
+    def _worst_confidence(ev) -> float | None:
+        values = [s.confidence for s in segments
+                 if s.confidence is not None
+                 and s.start_ms < ev.end_ms and ev.start_ms < s.end_ms]
+        return min(values) if values else None
+
+    suspects = []
+    for ev in events:
+        sparse = chars_per_second(ev.text, ev.duration_ms, weights) < SPARSE_CPS
+        if has_confidence:
+            conf = _worst_confidence(ev)
+            if conf is not None and conf < CONFIDENCE_THRESHOLD and sparse:
+                suspects.append(ev)
+        elif dur_max and ev.duration_ms >= dur_max and sparse:
+            suspects.append(ev)
+    basis = "신뢰도·글자 밀도 둘 다 낮음" if has_confidence else "시간을 꽉 채웠는데 글자가 적음"
+    return suspects, basis
+
+
+def settle_timecodes(events: list[Event], speech: list[tuple[int, int]], fps: float,
+                     detector: str, limits: TimingLimits,
+                     shots: list[int] | None = None,
+                     no_audio: set[int] | None = None) -> tuple[TimingResult, int]:
+    """스포팅(말소리·장면 전환)과 수렴. 돌려주는 `events`는 번호순이다.
+
+    **인점·아웃점을 말소리에 맞춘다.** 작업자 기준: 인점은 목소리 시작 2~3프레임
+    전, 아웃점은 끝난 뒤 6~9프레임. whisper가 찍은 경계는 이 여유를 모른다.
+
+    검사 경로에서는 이 조정을 자동으로 하지 않는다 — 사람이 잡은 타임코드를
+    추정값으로 덮어쓰면 싱크가 통째로 어긋나기 때문이다. 여기서는 타임코드 자체가
+    방금 기계가 만든 것이라 훼손할 작업물이 없다.
+
+    **`no_audio` 번호는 스포팅·수렴에 넣지 않는다**(2026-09-14, `docs/STAGE_CONTRACTS.md`
+    구멍 1). 대조(`align`)는 소리를 못 찾은 대본 줄을 길이 0으로 남기는데, 수렴은
+    그것을 "최소 표시 시간 위반"으로만 보고 늘렸다 — 맨 뒤 표식이 867ms짜리 자막이
+    되고, 가운데 표식은 앞 자막의 아웃점을 간격만큼 당겼다. 없는 자막이 이웃으로
+    끼면 안 되므로 빼 두었다가 제자리(번호)로 되돌린다. `converge` 자체는 안 고친다 —
+    `--check`에서 사람이 만든 길이 0 자막을 늘리는 것은 정당한 교정이다.
+    """
+    from .timing import apply_spotting, suggest_shot_snap, suggest_spotting
+
+    no_audio = no_audio or set()
+    timed = [e for e in events if e.index not in no_audio]
+    held = [e for e in events if e.index in no_audio]
+
+    suggestions = suggest_spotting(timed, speech, fps, detector=detector)
+    if shots is not None:
+        suggestions += suggest_shot_snap(timed, shots, fps)
+    moved = apply_spotting(timed, suggestions)
+
+    result = converge(timed, limits)
+    if held:
+        # 표식을 **정리된 이웃**에 다시 붙인다. `align`이 붙인 기준 그대로다 — 가운데
+        # 표식은 다음 대사의 인점, 맨 뒤 표식은 마지막 대사의 아웃점. 옛 시각을 그대로
+        # 두면 스포팅이 다음 대사의 인점을 당겼을 때 표식이 그보다 늦어져, 번호순과
+        # 시간순이 어긋난다(리뷰 지적, 2026-09-14).
+        settled = sorted(result.events, key=lambda e: e.index)
+        for marker in held:
+            after = next((e for e in settled if e.index > marker.index), None)
+            before = [e for e in settled if e.index < marker.index]
+            anchor = (after.start_ms if after else
+                      before[-1].end_ms if before else marker.start_ms)
+            marker.start_ms = marker.end_ms = anchor
+        result.events = sorted(settled + held, key=lambda e: e.index)
+    return result, moved
 
 
 def generate(video: Path, profile: dict, script: Path | None = None,
@@ -350,6 +436,9 @@ def generate(video: Path, profile: dict, script: Path | None = None,
 
     notes: list[tuple[int, str]] = []
     stats: dict = {"transcript": len(segments)}
+    # 대본 줄 중 소리를 못 찾아 길이 0으로 남긴 것의 번호. 뒤의 스포팅·수렴이
+    # 이 표식을 "짧은 자막"으로 보고 늘리지 않게 따로 들고 간다(`settle_timecodes`).
+    no_audio: set[int] = set()
 
     if script:
         # 대본은 워드·PDF로도 온다. 형식은 `script.py`가 가린다.
@@ -372,6 +461,7 @@ def generate(video: Path, profile: dict, script: Path | None = None,
         cues = align(segments, lines)
         stats.update(summary(cues))
         events = _to_events(cues, notes)
+        no_audio = {e.index for e in events if e.start_ms == e.end_ms}
     else:
         # **전사 조각을 자막 단위로 다시 묶는다.** whisper는 말이 잠깐 멎을 때마다
         # 끊지만 사람은 한 호흡을 한 자막에 담는다(`regroup.py` 첫머리에 근거를
@@ -491,15 +581,15 @@ def generate(video: Path, profile: dict, script: Path | None = None,
                 if old == old_index:
                     moved.setdefault(new_index, []).append(note)
         notes = [(i, " / ".join(v)) for i, v in sorted(moved.items())]
-
-    # **인점·아웃점을 말소리에 맞춘다.** 작업자 기준: 인점은 목소리 시작 2~3프레임
-    # 전, 아웃점은 끝난 뒤 6~9프레임. whisper가 찍은 경계는 이 여유를 모른다.
-    #
-    # 검사 경로에서는 이 조정을 자동으로 하지 않는다 — 사람이 잡은 타임코드를
-    # 추정값으로 덮어쓰면 싱크가 통째로 어긋나기 때문이다. 여기서는 타임코드 자체가
-    # 방금 기계가 만든 것이라 훼손할 작업물이 없다.
-    from .timing import apply_spotting, suggest_spotting
-    suggestions = suggest_spotting(events, speech, fps, detector=how)
+    if no_audio:
+        no_audio = {new for new, old in enumerate(origins, 1) if old in no_audio}
+    if revisions_out:
+        # 감수 내역도 새 번호로 옮긴다(`docs/STAGE_CONTRACTS.md` 구멍 3).
+        from .revise import renumber
+        split: dict[int, list[int]] = {}
+        for new_index, old_index in enumerate(origins, 1):
+            split.setdefault(old_index, []).append(new_index)
+        revisions_out = renumber(revisions_out, split)
 
     # **장면 전환도 스포팅의 일부다.** 전에는 `--check --fix-spotting`
     # 경로에서만 이 조정을 했고 `--generate` 자체는 몰랐다 — 만든 초안이
@@ -515,17 +605,11 @@ def generate(video: Path, profile: dict, script: Path | None = None,
     # 번역 자막은 TC 작업 뒤 장면전환 지정 없이 바로 번역으로 들어간다. 문서가
     # 틀렸다고 고치는 게 아니라(rules/*/common.yaml의 공식 인용문은 그대로
     # 둔다) 이 도구의 적용 범위를 실무에 맞춘 것이다.
+    shots = None
     if (profile.get("shot_change") or {}).get("applied") and profile.get("kind") == "sdh":
         from .media import detect_shot_changes
-        from .timing import suggest_shot_snap
         shots = detect_shot_changes(video)
         say(f"장면 전환 {len(shots)}곳")
-        suggestions += suggest_shot_snap(events, shots, fps)
-
-    moved = apply_spotting(events, suggestions)
-    if moved:
-        say(f"인점·아웃점 {moved}곳을 말소리에 맞춤")
-    stats["spotting_applied"] = moved
 
     limits = TimingLimits.from_profile(profile, fps=fps)
     # 규정 하한 위의 실무 바닥(학습값, 약 1초) — **생성 경로에서만**. 짧은 말은
@@ -538,8 +622,30 @@ def generate(video: Path, profile: dict, script: Path | None = None,
     if floor and floor > (limits.min_duration_ms or 0):
         limits.preferred_min_duration_ms = floor
         say(f"짧은 자막 실무 바닥(학습값) {floor}ms — 규정 하한 위에서 아웃점을 늘립니다")
-    result = converge(events, limits)
+    result, moved = settle_timecodes(events, speech, fps, how, limits,
+                                     shots=shots, no_audio=no_audio)
+    if moved:
+        say(f"인점·아웃점 {moved}곳을 말소리에 맞춤")
+    stats["spotting_applied"] = moved
+    if no_audio:
+        say(f"소리를 못 찾은 대본 줄 {len(no_audio)}개는 길이 0 그대로 둡니다")
     say(f"스포팅 {len(result.changes)}곳 조정, 남은 문제 {len(result.unresolved)}건")
+
+    # **줄바꿈을 여기서 넣는다.** 재분할(`resplit`)은 한 자막의 용량을 "한 줄
+    # 한계 × 줄 수"로 잡아 두고 줄은 안 나눴다 — 그래서 초안에 두 줄 자막이
+    # 하나도 없었고 한 줄이 규정 한계를 넘었다(`korean_break.place_line_break`
+    # 주석의 실측). 타임코드는 안 건드리므로 이 단계는 TC와 무관하다.
+    per_line = (profile.get("limits") or {}).get("chars_per_line")
+    if per_line:
+        weights = (profile.get("limits") or {}).get("char_weights")
+        wrapped = 0
+        for event in result.events:
+            placed = place_line_break(event.text, per_line, weights)
+            if placed != event.text:
+                event.text = placed
+                wrapped += 1
+        if wrapped:
+            say(f"줄바꿈 {wrapped}곳 — 한 줄 한계({per_line}자)를 넘는 자막을 두 줄로 놓았습니다")
     stats.update(cues_out=len(result.events), timing_changes=len(result.changes),
                  timing_unresolved=len(result.unresolved))
 
@@ -573,35 +679,19 @@ def generate(video: Path, profile: dict, script: Path | None = None,
     # 필터 — srt·json 둘 다 이 값을 안 준다) "최대 표시 시간을 꽉 채웠는지"로
     # 대신한다. 어느 쪽이든 놓치는 것과 잘못 잡는 것이 있을 수 있다 — 그래서
     # 지우거나 고치지 않고 **알리기만** 한다.
-    CONFIDENCE_THRESHOLD = -0.4
-    SPARSE_CPS = 3.0
-
-    def _worst_confidence(ev) -> float | None:
-        values = [s.confidence for s in segments
-                 if s.confidence is not None
-                 and s.start_ms < ev.end_ms and ev.start_ms < s.end_ms]
-        return min(values) if values else None
-
-    dur_max = (profile.get("limits") or {}).get("duration_ms", {}).get("max")
-    weights = (profile.get("limits") or {}).get("char_weights")
-    has_confidence = any(s.confidence is not None for s in segments)
-    suspects = []
-    for ev in result.events:
-        sparse = chars_per_second(ev.text, ev.duration_ms, weights) < SPARSE_CPS
-        if has_confidence:
-            conf = _worst_confidence(ev)
-            if conf is not None and conf < CONFIDENCE_THRESHOLD and sparse:
-                suspects.append(ev)
-        elif dur_max and ev.duration_ms >= dur_max and sparse:
-            suspects.append(ev)
+    suspects, basis = hallucination_suspects(result.events, segments, profile)
     if suspects:
-        basis = "신뢰도·글자 밀도 둘 다 낮음" if has_confidence else "시간을 꽉 채웠는데 글자가 적음"
         say(f"환각 의심 자막 {len(suspects)}곳({basis}) — 영상에서 직접 들어보고 확인하세요:")
         for ev in suspects[:20]:
             ts = ev.start_ms // 1000
             say(f"    #{ev.index} {ts // 60}:{ts % 60:02d}  {ev.text[:40]!r}")
         if len(suspects) > 20:
             say(f"    ...외 {len(suspects) - 20}곳 더")
+        # **notes.srt에도 남긴다**(2026-09-14, `docs/STAGE_CONTRACTS.md` 구멍 4) — 아래
+        # VAD 검사를 2026-08-31에 같은 이유로 고쳤는데 이 검사는 빠져 있었다. 콘솔에
+        # 20곳까지만 찍혀 21번째부터는 어디에도 안 남았다.
+        notes = merge_notes(notes, [(ev.index, f"환각 의심({basis}) — 들어보고 확인 필요")
+                                    for ev in suspects])
 
     # **말소리 구간(VAD)과 전혀 안 겹치는 자막도 따로 알린다(2026-08-31,
     # 위쪽 `_has_vad_support` 정정과 짝).** 위 환각 의심 검사와 근거가 다르다
@@ -614,8 +704,10 @@ def generate(video: Path, profile: dict, script: Path | None = None,
     # 손해, 안 지우면 후자가 사람 손이 한 번 더 간다. 둘 중 되돌릴 수 없는
     # 쪽(실제 대사 삭제)을 피한다.
     if speech:
+        # 소리 없는 대본 줄은 뺀다 — "소리를 찾지 못했다"는 더 정확한 노트가 이미 있다.
         no_vad = [ev for ev in result.events
-                 if not _has_vad_support(ev.start_ms, ev.end_ms)]
+                 if ev.index not in no_audio
+                 and not _has_vad_support(ev.start_ms, ev.end_ms)]
         if no_vad:
             say(f"말소리 구간(VAD)과 안 겹치는 자막 {len(no_vad)}곳 — 배경음에 묻힌 "
                 "진짜 대사이거나 침묵에서 지어낸 것, 둘 다일 수 있습니다. "
@@ -629,8 +721,11 @@ def generate(video: Path, profile: dict, script: Path | None = None,
             # 출력만으로는 사람이 실제로 여는 `<초안>.notes.srt`(cli.py가
             # SE에 얹어 보라고 안내하는 파일)에 하나도 안 남아서, 콘솔
             # 스크롤을 넘긴 나머지(20곳 넘는 것)는 확인할 방법이 없었다.
-            notes.extend((ev.index, "말소리 구간(VAD)과 안 겹칩니다 — 들어보고 확인 필요")
-                         for ev in no_vad)
+            #
+            # **`extend`가 아니라 `merge_notes`로 넣는다**(2026-09-14). 같은 번호에 노트가
+            # 이미 있으면(대본 대조·번역 등) `notes_srt`의 `dict()`가 먼저 것을 덮어썼다.
+            notes = merge_notes(notes, [(ev.index, "말소리 구간(VAD)과 안 겹칩니다 — 들어보고 확인 필요")
+                                        for ev in no_vad])
 
     # 재분할로 번호가 바뀌었으면 원어도 새 번호로 옮긴다.
     moved_sources: dict[int, str] = {}
