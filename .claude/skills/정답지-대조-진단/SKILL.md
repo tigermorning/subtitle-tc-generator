@@ -13,8 +13,8 @@ description: "정답 영상이 아직 남아 있을 때 --generate로 초안을 
 
 - `정답지-학습` 스킬로 정답 srt를 확정한 영상이 아직 삭제되지 않았을 때
 - **영상을 `학습완료`에서 지우기 전에 반드시 먼저 돈다** — 영상(음성)이 없으면
-  전사를 다시 못 하므로 이 진단은 다시 할 수 없다. 이미 늦은 사례: 드라마A
-  Texas, 예능B, 영화A, 드라마C(영상이 이미 삭제됨).
+  전사를 다시 못 하므로 이 진단은 다시 할 수 없다. 이미 늦은 사례: 드라마A,
+  예능B, 영화A, 드라마C(영상이 이미 삭제됨).
 
 ## -1. 이 발주처+장르가 이미 성숙 판정을 받았는지 먼저 본다
 
@@ -62,9 +62,21 @@ N=3 성숙 기준).
 
 ### 1. 초안을 만든다 (정답지는 보지 않는다)
 
+원장(`rules/private/corpus/corpus_status.yaml`)에 등록된 작품이면 플래그를 손으로
+다시 조립하지 않는다(규칙 17 사고 3번 — `--genre` 빠뜨림이 두 세션 연속 났던
+자리):
+
+```bash
+python -m tools.gen_from_ledger <작품> <회차> <sdh|translation>
+```
+
+원장에 없는 새 작품이면 직접 조립한다 — 이때 **`--genre`를 빠뜨리지 않는다**
+(`docs/AGENT_INCIDENTS.md` 사고 3번 참고):
+
 ```bash
 python -m checker --generate --video <영상> --whisper-lang <ko|en|...> \
-  -p <platform> -l <lang> -k <sdh|translation> -o <초안.srt>
+  -p <platform> -l <lang> -k <sdh|translation> --genre <documentary|drama|variety> \
+  -o <초안.srt>
 ```
 
 - 번역이 필요 없는 SDH(원어=자막 언어)면 `--translate` 없이 돌린다 — 더 단순하고
@@ -162,7 +174,7 @@ python -m checker <초안.srt> --against <정답.srt> --eval-json <out.json>
    움직였다고 고침이 안 먹었다고 판단하지 않는다 — 어느 집단이 움직여야
    하는지를 먼저 정하고 그 집단만 본다.
 
-### 4. 코드를 고친다 (정답지·학습 자료는 절대 고치지 않는다)
+### 5. 코드를 고친다 (정답지·학습 자료는 절대 고치지 않는다)
 
 - 고칠 대상은 `checker/`의 코드다. 정답지를 원인 규명 없이 재구성하거나, 학습
   자료(`rules/learned/`)에 이 결과를 섞지 않는다 — 이 진단은 별개 트랙이다.
@@ -172,7 +184,7 @@ python -m checker <초안.srt> --against <정답.srt> --eval-json <out.json>
   세 작품에서 공통 확인)는 스포팅 코드 하나로 못 고친다 — 별도 기능(오디오가
   대사인지 아닌지 판별)이 필요한 규모면 `docs/BACKLOG.md`에 남기고 넘어간다.
 
-### 5. 고침을 검증한다
+### 6. 고침을 검증한다
 
 같은 영상으로 다시 `--generate`+`--against`를 돌려, 지목했던 구체적인 사례
 (타임스탬프 하나를 콕 짚어서)가 실제로 바뀌었는지 확인한다. **전체 평균이

@@ -7,7 +7,7 @@
 ## 1. 파일 배치
 
 ```
-rules/
+rules/private/
   <platform>/
     common.yaml            kind: common     — SDH·번역 공통 기술 요건
     <lang>-translation.yaml  kind: translation
@@ -27,14 +27,14 @@ kind: sdh                  # sdh | translation | common
 extends: common.yaml       # 같은 플랫폼 디렉터리 기준 상대 경로. common 자신은 생략
 status: complete           # complete | partial | unavailable
 source:
-  official: true           # 플랫폼/정부 공식 문서인가. false면 룰로 쓰지 않는다
+  official: true           # 플랫폼/정부 공식 문서인가. false면 client를 함께 적어야 한다
   url: "..."
   section: "Korean TTSG Section II"
   revision: "2025-07-07"   # 원문 change log의 최신일
   verified: "2026-08-11"   # 우리가 원문을 확인한 날
 ```
 
-**`official: false`이거나 `status: unavailable`인 프로파일은 로더가 검사에 쓰지 않는다.** 블로그·2차 자료 수치가 조용히 룰이 되는 것을 막는다.
+**`status: unavailable`인 프로파일, 그리고 `official: false`이면서 `source.client`도 없는 프로파일은 로더가 검사에 쓰지 않는다.** 블로그·2차 자료 수치가 조용히 룰이 되는 것을 막는다 — 발주처가 지정한 실무 기준은 `source.client`를 적으면 쓸 수 있다.
 
 ## 3. SDH ↔ 번역 자막 섞임 방지 (핵심)
 
@@ -54,15 +54,15 @@ source:
 1. `kind`가 없으면 로드 실패. 기본값을 주지 않는다 — 조용히 한쪽으로 떨어지면 그게 곧 섞임이다.
 2. `kind: translation`인데 `speaker_id`·`sound_effect` 키가 있으면 **로드 실패**(경고 아님).
 3. `kind: sdh`인데 `forced_narrative`가 있으면 로드 실패.
-4. `extends`는 `kind: common`인 파일만 가리킬 수 있다. sdh가 translation을 상속하는 것은 금지.
-5. 병합은 **키 단위 얕은 덮어쓰기**. 리스트는 덮어쓰기(병합 아님) — 상위 값이 부분적으로 살아남아 생기는 유령 규칙을 막는다.
+4. `extends`는 `kind: common`이거나 **같은 kind**인 파일만 가리킬 수 있다(예: `ko-sdh-practice.yaml`이 `ko-sdh.yaml`을 상속). sdh가 translation을 상속하는 것은 금지.
+5. 병합은 **키 단위 얕은 덮어쓰기**. 리스트는 덮어쓰기(병합 아님) — 상위 값이 부분적으로 살아남아 생기는 유령 규칙을 막는다. **예외**: `rules` 목록은 이어 붙이되 같은 `id`는 개별(child) 쪽이 이긴다 — 공통 규칙과 개별 규칙을 둘 다 살리기 위해서다.
 
 ## 4. 값 규약
 
 - **글자 수**: `chars_per_line`은 `char_weights`와 함께 읽는다. 한국어는 CJK와 그 외(라틴·공백·문장부호)에 서로 다른 가중치를 준다 — 값은 프로파일의 `char_weights`에 있다.
 - **읽기 속도**: `reading_speed_cps.adult` / `.children`. 아동물은 별도 프로파일이 아니라 같은 파일 안의 분기다(넷플릭스가 그렇게 정의한다).
 - **시간**: 밀리초 정수. 프레임 값은 쓰지 않는다(프레임레이트 의존).
-- **규칙 id**: `rules[].id`는 `T##`(번역) / `S##`(SDH). `clause`에 원문 조항 번호를 넣는다. 위반 리포트가 조항을 인용할 수 있어야 한다 — 그게 이 프로젝트의 존재 이유다.
+- **규칙 id**: `rules[].id`는 `T##`(번역) / `S##`(SDH)가 기본이고, `common.yaml`은 `C##`(공통), 넷플릭스 영어 프로파일은 `ES##`(영어 SDH) / `ET##`(영어 번역) / `TP##`(템플릿)를 쓴다(`rules/private/netflix/*.yaml` 실측). `clause`에 원문 조항 번호를 넣는다. 위반 리포트가 조항을 인용할 수 있어야 한다 — 그게 이 프로젝트의 존재 이유다.
 - **`auto`**: `true`면 자동 교정, `false`면 확인 플래그만. 근거가 간접적인 규칙은 반드시 `false`.
 
 ## 5. SubtitleEdit 환경설정과의 대응
@@ -98,7 +98,10 @@ source:
 
 ## 6. 미확보 플랫폼
 
-디즈니+·쿠팡플레이는 공식 문서를 구하지 못했다. 값을 추측해 채우지 않고 `status: unavailable`로 남긴다. 로더가 이를 만나면 "이 플랫폼은 규정 미확보"라고 사용자에게 알리고 검사를 건너뛴다. **웹에 도는 수치를 채워 넣지 말 것.**
+디즈니+·쿠팡플레이는 공식 문서는 구하지 못했지만, 작업자 실무 자료(`source.client`)로
+채운 완성된 프로파일(`status: complete`)이 있다 — `official: false`일 뿐 미확보가
+아니다. 공식 문서 자체가 아예 없는 항목은 각 플랫폼 디렉터리의 `UNAVAILABLE.yaml`에
+확보 경로와 미확인 항목을 따로 적어 둔다. **웹에 도는 수치를 채워 넣지 말 것.**
 
 ## 작업마다 정해지는 것 (2026-08-11 추가)
 
