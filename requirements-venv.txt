@@ -1,0 +1,30 @@
+# 이 리포 전용 가상환경(.venv) — tools/setup-venv.bat이 깐다.
+#
+# 전에는 옆 리포 korean-subtitle-corrector의 .venv를 빌려 썼다. 그 바람에
+# 이 리포 패키지(PySide6·mpv·PyInstaller·torch)가 교정기 환경에 깔렸고,
+# 명령·경로마다 교정기 폴더가 끼어 두 프로젝트가 섞였다(CLAUDE.md 규칙 0).
+#
+# 한국어 레인(checker/korean.py)은 교정기 코드를 같은 프로세스로 import한다.
+# 그래서 교정기 의존성(kiwipiepy 등)도 이 환경에 깔아야 하는데, 그 목록은
+# 교정기가 정한다 — 여기 베껴 적지 않고 setup-venv.bat이 교정기의
+# requirements.txt를 그대로 읽는다(베끼면 교정기가 바꿀 때 낡는다).
+#
+# 화자 분리(.venv-diarize)·화면 캡션 OCR(.venv-ocr)은 torch 버전이 부딪혀
+# 따로 산다. 여기 섞지 않는다.
+
+-r requirements.txt
+
+# 편집기(app/)
+PySide6-Essentials>=6.9
+python-mpv>=1.0
+numpy>=2.0
+
+# 검사기의 영상 쪽 기능
+onnxruntime>=1.20      # checker/vad.py (말소리 구간)
+pypdf>=5.0             # checker/script.py (PDF 대본)
+torch>=2.8             # checker/sfx.py (효과음 후보)
+transformers>=4.50     # checker/sfx.py
+scipy>=1.14            # checker/sfx.py
+
+# 실행 파일 빌드(tools/build-exe.bat)
+pyinstaller>=6.10

@@ -36,7 +36,7 @@ python3 tests/run_tests.py
 건너뛰어진다.
 
 ```bash
-cmd.exe /c "..\korean-subtitle-corrector\.venv\Scripts\python.exe tests\run_tests.py"
+cmd.exe /c ".venv\Scripts\python.exe tests\run_tests.py"
 ```
 
 ## 넘어가기 쉬운 함정 셋

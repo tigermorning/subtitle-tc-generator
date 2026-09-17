@@ -21,15 +21,19 @@ if "%~1"=="" (
   exit /b 1
 )
 
-rem Python: CHECKER_PYTHON env var, then the Korean corrector venv next door, then PATH.
+rem Python: CHECKER_PYTHON env var, then this repo's own .venv, then PATH.
+rem Do not borrow the Korean corrector's venv - the two projects got mixed that way.
+rem Create .venv with tools\setup-venv.bat.
 set "PY=%CHECKER_PYTHON%"
 if not defined PY (
-  if exist "%REPO%\..\korean-subtitle-corrector\.venv\Scripts\python.exe" (
-    set "PY=%REPO%\..\korean-subtitle-corrector\.venv\Scripts\python.exe"
-    if not defined KSC_PATH set "KSC_PATH=%REPO%\..\korean-subtitle-corrector"
-  )
+  if exist "%REPO%\.venv\Scripts\python.exe" set "PY=%REPO%\.venv\Scripts\python.exe"
 )
 if not defined PY set "PY=python"
+
+rem The corrector repo itself is still used by the Korean lane (code, not its venv).
+if not defined KSC_PATH (
+  if exist "%REPO%\..\korean-subtitle-corrector\subtitle_corrector" set "KSC_PATH=%REPO%\..\korean-subtitle-corrector"
+)
 
 rem Korean correction lane runs too when the corrector is reachable. If it cannot be
 rem loaded the checker says so and keeps going with the rule checks.
