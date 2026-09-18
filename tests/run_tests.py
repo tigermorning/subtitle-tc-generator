@@ -106,6 +106,19 @@ try:
 except ProfileError:
     ok("번역에 speaker_id가 있으면 실패", True)
 
+try:
+    _validate({"schema_version": 1, "kind": "sdh", "rules": [
+        {"id": "S17", "check": "line_break_top_heavy"}, {"id": "S17", "check": "forbidden_punctuation"}]},
+        Path("x.yaml"))
+    ok("한 파일 안에 규칙 번호가 겹치면 실패", False, "예외가 나지 않았다")
+except ProfileError:
+    ok("한 파일 안에 규칙 번호가 겹치면 실패", True)
+
+# 합친 프로파일에서도 한 번호는 한 검사만 가리킨다 — 설정 화면이 번호로 규칙을 켜고 끈다
+for _name, _prof in [("넷플릭스 한국어 SDH", ko_sdh), ("넷플릭스 한국어 번역", ko_tr)]:
+    _ids = [r["id"] for r in _prof["rules"]]
+    ok(f"{_name} 규칙 번호가 겹치지 않는다", len(_ids) == len(set(_ids)), str(sorted({i for i in _ids if _ids.count(i) > 1})))
+
 # 화면 자막은 SDH도 다룬다(대사와 겹칠 때 지울지 병기할지가 플랫폼마다 다르다).
 # 막아야 할 것은 SDH 규정이 번역 프로파일에 새는 것이지 그 반대가 아니다.
 _validate({"schema_version": 1, "kind": "sdh", "forced_narrative": {}}, Path("x.yaml"))

@@ -63,6 +63,14 @@ def _validate(data: dict, path: Path) -> None:
         if bad:
             raise ProfileError(f"{path.name}: SDH 프로파일에 번역 전용 키가 있습니다: {bad}")
 
+    # 한 파일 안에서 규칙 번호가 겹치면 실패. 설정 화면의 규칙 켜기/끄기, disable_rules,
+    # 상속 덮어쓰기가 모두 번호로 규칙을 찾는다 — 번호가 겹치면 한 검사를 끄거나 덮어쓸 때
+    # 다른 검사도 함께 움직인다. 넷플릭스 한국어 SDH에서 실제로 S17이 두 검사에 붙어 있었다(2026-09-17).
+    ids = [r.get("id") for r in data.get("rules") or []]
+    dup = sorted({i for i in ids if ids.count(i) > 1})
+    if dup:
+        raise ProfileError(f"{path.name}: 규칙 번호가 겹칩니다: {dup}")
+
     if data.get("schema_version") != 1:
         raise ProfileError(f"{path.name}: 지원하지 않는 schema_version입니다")
 
