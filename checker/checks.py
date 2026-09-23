@@ -16,6 +16,7 @@ import re
 
 from .model import Event
 from .position import is_forced_narrative
+from .profile import speaker_enclosure
 from .text import count_chars, chars_per_second, strip_tags, has_hangul, is_foreign_language_text
 
 REGISTRY: dict[str, callable] = {}
@@ -873,7 +874,7 @@ def _space_between_markers(ev: Event, ctx: dict):
     from .position import POSITION_TAG
 
     profile = ctx.get("profile") or {}
-    speaker = ((profile.get("speaker_id") or {}).get("enclosure") or "[]")
+    speaker = speaker_enclosure(profile)
     tone = ((profile.get("tone") or {}).get("enclosure")
             or (profile.get("sound_effect") or {}).get("enclosure") or "[]")
     pairs = {speaker, tone, "[]", "()"}
@@ -1179,7 +1180,7 @@ def _speaker_enclosure(ev: Event, ctx: dict):
 
     효과음은 셋 다 대괄호이므로, 줄 맨 앞에서 뒤에 대사가 이어지는 자리만 본다.
     """
-    want = (ctx["profile"].get("speaker_id") or {}).get("enclosure")
+    want = speaker_enclosure(ctx["profile"], default=None)
     if want not in ("[]", "()"):
         return []
     out = []

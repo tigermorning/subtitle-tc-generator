@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from checker import check_events, load_profile, ProfileError  # noqa: E402
 from checker.model import Event  # noqa: E402
-from checker.profile import _merge, _validate  # noqa: E402
+from checker.profile import _merge, _validate, speaker_enclosure  # noqa: E402
 from checker.text import count_chars  # noqa: E402
 from checker.ocr import (  # noqa: E402
     OcrCaption, _checkpoint_fingerprint, _cleanup_checkpoint, _crop_filter,
@@ -105,6 +105,22 @@ try:
     ok("번역에 speaker_id가 있으면 실패", False, "예외가 나지 않았다")
 except ProfileError:
     ok("번역에 speaker_id가 있으면 실패", True)
+
+# `_validate`는 파일 하나를 병합 전에만 본다 — `extends`로 상속받아 새어 들어오는
+# 것은 못 잡는다(2026-09-21 실측: 디즈니·쿠팡은 화자명 괄호 모양을 SDH·번역이
+# 공유해야 해서 `common.yaml`에 `speaker_id`를 통째로 뒀었고, `ko-translation.yaml`이
+# 그걸 그대로 상속해 로더가 잡지 못한 채 계약을 어기고 있었다). 그래서 **병합된
+# 결과**로 직접 재발을 막는다 — 괄호 모양은 `markers.speaker_enclosure`로 옮기고
+# SDH 전용 나머지 필드만 `ko-sdh.yaml`에 남겨 이 키 자체가 안 생기게 고쳤다.
+for platform in ("disney", "coupang"):
+    merged_tr = load_profile(platform, "ko", "translation")
+    ok(f"{platform} 번역 프로파일엔 speaker_id가 없다(상속으로도)",
+       "speaker_id" not in merged_tr, str(merged_tr.get("speaker_id")))
+    ok(f"{platform} 번역도 화자명 괄호 모양은 안다",
+       speaker_enclosure(merged_tr) in ("[]", "()"))
+    merged_sdh = load_profile(platform, "ko", "sdh")
+    ok(f"{platform} SDH·번역의 화자명 괄호 모양이 같다",
+       speaker_enclosure(merged_sdh) == speaker_enclosure(merged_tr))
 
 # 화면 자막은 SDH도 다룬다(대사와 겹칠 때 지울지 병기할지가 플랫폼마다 다르다).
 # 막아야 할 것은 SDH 규정이 번역 프로파일에 새는 것이지 그 반대가 아니다.

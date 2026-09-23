@@ -17,6 +17,7 @@ import sys
 from pathlib import Path
 
 from .model import Event, Violation
+from .profile import speaker_enclosure
 
 # 자막 문법 조각. 교정기에 넘기지 않는다.
 MARKUP_RE = re.compile(
@@ -107,7 +108,7 @@ def _corrector_options(root_path, profile: dict | None) -> dict:
     except ImportError:
         return {}
 
-    speaker = ((profile.get("speaker_id") or {}).get("enclosure") or "[]")
+    speaker = speaker_enclosure(profile)
     # **어조 부호는 화자명과 같다고 가정하면 안 된다.** 쿠팡은 화자명이 소괄호인데
     # 어조·효과음은 대괄호다: `(철수) [작게]`. 같다고 넘기면 교정기가 대괄호 어조를
     # 대사로 읽는다(사용자 지적 2026-08-11).

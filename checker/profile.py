@@ -179,6 +179,27 @@ def _merge(parent: dict, child: dict) -> dict:
     return merged
 
 
+def speaker_enclosure(profile: dict, default: str | None = "[]") -> str | None:
+    """화자명 괄호 모양(`[]`·`()`). `colon_speaker_prefix`·`space_between_markers`·
+    `speaker_id_enclosure` 같은 **공통 규칙**이 SDH·번역 양쪽에서 쓴다.
+
+    `speaker_id`는 SDH 전용이라(계약 2, `SDH_ONLY_KEYS`) 번역 프로파일에 두면 로드
+    실패해야 한다 — 그래서 이 괄호 모양은 `markers.speaker_enclosure`라는 별도
+    common 키로 둔다(디즈니·쿠팡처럼 화자명 괄호가 넷플릭스 기본값 `[]`과 다른
+    발주처가 씀). 없으면 `speaker_id.enclosure`로 내려간다 — SDH 프로파일 자신이
+    적어 둔 값을 그대로 쓰기 위해서다. 둘 다 없으면 `default`(넷플릭스처럼 `[]`
+    하나만 쓰는 곳은 이걸로 충분하다).
+
+    `default=None`으로 부르면 "설정 안 됨"과 "설정된 값"을 구분해야 하는 자리
+    (`speaker_id_enclosure` 검사 — 값이 없으면 아예 검사하지 않는다)에 쓴다.
+    """
+    markers = profile.get("markers") or {}
+    value = markers.get("speaker_enclosure")
+    if not value:
+        value = (profile.get("speaker_id") or {}).get("enclosure")
+    return value or default
+
+
 def load_learned_chars_per_cue(platform: str | None, language: str | None,
                                kind: str | None) -> float | None:
     """`rules/learned/<platform>/<language>-<kind>.yaml`에서 `chars_per_cue` 중앙값을 읽는다.

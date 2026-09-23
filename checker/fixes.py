@@ -12,6 +12,7 @@ from __future__ import annotations
 import re
 
 from .model import Event
+from .profile import speaker_enclosure
 
 FIXERS: dict[str, callable] = {}
 
@@ -128,7 +129,7 @@ def _fix_colon_speaker(text: str, ctx: dict) -> str:
     시각(`9:30`)은 건드리지 않는다 — 앞뒤가 숫자면 부호가 아니라 값이다.
     """
     profile = ctx.get("profile") or {}
-    enclosure = ((profile.get("speaker_id") or {}).get("enclosure") or "[]")
+    enclosure = speaker_enclosure(profile)
     left, right = (enclosure + "[]")[:2]
 
     out = []
@@ -152,7 +153,7 @@ def _join_markers(text: str, ctx: dict) -> str:
     판단을 한다 — `correct_subtitle_bracket_spacing`).
     """
     profile = ctx.get("profile") or {}
-    speaker = ((profile.get("speaker_id") or {}).get("enclosure") or "[]")
+    speaker = speaker_enclosure(profile)
     tone = ((profile.get("tone") or {}).get("enclosure")
             or (profile.get("sound_effect") or {}).get("enclosure") or "[]")
     pairs = {speaker, tone, "[]", "()"}

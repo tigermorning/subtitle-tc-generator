@@ -24,6 +24,7 @@ from pathlib import Path
 from .align import AlignedCue, Segment, align, summary
 from .media import find_speech, probe
 from .model import Event
+from .profile import speaker_enclosure
 from .text import chars_per_second
 from .korean_break import place_line_break
 from .resplit import resplit_all
@@ -94,7 +95,7 @@ def speaker_prefix(name: str, profile: dict) -> str:
     """플랫폼 표기로 화자명을 만든다. 번역 자막에서는 쓰지 않는다."""
     if not name:
         return ""
-    enclosure = ((profile.get("speaker_id") or {}).get("enclosure") or "[]")
+    enclosure = speaker_enclosure(profile)
     left, right = (enclosure + "[]")[:2]
     return f"{left}{name}{right} "
 

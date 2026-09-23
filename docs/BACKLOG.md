@@ -6,6 +6,40 @@
 마지막 갱신: **2026-09-17** · 시험 건수는 CLAUDE.md 규칙 9(훅이 지킨다) ·
 **다음 세션은 §0-T "다음에 할 것" 절의 T-1a부터.**
 
+## 0-U. 스키마 감사 — 미구현 check 13건, 어디에도 안 적혀 있었다 (2026-09-21)
+
+`rules/SCHEMA.md` 스키마 리뷰 겸 전체 프로파일 감사(스크립트로 `rules[].check` 값을
+`checker/*.py`의 `@check`/`@doc_check` 레지스트리와 전수 대조) 중 발견. 로더는
+이 항목들을 `unimplemented_checks`로 리포트에 정상적으로 띄운다(규칙 9 그대로
+지켜짐 — **로더가 조용히 통과시키는 버그는 아니다**). 다만 *왜* 미구현인지·
+구현 계획이 있는지는 이 문서 어디에도 없었다 — `C03`(`currency_converted`)·
+`S12`(`sentence_split_across_events`, `ko-sdh.yaml` 153~155행에 사유 있음)만
+예외. 나머지 13건은 규칙 17("손대기 전에 이미 답이 있는지 먼저 본다")이 다음
+세션에 헛수고를 시키지 않도록 여기 한 번에 모아 둔다 — **구현하라는 뜻이
+아니라, 다음에 마주치면 "또 새로 조사할 필요 없다"는 뜻이다.**
+
+| rule id | 파일 | check | 비고 |
+|---|---|---|---|
+| C04 | netflix/common.yaml | `glyph_not_allowed` | Netflix Glyph List 문자 사전이 없다 — 목록 확보부터 |
+| ES04 | netflix/en-sdh.yaml | `speaker_id_uppercase` | 영어 SDH 전용, 한국어 경로는 해당 없음 |
+| ES05 | netflix/en-sdh.yaml | `italic_speaker_id_or_sound_effect` | 위와 같음 |
+| ES15 | netflix/en-sdh.yaml | `capitalization_of_identity_terms` | 위와 같음 |
+| ET06 | netflix/en-translation.yaml | `forced_narrative_not_uppercase` | 영어 번역 전용 |
+| ET08 | netflix/en-translation.yaml | `number_spelling_range` | 영어 번역 전용 |
+| ET09 | netflix/en-translation.yaml | `number_style_inconsistent_in_sentence` | 영어 번역 전용 |
+| ET11 | netflix/en-translation.yaml | `korean_name_romanization` | 로마자 표기 규칙표 필요 |
+| ET12 | netflix/en-translation.yaml | `lyric_line_end_punctuation` | T15와 같은 성격, 언어만 다름 |
+| ET14 | netflix/en-translation.yaml | `mixed_english_variant` | 미국·영국 철자 혼용 검사 |
+| S10 | netflix/ko-sdh.yaml | `bleep_asterisk_count` | 음절당 별표 수 세는 검사 |
+| T14 | netflix/ko-translation.yaml | `repeated_phrase_translated_twice` | 반복 대사 중복 번역 검사 |
+| T15 | netflix/ko-translation.yaml | `lyric_quotes_or_italics` | `lyric_line_end_punctuation`도 같은 rule에 걸림(ET12와 한국어 짝) |
+
+**한국어 작업(이 프로젝트 지금 우선순위)에 실제로 걸리는 건 S10·T14·T15 셋뿐이다** —
+나머지 9건(ES04/05/15·ET06/08/09/11/12/14)은 영어 SDH·번역 전용이라 규칙 2(원어에
+한국어 규정 적용 안 함)의 반대쪽, 즉 "영어가 최종 납품물일 때"만 쓰인다. 지금
+파이프라인 우선순위(§0-T)가 한국어 자막이면 급하지 않다 — 그래도 있는 줄은 알아야
+다음에 "이거 왜 안 잡히지"로 재조사하지 않는다.
+
 ## 0-G. 넷플릭스 자막 간격 — 3~11프레임 닫기 미구현 (2026-09-17)
 
 - 근거: Subtitle Timing Guidelines §5 (article 360051554394, edited 2025-07-04)
