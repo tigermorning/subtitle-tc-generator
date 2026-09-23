@@ -48,6 +48,8 @@
 여기다. 의존은 한 방향이다 — 이 저장소가 교정기를 라이브러리로 부르고(`checker/korean.py`),
 교정기는 이 저장소를 모른다.
 
+이 도구의 자막·규정 자료로 만든 딥리서치 에이전트(모두의연구소 과제): [my-deep-researcher](https://github.com/tigermorning/my-deep-researcher) — 이 저장소 코드에 의존하지 않고, 로컬 자료만 읽어 코퍼스를 만든다.
+
 ## 작업 단계
 
 화면과 CLI가 같은 단계 모델(`checker/pipeline.py::STAGES`)을 쓴다. 어댑터가 순서를
