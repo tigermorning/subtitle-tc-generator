@@ -394,6 +394,17 @@ torch DLL이 걸린다. 어젯밤(2026-08-27)엔 됐다가 다음날 안 됐다 
 전부 `checker/`에 남아 자동으로 다음 영상부터 적용된다. 상세 재현 과정은
 `docs/BACKLOG.md`에 있다 — 여기는 "무엇을, 왜"만.
 
+- **1차 번역이 번호에 이웃 자막의 대사를 넣었다 — 번호 검사로는 안 보였다**
+  (2026-09-24, `translate._continues`·`_clean_continuation`·`backtranslate.shift_suspects`).
+  문장이 자막 둘에 걸치면 앞 번호에 통째로 옮기고 뒤 번호들을 한 칸씩 당겼다.
+  타임코드는 번호에 걸려 있어 대사가 말보다 먼저 뜬다. 이어지는 줄 끝에 표시를
+  붙여 431큐 × 2회 밀림 의심 29·27 → 10·8로 줄였고, 역번역 리포트에 "번호 밀림
+  의심"을 따로 낸다. 남은 것과 잰 방법은 `docs/STAGE_CONTRACTS.md` 구멍 5,
+  다시 잴 때는 `tools/translate_shift_probe.py`.
+- **화자명 뒤 이탤릭이 닫는 태그만 남았다**(2026-09-24, `translate._protect`).
+  `[Grace] <i>There's one.</i>` → `[그레이스] 하나입니다.</i>`, 431큐 중 21큐.
+  `docs/STAGE_CONTRACTS.md` 구멍 6.
+
 - **생성 경로에 줄바꿈을 놓는 단계가 아예 없었다**(2026-09-13,
   `korean_break.place_line_break`·`generate`의 converge 뒤 단계).
   `resplit`은 한 자막 용량을 "한 줄 한계 × 줄 수"로 잡아 두고 줄은 안 나눴고,

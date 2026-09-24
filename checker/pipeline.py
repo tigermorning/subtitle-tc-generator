@@ -282,9 +282,15 @@ def stage_backtranslate(events: list[Event], profile: dict | None = None, *,
     if stats.get("total"):
         say(f"견준 자막 {stats['total']}개 · 원문 낱말이 남은 비율 중간값 "
             f"{stats['median']:.0%} · 절반도 안 남은 자막 {stats['below_half']}개")
+    # 오역과 따로 낸다. 밀린 자막은 뜻이 아니라 **자리**가 틀린 것이라, 오역 순위에
+    # 섞이면 "번역이 이상하다"로 읽혀 원인을 못 찾는다.
+    shifted = bt.shift_suspects(events, source, back)
+    if shifted:
+        say(f"번호 밀림 의심 {len(shifted)}곳 — 이웃 자막의 대사가 들어간 것으로 보입니다: "
+            + ", ".join(f"#{s.event_index}(←#{s.from_index})" for s in shifted[:10]))
     return StageResult(events=list(events),
                        extra={"back": back, "diverged": diverged, "worst": picked,
-                              "summary": stats})
+                              "summary": stats, "shifted": shifted})
 
 
 def stage_polish(events: list[Event], profile: dict, *, translator,

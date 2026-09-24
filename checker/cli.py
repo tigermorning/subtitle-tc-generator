@@ -525,6 +525,7 @@ def _run_one(path: Path, profile: dict, args, backend) -> dict | None:
             report["backtranslation"] = {
                 "summary": checked.extra["summary"],
                 "worst": [d.to_dict() for d in checked.extra["worst"]],
+                "shifted": [s.to_dict() for s in checked.extra["shifted"]],
             }
 
         if work:
