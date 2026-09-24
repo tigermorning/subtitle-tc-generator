@@ -425,6 +425,9 @@ SYSTEM_BY_LANG: dict[str, str] = {
         "- 원문의 단어에 매달리지 말고 **의미**를 옮깁니다.\n"
         "- 말투는 **존댓말로 통일**합니다. 인물 관계에 맞추는 것은 2차에서 합니다.\n"
         "- 자막은 한 줄에 하나입니다. **번호를 합치거나 나누지 마세요.**\n"
+        "- 끝에 `(다음 번호로 이어짐)`이 붙은 자막은 문장이 다음 번호로 이어집니다. "
+        "번역도 **번호마다 그 번호에 있는 부분만** 옮기고, 이 표시는 내지 마세요. "
+        "어순이 어색해도 괜찮습니다.\n"
         "- 대괄호 안의 화자명·효과음, 음표, 태그는 그대로 둡니다.\n"
         "- 설명을 덧붙이지 말고 번역만 냅니다."
     ),
@@ -514,7 +517,12 @@ class TranslatedCue:
     note: str = ""
 
 
-def _protect(text: str) -> tuple[str, tuple[str, str, bool]]:
+# 대사 앞머리 — 두 화자 하이픈과 화자명(`- [Stratt] `). 둘 다 없을 수도 있다.
+_LABEL = r"^\s*(?:-\s*)?(?:\[[^\]]*\]\s*)?"
+_LABEL_THEN_TAG = rf"({_LABEL})((?:<[a-zA-Z][^>]*>)+)\s*"
+
+
+def _protect(text: str) -> tuple[str, tuple[str, str, bool, str]]:
     """태그를 **떼어 놓는다**. 모델에게는 맨 대사만 보여 준다.
 
     처음에는 자리표(`\\x01 0 \\x02`)로 바꿔 넣었는데, 모델이 그걸 대괄호로 바꿔
@@ -526,6 +534,12 @@ def _protect(text: str) -> tuple[str, tuple[str, str, bool]]:
     달라 어디에 넣을지 기계가 알 수 없다.
 
     화자명 `[사라]`는 떼지 않는다. SDH에서 화자명은 한국어로 옮겨야 하는 대상이다.
+
+    **화자명 바로 뒤에서 여는 태그**(`[Grace] <i>There's one.</i>`)는 따로 기억한다.
+    영어 SDH에서 흔한 꼴이다 — 화면 밖 목소리의 대사만 기울이고 화자명은 세운다.
+    전에는 끝의 `</i>`만 떼었다가 되돌리고 여는 `<i>`는 "가운데 태그"로 지워서,
+    **닫는 태그만 남은 자막**이 나갔다(exaone3.5 실측: 프로젝트 헤일 메리 영어
+    SDH 431큐 중 21큐, `[그레이스] 하나입니다.</i>`, 2026-09-24).
     """
     head, tail, inner = "", "", False
     body = text
@@ -541,14 +555,37 @@ def _protect(text: str) -> tuple[str, tuple[str, str, bool]]:
             break
         tail = m.group(1) + tail
         body = body[:m.start()]
+    # 끝에서 뗀 닫는 태그와 짝이 맞고 대사 안에 다른 태그가 없을 때만 — 아니면
+    # (`[Grace] <i>Hi</i> there`) 여는 태그만 되살아나 거꾸로 짝이 깨진다.
+    after_label = ""
+    m = re.match(_LABEL_THEN_TAG, body)
+    if m and m.group(1).strip():
+        rest = body[m.end():]
+        names = re.findall(r"<([a-zA-Z]+)", m.group(2))
+        if not KEEP.search(rest) and all(re.search(rf"</{n}\s*>", tail, re.I) for n in names):
+            after_label = m.group(2)
+            body = m.group(1) + rest
     if KEEP.search(body):
         inner = True
         body = KEEP.sub(" ", body)
-    return re.sub(r"\s+", " ", body).strip(), (head, tail, inner)
+    return re.sub(r"\s+", " ", body).strip(), (head, tail, inner, after_label)
 
 
-def _restore(text: str, frame: tuple[str, str, bool]) -> str:
-    head, tail, _inner = frame
+def _restore(text: str, frame: tuple) -> str:
+    head, tail, inner = frame[:3]
+    after_label = frame[3] if len(frame) > 3 else ""
+    if inner and not after_label:
+        # 여는 태그가 대사 가운데 있어 지웠으면(`- No.\n- <i>Don't.</i>`) 끝의 닫는
+        # 태그도 짝이 없다. 되살릴 자리를 모르니 닫는 쪽을 버린다 — 깨진 태그를
+        # 내보내는 것보다 낫고, 노트("태그를 되돌리지 못했습니다")가 남는다.
+        tail = re.sub(r"</([a-zA-Z]+)>",
+                      lambda m: m.group(0) if f"<{m.group(1).lower()}" in head.lower() else "",
+                      tail)
+    if after_label:
+        # 번역문도 화자명으로 시작하면 그 뒤에, 모델이 화자명을 빠뜨렸으면 맨 앞에
+        # 씌운다. 어느 쪽이든 여는 태그와 닫는 태그가 짝을 이룬다.
+        end = re.match(_LABEL, text).end()
+        text = text[:end] + after_label + text[end:]
     joiner_head = " " if head.endswith("♪") else ""
     joiner_tail = " " if tail.startswith("♪") else ""
     return f"{head}{joiner_head}{text}{joiner_tail}{tail}"
@@ -610,6 +647,59 @@ def _strip_self_revision(text: str) -> str:
     if " → " in text:
         text = text.rsplit(" → ", 1)[-1]
     return text.strip()
+
+
+# --- 문장이 다음 번호로 이어지는 자리 -------------------------------------------
+#
+# **번호 밀림을 막는다**(2026-09-24). 문장 하나가 자막 두 개에 걸치면 모델이 앞
+# 번호에 통째로 옮기고 뒤 번호들에 다음 대사를 한 칸씩 당겨 넣었다 — 번호는 다
+# 있어서 번호 검사를 통과하고, 타임코드는 번호에 걸려 있으니 대사가 말보다 먼저
+# 뜬다(`docs/STAGE_CONTRACTS.md` 구멍 5). 프롬프트의 "번호를 합치거나 나누지
+# 마세요"는 이미 있었는데도 났다.
+#
+# 이어지는 줄 끝에 표시를 붙여 **어디서 문장이 넘어가는지 보여 준다.** exaone3.5,
+# 프로젝트 헤일 메리 영어 SDH 세 구간 × 2회(`tools/translate_shift_probe.py`):
+#
+#     밀림 의심(하한)   지금까지 29·27   규칙 한 줄만 21·29   규칙+표시 10·8
+#
+# 규칙 한 줄만으로는 못 막았다 — 모델이 **어느 줄이** 이어지는지 모르기 때문이다.
+# 남은 것은 대부분 앞 번호에 뒤 번호 말까지 **합쳐 쓴** 자리(463·506)와 한국어
+# 어순대로 두 번호의 내용을 **맞바꾼** 자리(519·520)다. 연쇄로 밀리던 구간
+# (1499~1531)은 제자리로 돌아왔다.
+#
+# 표시는 **줄 끝에 문장부호가 없고 다음 줄이 영문 소문자로 시작할 때만** 붙인다.
+# 한국어·일본어 원문은 마침표를 안 찍는 관행이 있어 문장부호만 보면 모든 줄에
+# 붙는다. 소문자 시작은 이어지는 줄의 분명한 표지라 임계값 없이 가를 수 있다.
+# **한국어로 옮길 때만 켠다** — 잰 것이 한국어 목표뿐이다.
+_CONTINUES = "(다음 번호로 이어짐)"
+_SENTENCE_END = re.compile(r"(?:[.!?…\"'”’♪)\]。！？」』]|--|—)$")
+# 모델이 표시를 따라 쓴다 — 화살표를 붙이거나 빼거나, 대괄호 안에 넣는다.
+_CONTINUES_LEAK = re.compile(r"\s*[(\[]?\s*→?\s*다음 번호로 이어짐\s*[)\]]?")
+
+
+def _continues(body: str, next_body: str) -> bool:
+    body = body.rstrip()
+    return bool(body) and not _SENTENCE_END.search(body) \
+        and bool(re.match(r"[a-z]", next_body.lstrip()))
+
+
+def _clean_continuation(text: str, source_body: str, near_mark: bool) -> str:
+    """표시가 새어 나온 것을 지우고, 표시 때문에 생긴 **통째 괄호**를 벗긴다.
+
+    이어지는 줄을 `(…)`나 `[…]`로 통째로 감싸 내는 일이 표시와 함께 늘었다(위 실측
+    6회에서 표시를 붙이자 13곳, 붙이기 전 3곳). 벗기는 것은 **표시를 붙인 줄이나 그
+    바로 다음 줄이고, 원문에 괄호가 하나도 없을 때뿐이다.** 모델이 효과음의 괄호
+    종류를 바꿔 내면(`[sighs]` → `(한숨)`) 원문과 괄호가 달라도 효과음이다 — 벗기면
+    효과음이 대사가 된다.
+    """
+    text = _CONTINUES_LEAK.sub("", text).strip()
+    if not near_mark or "(" in source_body or "[" in source_body:
+        return text
+    for left, right in (("(", ")"), ("[", "]")):
+        if (text.startswith(left) and text.endswith(right)
+                and text.count(left) == 1 and text.count(right) == 1):
+            text = text[1:-1].strip()
+    return text
 
 
 def _parse_schema_reply(reply: str, expected: list[int]) -> dict[int, str] | None:
@@ -715,8 +805,11 @@ def translate_events(events: list[Event], translator, glossary: Glossary | None 
             before = ("이미 옮긴 앞부분입니다(참고만 하고 다시 내지 마세요):\n"
                       + "\n".join(f"  {c.source} → {c.text}" for c in recent) + "\n\n")
 
-        numbered = "\n".join(f"{ev.index}. {body}"
-                             for ev, (body, _) in zip(chunk, protected))
+        bodies = [body for body, _ in protected]
+        marks = [target_lang == "ko" and i + 1 < len(bodies)
+                 and _continues(bodies[i], bodies[i + 1]) for i in range(len(bodies))]
+        numbered = "\n".join(f"{ev.index}. {body}" + (f" {_CONTINUES}" if mark else "")
+                             for ev, body, mark in zip(chunk, bodies, marks))
         # 이 배치의 원문에 실제로 걸리는 표현만 붙인다 — word_sense.hint 참고.
         sense_hint = word_sense.hint(" ".join(ev.text for ev in chunk))
         # 형식을 서버가 강제할 수 있으면 그 형식으로 요구하고, 아니면 예전처럼
@@ -738,6 +831,10 @@ def translate_events(events: list[Event], translator, glossary: Glossary | None 
 
         for ev, (body, frame) in zip(chunk, protected):
             text = got.get(ev.index, "")
+            if target_lang == "ko":
+                i = chunk.index(ev)
+                text = _clean_continuation(text, body,
+                                           marks[i] or (i > 0 and marks[i - 1]))
             note = "대사 가운데 있던 태그를 되돌리지 못했습니다" if frame[2] else ""
             if not text:
                 # 한 줄만 다시 묻는다. 그래도 안 되면 원문을 남긴다 — 빈 자막은

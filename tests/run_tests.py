@@ -1551,6 +1551,31 @@ ok("화자명은 모델에게 보낸다", body.startswith("[Sarah]"))
 body, frame = _protect("Wait{\\an8} what?")
 ok("대사 가운데 태그는 되돌리지 못한다고 표시한다", frame[2] is True)
 
+# 화자명 뒤에서 여는 태그 — 닫는 태그만 남던 사고(2026-09-24, 431큐 중 21큐).
+body, frame = _protect("[Grace] <i>There's one.</i>")
+ok("화자명 뒤 태그도 떼고 보낸다", body == "[Grace] There's one." and frame[2] is False)
+ok("화자명 뒤에 태그를 짝 맞춰 되돌린다",
+   _restore("[그레이스] 하나입니다.", frame) == "[그레이스] <i>하나입니다.</i>")
+ok("모델이 화자명을 빠뜨려도 짝은 맞는다",
+   _restore("하나입니다.", frame) == "<i>하나입니다.</i>")
+body, frame = _protect("[Carl on radio]\n<i>Please report. Over.</i>")
+ok("화자명과 대사가 두 줄이어도 같다",
+   _restore("[칼, 무전] 보고하세요. 이상.", frame) == "[칼, 무전] <i>보고하세요. 이상.</i>")
+body, frame = _protect("- [Stratt] <i>What?</i>")
+ok("두 화자 하이픈 뒤 화자명이어도 같다",
+   _restore("- [스트라트] 뭐라고요?", frame) == "- [스트라트] <i>뭐라고요?</i>")
+body, frame = _protect("- No.\n- <i>Don't like that voice.</i>")
+ok("둘째 화자 줄에서 열린 태그는 짝 없는 닫는 태그를 남기지 않는다",
+   frame[2] is True and "</i>" not in _restore("- 아니요. - 그 목소리 싫어요.", frame))
+body, frame = _protect("<i>A</i> and <i>B</i>")
+ok("앞에서 연 태그의 닫는 짝은 그대로 둔다",
+   _restore("가 그리고 나", frame) == "<i>가 그리고 나</i>")
+body, frame = _protect("[Grace] <i>Hi</img>")
+ok("닫는 태그는 이름 전체로 맞춘다", "<i>" not in _restore("[그레이스] 안녕", frame))
+body, frame = _protect("[Grace] <i>Hi</i> there")
+ok("짝이 대사 안에서 닫히면 여는 태그를 되살리지 않는다",
+   frame[2] is True and "<i>" not in _restore("[그레이스] 안녕", frame))
+
 got = _parse_numbered("1. 진심이야?\n2. 20분이나 기다렸어\n", [1, 2])
 ok("번호 붙은 답을 읽는다", got == {1: "진심이야?", 2: "20분이나 기다렸어"})
 ok("엉뚱한 번호는 버린다", _parse_numbered("7. 남의 자막\n", [1, 2]) == {})
@@ -1688,6 +1713,48 @@ _cues = translate_events(_evs[:1], _fake, Glossary())
 # 빈 자막은 사람이 못 보고 지나친다. 원문이 남아 있으면 눈에 띈다.
 ok("끝내 못 옮기면 원문을 남긴다", _cues[0].text == "Hello.")
 ok("못 옮겼다고 표시한다", "원문" in _cues[0].note)
+
+# --- 문장이 다음 번호로 이어지는 자리 — 번호 밀림 막기 (2026-09-24) ---
+# 문장이 두 자막에 걸치면 모델이 앞 번호에 통째로 옮기고 뒤 번호에 다음 대사를
+# 당겨 넣었다. 이어지는 줄 끝에 표시를 붙여 넘어가는 자리를 보여 준다.
+_evs3 = [Event(1, 0, 1000, "Everyone, this is Dr. Ryland Grace"),
+         Event(2, 1000, 2000, "from the United States."),
+         Event(3, 2000, 3000, "Please go here.")]
+_fake = _FakeTranslator(["1. 여러분, 라일랜드 그레이스 박사님입니다 (다음 번호로 이어짐)\n"
+                         "2. [미국에서 오셨습니다.]\n3. (이쪽으로 오세요.)\n"])
+_cues = translate_events(_evs3, _fake, Glossary())
+_sent = {l.split(".")[0]: l for l in _fake.asked[0].splitlines() if l[:2] in ("1.", "2.", "3.")}
+ok("이어지는 줄에만 표시를 붙인다",
+   _sent["1"].endswith("(다음 번호로 이어짐)")
+   and "이어짐" not in _sent["2"] + _sent["3"], str(_sent))
+ok("새어 나온 표시를 지운다", _cues[0].text == "여러분, 라일랜드 그레이스 박사님입니다",
+   _cues[0].text)
+# 2번은 표시한 1번의 바로 다음 줄이라 벗기고, 3번은 표시와 무관해 그대로 둔다.
+ok("표시 옆 줄의 통째 괄호만 벗긴다",
+   [c.text for c in _cues[1:]] == ["미국에서 오셨습니다.", "(이쪽으로 오세요.)"],
+   str([c.text for c in _cues[1:]]))
+_fake = _FakeTranslator(["1. [한숨]\n"])
+_cues = translate_events([Event(1, 0, 1000, "- [sighs]")], _fake, Glossary())
+ok("원문에 있던 괄호는 벗기지 않는다", _cues[0].text == "[한숨]", _cues[0].text)
+# 한국어·일본어 원문은 마침표를 안 찍는 관행이 있다. 문장부호만 보면 모든 줄에
+# 붙는다 — 다음 줄이 영문 소문자로 시작할 때만 붙인다.
+_fake = _FakeTranslator(["1. 안녕\n2. 잘 가\n"])
+translate_events([Event(1, 0, 1000, "安心して"), Event(2, 1000, 2000, "また明日")],
+                 _fake, Glossary(), target_lang="ko")
+ok("마침표 없는 원문이라도 다음 줄이 소문자로 안 시작하면 표시를 안 붙인다",
+   "이어짐" not in _fake.asked[0])
+# 모델이 효과음의 괄호 종류를 바꿔 내도 효과음이다 — 벗기면 대사가 된다.
+_fake = _FakeTranslator(["1. 그는 말했다 (다음 번호로 이어짐)\n2. (한숨)\n"])
+_cues = translate_events([Event(1, 0, 1000, "And he said"), Event(2, 1000, 2000, "[sighs]")],
+                         _fake, Glossary())
+ok("괄호 종류가 바뀐 효과음은 벗기지 않는다", _cues[1].text == "(한숨)", _cues[1].text)
+_fake = _FakeTranslator(["1. 좋아요\n2. (그래요)\n"])
+_cues = translate_events([Event(1, 0, 1000, "Fine."), Event(2, 1000, 2000, "Yes.")],
+                         _fake, Glossary())
+ok("표시와 무관한 줄의 괄호는 건드리지 않는다", _cues[1].text == "(그래요)", _cues[1].text)
+_fake = _FakeTranslator(["1. Bonjour\n2. docteur\n"])
+translate_events(_evs3[:2], _fake, Glossary(), target_lang="fr")
+ok("잰 적 없는 목표 언어에는 아직 안 켠다", "이어짐" not in _fake.asked[0])
 
 _gl = Glossary({"Halberd Systems": "핼버드 시스템즈"})
 ok("통일표를 어긴 자리를 찾는다",
@@ -3527,6 +3594,34 @@ ok("눈금을 낸다", set(_btstats) == {"total", "mean", "median", "min", "belo
    str(sorted(_btstats)))
 ok("빈 목록도 터지지 않는다", _bt.summarize([]) == {"total": 0})
 
+# **번호 밀림** — 문장이 두 자막에 걸치면 모델이 앞 번호에 통째로 옮기고 뒤 번호에
+# 다음 대사를 당겨 넣는다. 번호는 다 있어서 번호 검사로는 못 본다(2026-09-24 실측).
+_shevs = [_PEvent(i, 0, 0, "") for i in (1, 2, 3, 4)]
+_shsrc = {1: "Everyone, this is Dr. Ryland Grace", 2: "from the United States.",
+          3: "Please go here. Thank you.", 4: "Stand up."}
+_shback = {1: "Everyone, Dr. Ryland Grace from the United States.",
+           2: "Please go here. Thank you.", 3: "Stand up.", 4: "Stand up."}
+_sh = _bt.shift_suspects(_shevs, _shsrc, _shback)
+# 1번은 제 문장을 다 담았으니(합쳐 쓴 쪽) 밀림이 아니다. 밀림은 2번부터 보인다.
+# 3번의 이웃 4 "Stand up."은 내용어가 하나(up은 기능어)지만 3번이 제 원문과 하나도
+# 안 겹치므로 받는다.
+ok("다음 대사가 당겨진 자리를 잡는다",
+   [(s.event_index, s.from_index) for s in _sh] == [(2, 3), (3, 4)],
+   str([(s.event_index, s.from_index) for s in _sh]))
+# 이웃 원문이 한 낱말이고 제 원문과도 겹치면 — 그 낱말이 번역에 다시 나온 것일 뿐이다.
+_fpevs = [_PEvent(i, 0, 0, "") for i in (1, 2)]
+_fp = _bt.shift_suspects(_fpevs, {1: "What's your mate's name again?", 2: "Name is"},
+                         {1: "Again, what was your spouse name?", 2: "Name is"})
+ok("한 낱말 이웃이 겹친 것만으로는 잡지 않는다", _fp == [], str(_fp))
+_tie = _bt.shift_suspects([_PEvent(i, 0, 0, "") for i in (1, 2, 3)],
+                          {1: "Stand up now", 2: "Stand up now", 3: "Go away there"},
+                          {3: "Stand up now"})
+ok("점수가 같으면 가까운 이웃을 출처로 본다",
+   [s.from_index for s in _tie] == [2], str([s.from_index for s in _tie]))
+ok("밀림이 없으면 비어 있다",
+   _bt.shift_suspects(_btevs, _btsrc, {1: "I never said I'd go alone",
+                                       2: "Wait five minutes"}) == [])
+
 
 class _LeakyBack:
     """부정을 흘리는 역번역 흉내."""
@@ -3551,6 +3646,8 @@ ok("어긋난 자리를 낸다",
    [d.event_index for d in _btresult.extra["worst"]] == [1, 2],
    str([d.event_index for d in _btresult.extra["worst"]]))
 ok("역번역은 위반을 내지 않는다", _btresult.violations == [])
+ok("번호 밀림 의심을 따로 낸다", _btresult.extra["shifted"] == [],
+   str(_btresult.extra.get("shifted")))
 
 
 class _DeadBack:

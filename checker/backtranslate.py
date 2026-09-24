@@ -210,3 +210,78 @@ def summarize(divergences: list[Divergence]) -> dict:
             # 원문 내용어가 절반도 안 남은 자막 수. **판정이 아니라 눈금이다** —
             # 어느 선이 오역인지는 실제 작업물로 재야 안다.
             "below_half": sum(1 for s in scores if s < 0.5)}
+
+
+# --- 번호 밀림 ---------------------------------------------------------------
+#
+# 1차 번역은 자막을 12개씩 묶어 번호를 붙여 보낸다. **문장 하나가 자막 두 개에
+# 걸치면**(`463. Everyone, this is Dr. Ryland Grace` / `464. from the United
+# States.`) 모델이 앞 번호에 문장을 통째로 옮기고, 뒤 번호들에는 한 칸씩 당겨진
+# 다음 대사를 넣는다. 번호는 다 있고 내용도 차 있어서 `_parse_numbered`의 번호
+# 검사와 빈 번호 재질문을 전부 통과한다. 타임코드는 번호에 걸려 있으므로
+# **대사가 말보다 먼저 뜨는 자막**이 조용히 나간다(exaone3.5 실측, 프로젝트
+# 헤일 메리 영어 SDH 세 구간 431큐 중 약 21큐 — 0건인 구간부터 13큐 연쇄까지,
+# 2026-09-24).
+#
+# 역번역이 이미 있으니 그것으로 잡는다: 역번역 N이 **제 원문보다 이웃 원문과 더
+# 겹치면** 밀린 것으로 본다. 판정이 아니라 사람이 볼 자리 목록이다.
+#
+# 값은 위 실측 431큐에서 정했다. 이웃 비교만으로는 뽑은 29곳 중 21곳이 실제
+# 밀림이었고, 틀린 8곳은 대부분 **이웃 원문이 내용어 한 낱말**("Personal.",
+# "Name is")이라 그 낱말이 번역에 다시 나온 것이었다. 그래서 이웃 원문이 내용어
+# 한 낱말이면, 제 원문과 하나도 안 겹칠 때만 잡는다 — 같은 431큐에서 23곳 중
+# 21곳(값을 정한 자료로 잰 것이라 실제보다 좋게 나온 숫자다). 이 규칙은 연쇄 밀림의
+# 가운데처럼 **어느 원문과도 안 겹치는 자리는 못 잡는다**. **자료 하나로 정한 값이다** —
+# `tools/translate_shift_probe.py`로 다른 작품을 재면 다시 본다.
+_SHIFT_REACH = 2        # 몇 칸까지 밀린 것을 보나 (실측 최대 2칸)
+_SHIFT_NEAR = 0.5       # 이웃 원문 내용어가 이만큼은 역번역에 있어야 한다
+_SHIFT_MARGIN = 0.25    # 그리고 제 원문보다 이만큼 더 겹쳐야 한다
+
+
+@dataclass
+class Shift:
+    event_index: int
+    from_index: int              # 이 자막에 실제로 들어온 것으로 보이는 원문 번호
+    own: float                   # 제 원문과의 겹침
+    neighbor: float              # from_index 원문과의 겹침
+    source: str
+    korean: str
+    back: str
+
+    def to_dict(self) -> dict:
+        return {"event_index": self.event_index, "from_index": self.from_index,
+                "own": round(self.own, 3), "neighbor": round(self.neighbor, 3),
+                "source": self.source, "korean": self.korean, "back": self.back}
+
+
+def shift_suspects(events: list[Event], source: dict[int, str],
+                   back: dict[int, str]) -> list[Shift]:
+    """번역이 이웃 자막의 대사를 담은 것으로 보이는 자리. 자막 순서대로 돌려준다."""
+    korean = {e.index: e.text for e in events}
+    order = [e.index for e in events if source.get(e.index)]
+    out: list[Shift] = []
+    for i, index in enumerate(order):
+        after = back.get(index)
+        if not after:
+            continue
+        own = overlap(source[index], after)
+        if own is None:
+            continue
+        best, best_index = 0.0, None
+        # 가까운 이웃부터 본다 — 점수가 같으면 가까운 쪽이 출처다.
+        steps = [s for d in range(1, _SHIFT_REACH + 1) for s in (-d, d)]
+        for step in steps:
+            j = i + step
+            if not 0 <= j < len(order):
+                continue
+            other = source[order[j]]
+            score = overlap(other, after)
+            if score is None or score <= best:
+                continue
+            if len(content_words(other)) < 2 and own > 0:
+                continue
+            best, best_index = score, order[j]
+        if best_index is not None and best >= _SHIFT_NEAR and best >= own + _SHIFT_MARGIN:
+            out.append(Shift(index, best_index, own, best, source[index],
+                             korean.get(index, ""), after))
+    return out
