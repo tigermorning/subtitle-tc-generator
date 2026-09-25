@@ -1,0 +1,207 @@
+"""넷플릭스 방향 규칙 적용판(v5): 자막 간격 + 장면전환. 시제품.
+
+넷플릭스 공식(Subtitle Timing Guidelines): 대사가 전환 위이거나 전환 뒤 0.5초 이내에 시작하면 인점을 전환 첫 프레임으로,
+아웃점이 전환 앞 0.5초 이내면 전환 2프레임 전으로 당긴다. 그 밖(전환 앞의 인점, 전환 뒤의 아웃점)은 손대지 않는다.
+사용자 결정(2026-09-25): 이 작품은 음성 시작점을 우선하고 넷플릭스 방향 규칙만 적용한다.
+
+이전 v4 설명(양방향 판은 tc_rules_gdocs.py):
+
+근거(rules/private/sources/작업자-자료/작업 기본 원칙.txt):
+  - 자막 사이 간격 메우기(500ms 미만 간격을 이전 자막 아웃점 연장으로 메움) -> 그 다음 최소간격(2프레임) 설정.
+  - 자막이 장면 전환 앞뒤 0.5초 이내에 걸치지 않게: 딱 붙이거나 0.5초 이상 벌린다. 더 자연스러운 쪽.
+      인점: 장면전환에 딱 맞추기(전환 첫 프레임) 또는 0.5초 이상 벌리기
+      아웃점: 장면전환 -2프레임 또는 0.5초 이상 벌리기
+  - 쿠팡은 비적용, 넷플릭스·디즈니는 적용. SDH만.
+사용: python tc_rules.py IN.srt SHOTS.json OUT.srt REPORT.txt [FPS] [PIXEL.srt]
+  PIXEL.srt를 주면 방송에서 바로 이어진(프레임 간격 1 이하) 자막 쌍은 간격 없이 딱 붙인다(사용자 결정 2026-09-25: 아웃점 = 다음 인점).
+"""
+import json, re, sys
+
+in_srt, shots_json, out_srt, report = sys.argv[1:5]
+FPS = float(sys.argv[5]) if len(sys.argv) > 5 else 30000 / 1001
+PIXEL = sys.argv[6] if len(sys.argv) > 6 else None
+NOFILL = bool(__import__('os').environ.get('HARDSUB_NOFILL'))   # 1이면 500ms 미만 간격 메우기를 하지 않는다(겹침·2프레임 미만만 정리)
+FR = 1000.0 / FPS
+GAP = 70                     # 최소 간격 2프레임(66.7ms) 이상, 10ms 단위 내림 뒤에도 유지되도록 70ms
+FILL = 500                   # 간격 메우기 기준
+CLEAR = 500                  # 장면전환 앞뒤 여유
+RED = round(7 * FR)          # SE 넷플릭스 프리셋 빨간 영역(7프레임): 이 안이면 전환에 딱 붙인다
+AWAY = CLEAR + 10            # 벌릴 때 목표: 10ms 내림 뒤에도 0.5초 이상이 되도록 10ms 더
+OUT_LEAD = GAP                # 아웃점은 전환 2프레임 전 = 최소 간격과 같은 70ms(체인된 다음 자막이 전환에 붙어도 충돌 없게)
+KEEP = 300                   # 인점·아웃점 조정 후에도 남겨 둘 최소 길이(이보다 짧아지면 조정을 포기하고 표시)
+SHOTS = json.load(open(shots_json))
+FLUSH = set()      # 앞 자막과 딱 붙일 자막 번호(방송에서 앞 자막 아웃 프레임 = 이 자막 인 프레임)
+log = []
+
+
+def parse(ts):
+    h, m, s, ms = map(int, re.findall(r"\d+", ts))
+    return ((h * 60 + m) * 60 + s) * 1000 + ms
+
+
+def fmt(ms):
+    ms = int(ms // 10 * 10)      # SE 미리보기(ASS 10ms 반올림)에서도 그 프레임에 뜨도록 10ms 내림
+    return f"{ms//3600000:02d}:{ms//60000%60:02d}:{ms//1000%60:02d},{ms%1000:03d}"
+
+
+cues, notes = [], []
+for b in open(in_srt, encoding="utf-8").read().strip().split("\n\n"):
+    L = b.split("\n")
+    a, e = [parse(x) for x in L[1].split(" --> ")]
+    c = {"n": int(L[0]), "in": a, "out": e, "text": "\n".join(L[2:]), "in0": a, "out0": e}
+    (notes if c["text"].startswith("[읽기 실패]") else cues).append(c)
+if PIXEL:
+    pix = []
+    for b in open(PIXEL, encoding="utf-8").read().strip().split("\n\n"):
+        L = b.split("\n")
+        a, e = [parse(x) for x in L[1].split(" --> ")]
+        pix.append((int(L[0]), a, e, "\n".join(L[2:])))
+    for (n0, a0, e0, t0), (n1, a1, e1, t1) in zip(pix, pix[1:]):
+        if not t0.startswith("[읽기 실패]") and not t1.startswith("[읽기 실패]") and a1 - e0 <= FR + 10:
+            FLUSH.add(n1)
+print(f"cues {len(cues)}, 읽기 실패(제외) {len(notes)}, 장면전환 {len(SHOTS)}, 간격 {GAP}ms, fps {FPS:.3f}")
+
+
+def near_shot(t, lo, hi):
+    """t 기준 (lo, hi) 안에 있는 가장 가까운 장면전환 하나."""
+    best = None
+    for s in SHOTS:
+        if lo < t - s < hi and (best is None or abs(t - s) < abs(t - best)):
+            best = s
+    return best
+
+
+def fix_in(c, prev):
+    t = c["in"]
+    s = near_shot(t, -RED, CLEAR)            # 전환 앞 7프레임(빨간 영역) ~ 전환 뒤 0.5초
+    if s is None or abs(t - s) <= FR:        # 전환 없음 / 이미 딱 붙음
+        return
+    lo = (prev["in"] + KEEP) if prev else 0
+    hi = c["out"] - KEEP
+    where = f"전환 앞 {s - t}ms" if t < s else f"전환 뒤 {t - s}ms"
+    if not (lo <= s <= hi):
+        log.append((c["n"], "in", t, None, f"장면전환 {s}ms {where}에 시작하나 전환 프레임으로 당길 자리가 없어 그대로 둠(음성 우선)"))
+        return
+    log.append((c["n"], "in", t, s, f"장면전환 {s}ms {where}에 시작 — 전환 첫 프레임으로 붙임"))
+    c["in"] = int(round(s))
+
+
+def fix_out(c, nxt):
+    t = c["out"]
+    s = near_shot(t, -CLEAR, RED)            # 전환 앞 0.5초 ~ 전환 뒤 7프레임(빨간 영역)에 끝나는 경우
+    if s is None:
+        return
+    target = s - OUT_LEAD
+    if abs(t - target) <= FR:
+        return
+    lo = c["in"] + KEEP
+    hi = (nxt["in"] - GAP) if nxt else 10 ** 12
+    if not (lo <= target <= hi):
+        why = "다음 자막의 음성이 전환 전에 시작해서" if hi < target else "그러면 자막이 너무 짧아져서"
+        log.append((c["n"], "out", t, None, f"장면전환 {s}ms 앞 {s - t}ms에 끝나나 {why} 전환 2프레임 전으로 못 맞춤(음성 우선)"))
+        return
+    log.append((c["n"], "out", t, target, f"장면전환 {s}ms 기준 {t - s:+d}ms에 끝남 — 전환 2프레임 전으로 당김"))
+    c["out"] = int(round(target))
+    c["locked"] = True                       # 간격 메우기가 다시 늘리지 못하게(다음 자막과의 간격이 500ms 미만이어도)
+
+
+def fill_gaps():
+    """간격 메우기(500ms 미만) -> 최소간격 2프레임. 겹침(음수 간격)도 여기서 걷힌다."""
+    for i in range(1, len(cues)):
+        p, c = cues[i - 1], cues[i]
+        flush = c["n"] in FLUSH and c["n"] == p["n"] + 1
+        if NOFILL and not flush and c["in"] - p["out"] >= GAP:
+            continue
+        if c["in"] - p["out"] < FILL:
+            new = c["in"] if flush else c["in"] - GAP
+            if p.get("locked") and new > p["out"]:
+                continue
+            if new != p["out"]:
+                why = "겹침 해소" if c["in"] < p["out"] else "간격 정리"
+                if new - p["in"] < KEEP:
+                    log.append((p["n"], "out", p["out"], new, f"{why}하면 {new - p['in']}ms로 너무 짧아짐 — 표시"))
+                log.append((p["n"], "out", p["out"], new, f"다음 자막(#{c['n']}) 인점과 {c['in'] - p['out']:+d}ms — {why}(2프레임)"))
+                p["out"] = new
+
+
+def run_rules():
+    for c in cues:
+        c["in"], c["out"] = c["in0"], c["out0"]
+        c.pop("locked", None)
+    log.clear()
+    for rnd in range(3):     # 장면전환 조정 <-> 간격 정리가 서로 밀지 않을 때까지
+        before = [(c["in"], c["out"]) for c in cues]
+        for i, c in enumerate(cues):
+            fix_in(c, cues[i - 1] if i else None)
+        fill_gaps()
+        for i, c in enumerate(cues):
+            fix_out(c, cues[i + 1] if i + 1 < len(cues) else None)
+        fill_gaps()
+        if before == [(c["in"], c["out"]) for c in cues]:
+            break
+
+
+def _out_violates(c):
+    b = c["out"] // 10 * 10
+    s = near_shot(b, -CLEAR, RED)
+    return s is not None and abs(b - (s - OUT_LEAD)) > FR + 10
+
+
+run_rules()
+# 딱 붙이기가 장면전환 규칙(아웃점 전환 2프레임 전)을 깨는 쌍은 붙이지 않고 전환 규칙을 따른다
+released = set()
+for i in range(1, len(cues)):
+    if cues[i]["n"] in FLUSH and cues[i]["n"] == cues[i - 1]["n"] + 1 and cues[i]["in"] == cues[i - 1]["out"] and _out_violates(cues[i - 1]):
+        released.add(cues[i]["n"])
+if released:
+    FLUSH -= released
+    run_rules()
+print(f"장면전환 규칙과 부딪혀 붙이지 않은 쌍 {len(released)}")
+
+# ---- 검증 ----
+bad_overlap = sum(1 for i in range(1, len(cues)) if cues[i]["in"] < cues[i - 1]["out"])
+def _flush(i):
+    return cues[i]["n"] in FLUSH and cues[i]["n"] == cues[i - 1]["n"] + 1
+
+
+bad_gap = sum(1 for i in range(1, len(cues)) if 0 < cues[i]["in"] - cues[i - 1]["out"] < GAP - 1 or (0 == cues[i]["in"] - cues[i - 1]["out"] and not _flush(i)))
+mid_gap = sum(1 for i in range(1, len(cues)) if GAP + 1 < cues[i]["in"] - cues[i - 1]["out"] < FILL)
+flush_done = sum(1 for i in range(1, len(cues)) if _flush(i) and cues[i]["in"] == cues[i - 1]["out"])
+inv = sum(1 for c in cues if c["out"] <= c["in"])
+short = sum(1 for c in cues if c["out"] - c["in"] < 833)
+
+
+def shot_violation(c):
+    v = []
+    a, b = c["in"] // 10 * 10, c["out"] // 10 * 10      # 실제로 적히는 값
+    s = near_shot(a, -RED, CLEAR)
+    if s is not None and abs(a - s) > FR + 10:
+        v.append(f"in 전환 {a - s:+d}ms")
+    s = near_shot(b, -CLEAR, RED)
+    if s is not None and abs(b - (s - OUT_LEAD)) > FR + 10:
+        v.append(f"out 전환 앞 {s - b}ms")
+    return v
+
+
+left = [(c["n"], shot_violation(c)) for c in cues if shot_violation(c)]
+print(f"겹침 {bad_overlap}, 간격 2프레임 미만 {bad_gap}, 간격 2프레임~0.5초 미정리 {mid_gap}, 길이 역전 {inv}")
+print(f"넷플릭스 규칙에 안 맞고 남은 자막 {len(left)}, 최소 길이(833ms) 미달 {short}")
+moved_in = sum(1 for c in cues if c["in"] != c["in0"])
+moved_out = sum(1 for c in cues if c["out"] != c["out0"])
+print(f"방송에서 이어진 쌍 {len(FLUSH)}, 딱 붙인 쌍 {flush_done}")
+print(f"인점 바뀐 자막 {moved_in}, 아웃점 바뀐 자막 {moved_out}")
+
+with open(out_srt, "w", encoding="utf-8") as f:
+    for k, c in enumerate(cues, 1):
+        f.write(f"{k}\n{fmt(c['in'])} --> {fmt(c['out'])}\n{c['text']}\n\n")
+with open(report, "w", encoding="utf-8") as f:
+    f.write(f"# 조정 기록 (원 번호 기준) — 간격 {GAP}ms, 장면전환 여유 {CLEAR}ms\n")
+    for n, w, a, b, msg in log:
+        f.write(f"#{n} {w} {fmt(a)} -> {fmt(b) if b is not None else '-'}  {msg}\n")
+    f.write(f"\n# 넷플릭스 규칙에 안 맞고 남은 자막 {len(left)}건\n")
+    for n, v in left:
+        f.write(f"#{n} {', '.join(v)}\n")
+    f.write(f"\n# 제외한 [읽기 실패] 구간 {len(notes)}건\n")
+    for c in notes:
+        f.write(f"#{c['n']} {fmt(c['in0'])} --> {fmt(c['out0'])}\n")
+print("wrote", out_srt, report)
