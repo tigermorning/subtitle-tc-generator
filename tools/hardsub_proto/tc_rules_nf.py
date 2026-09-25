@@ -12,12 +12,15 @@
       인점: 장면전환에 딱 맞추기(전환 첫 프레임) 또는 0.5초 이상 벌리기
       아웃점: 장면전환 -2프레임 또는 0.5초 이상 벌리기
   - 쿠팡은 비적용, 넷플릭스·디즈니는 적용. SDH만.
-사용: python tc_rules.py IN.srt SHOTS.json OUT.srt REPORT.txt [FPS]
+사용: python tc_rules.py IN.srt SHOTS.json OUT.srt REPORT.txt [FPS] [PIXEL.srt]
+  PIXEL.srt를 주면 방송에서 바로 이어진(프레임 간격 1 이하) 자막 쌍은 간격 없이 딱 붙인다(사용자 결정 2026-09-25: 아웃점 = 다음 인점).
 """
 import json, re, sys
 
 in_srt, shots_json, out_srt, report = sys.argv[1:5]
 FPS = float(sys.argv[5]) if len(sys.argv) > 5 else 30000 / 1001
+PIXEL = sys.argv[6] if len(sys.argv) > 6 else None
+NOFILL = bool(__import__('os').environ.get('HARDSUB_NOFILL'))   # 1이면 500ms 미만 간격 메우기를 하지 않는다(겹침·2프레임 미만만 정리)
 FR = 1000.0 / FPS
 GAP = 70                     # 최소 간격 2프레임(66.7ms) 이상, 10ms 단위 내림 뒤에도 유지되도록 70ms
 FILL = 500                   # 간격 메우기 기준
@@ -27,6 +30,7 @@ AWAY = CLEAR + 10            # 벌릴 때 목표: 10ms 내림 뒤에도 0.5초 �
 OUT_LEAD = GAP                # 아웃점은 전환 2프레임 전 = 최소 간격과 같은 70ms(체인된 다음 자막이 전환에 붙어도 충돌 없게)
 KEEP = 300                   # 인점·아웃점 조정 후에도 남겨 둘 최소 길이(이보다 짧아지면 조정을 포기하고 표시)
 SHOTS = json.load(open(shots_json))
+FLUSH = set()      # 앞 자막과 딱 붙일 자막 번호(방송에서 앞 자막 아웃 프레임 = 이 자막 인 프레임)
 log = []
 
 
@@ -46,6 +50,15 @@ for b in open(in_srt, encoding="utf-8").read().strip().split("\n\n"):
     a, e = [parse(x) for x in L[1].split(" --> ")]
     c = {"n": int(L[0]), "in": a, "out": e, "text": "\n".join(L[2:]), "in0": a, "out0": e}
     (notes if c["text"].startswith("[읽기 실패]") else cues).append(c)
+if PIXEL:
+    pix = []
+    for b in open(PIXEL, encoding="utf-8").read().strip().split("\n\n"):
+        L = b.split("\n")
+        a, e = [parse(x) for x in L[1].split(" --> ")]
+        pix.append((int(L[0]), a, e, "\n".join(L[2:])))
+    for (n0, a0, e0, t0), (n1, a1, e1, t1) in zip(pix, pix[1:]):
+        if not t0.startswith("[읽기 실패]") and not t1.startswith("[읽기 실패]") and a1 - e0 <= FR + 10:
+            FLUSH.add(n1)
 print(f"cues {len(cues)}, 읽기 실패(제외) {len(notes)}, 장면전환 {len(SHOTS)}, 간격 {GAP}ms, fps {FPS:.3f}")
 
 
@@ -96,8 +109,11 @@ def fill_gaps():
     """간격 메우기(500ms 미만) -> 최소간격 2프레임. 겹침(음수 간격)도 여기서 걷힌다."""
     for i in range(1, len(cues)):
         p, c = cues[i - 1], cues[i]
+        flush = c["n"] in FLUSH and c["n"] == p["n"] + 1
+        if NOFILL and not flush and c["in"] - p["out"] >= GAP:
+            continue
         if c["in"] - p["out"] < FILL:
-            new = c["in"] - GAP
+            new = c["in"] if flush else c["in"] - GAP
             if p.get("locked") and new > p["out"]:
                 continue
             if new != p["out"]:
@@ -108,21 +124,49 @@ def fill_gaps():
                 p["out"] = new
 
 
-for rnd in range(3):     # 장면전환 조정 <-> 간격 정리가 서로 밀지 않을 때까지
-    before = [(c["in"], c["out"]) for c in cues]
-    for i, c in enumerate(cues):
-        fix_in(c, cues[i - 1] if i else None)
-    fill_gaps()
-    for i, c in enumerate(cues):
-        fix_out(c, cues[i + 1] if i + 1 < len(cues) else None)
-    fill_gaps()
-    if before == [(c["in"], c["out"]) for c in cues]:
-        break
+def run_rules():
+    for c in cues:
+        c["in"], c["out"] = c["in0"], c["out0"]
+        c.pop("locked", None)
+    log.clear()
+    for rnd in range(3):     # 장면전환 조정 <-> 간격 정리가 서로 밀지 않을 때까지
+        before = [(c["in"], c["out"]) for c in cues]
+        for i, c in enumerate(cues):
+            fix_in(c, cues[i - 1] if i else None)
+        fill_gaps()
+        for i, c in enumerate(cues):
+            fix_out(c, cues[i + 1] if i + 1 < len(cues) else None)
+        fill_gaps()
+        if before == [(c["in"], c["out"]) for c in cues]:
+            break
+
+
+def _out_violates(c):
+    b = c["out"] // 10 * 10
+    s = near_shot(b, -CLEAR, RED)
+    return s is not None and abs(b - (s - OUT_LEAD)) > FR + 10
+
+
+run_rules()
+# 딱 붙이기가 장면전환 규칙(아웃점 전환 2프레임 전)을 깨는 쌍은 붙이지 않고 전환 규칙을 따른다
+released = set()
+for i in range(1, len(cues)):
+    if cues[i]["n"] in FLUSH and cues[i]["n"] == cues[i - 1]["n"] + 1 and cues[i]["in"] == cues[i - 1]["out"] and _out_violates(cues[i - 1]):
+        released.add(cues[i]["n"])
+if released:
+    FLUSH -= released
+    run_rules()
+print(f"장면전환 규칙과 부딪혀 붙이지 않은 쌍 {len(released)}")
 
 # ---- 검증 ----
 bad_overlap = sum(1 for i in range(1, len(cues)) if cues[i]["in"] < cues[i - 1]["out"])
-bad_gap = sum(1 for i in range(1, len(cues)) if 0 <= cues[i]["in"] - cues[i - 1]["out"] < GAP - 1)
+def _flush(i):
+    return cues[i]["n"] in FLUSH and cues[i]["n"] == cues[i - 1]["n"] + 1
+
+
+bad_gap = sum(1 for i in range(1, len(cues)) if 0 < cues[i]["in"] - cues[i - 1]["out"] < GAP - 1 or (0 == cues[i]["in"] - cues[i - 1]["out"] and not _flush(i)))
 mid_gap = sum(1 for i in range(1, len(cues)) if GAP + 1 < cues[i]["in"] - cues[i - 1]["out"] < FILL)
+flush_done = sum(1 for i in range(1, len(cues)) if _flush(i) and cues[i]["in"] == cues[i - 1]["out"])
 inv = sum(1 for c in cues if c["out"] <= c["in"])
 short = sum(1 for c in cues if c["out"] - c["in"] < 833)
 
@@ -144,6 +188,7 @@ print(f"겹침 {bad_overlap}, 간격 2프레임 미만 {bad_gap}, 간격 2프레
 print(f"넷플릭스 규칙에 안 맞고 남은 자막 {len(left)}, 최소 길이(833ms) 미달 {short}")
 moved_in = sum(1 for c in cues if c["in"] != c["in0"])
 moved_out = sum(1 for c in cues if c["out"] != c["out0"])
+print(f"방송에서 이어진 쌍 {len(FLUSH)}, 딱 붙인 쌍 {flush_done}")
 print(f"인점 바뀐 자막 {moved_in}, 아웃점 바뀐 자막 {moved_out}")
 
 with open(out_srt, "w", encoding="utf-8") as f:
