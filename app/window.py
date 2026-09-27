@@ -1307,7 +1307,7 @@ class MainWindow(QMainWindow):
         box = QMessageBox(self)
         box.setWindowTitle("기능과 단축키")
         box.setText("<pre>" + "\n".join(lines).replace("<", "&lt;") + "</pre>")
-        box.setInformativeText("바꾸려면 [작업 기준...] 창의 '단축키' 탭에서 고칩니다.")
+        box.setInformativeText("바꾸려면 [작업 기준...] 창의 '단축키와 기능' 탭에서 고칩니다.")
         box.exec()
 
     def resizeEvent(self, event) -> None:
