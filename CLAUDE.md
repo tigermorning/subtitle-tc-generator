@@ -22,7 +22,7 @@
                            (QFileDialog로 로컬 파일 직접 연다 — 크기 제한
                            개념 자체가 없다)
 
-    한국어 교정기 — 본체    C:\Users\user\Documents\korean-subtitle-corrector
+    한국어 교정기 — 본체    C:\Users\user\Documents\korean-subtitle-corrector-project\korean-subtitle-corrector
                            한국어 맞춤법·띄어쓰기 교정기. FastAPI 웹 서버
                            (subtitle_corrector/api.py) + 정적 프런트
                            (static/index.html). 업로드 크기 제한 **실재**:

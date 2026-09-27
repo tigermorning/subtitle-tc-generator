@@ -144,9 +144,12 @@ def find_corrector(explicit: str | None = None) -> Path | None:
     candidates = []
     here = Path(__file__).resolve().parent.parent
     beside_exe = Path(sys.executable).resolve().parent
-    for base in (here.parent, beside_exe.parent, beside_exe,
+    # 교정기 폴더는 옆자리에서 <상위>/korean-subtitle-corrector-project/ 아래로 옮겨진
+    # 적이 있다. 한 배치만 보면 옮긴 뒤 조용히 '없음'이 되므로 두 배치를 다 본다.
+    for base in (here.parent, here.parent.parent, beside_exe.parent, beside_exe,
                  Path.home() / "Documents", user_data()):
         candidates.append(base / "korean-subtitle-corrector")
+        candidates.append(base / "korean-subtitle-corrector-project" / "korean-subtitle-corrector")
 
     for candidate in candidates:
         if not candidate:
