@@ -94,7 +94,7 @@ dist/자막생성기/자막생성기.exe
 빌드:
 
 ```
-cmd.exe /c "..\korean-subtitle-corrector\.venv\Scripts\python.exe -m PyInstaller \
+cmd.exe /c "..\..\korean-subtitle-corrector-project\korean-subtitle-corrector\.venv\Scripts\python.exe -m PyInstaller \
   --noconfirm --distpath dist --workpath .tmp\build 자막생성기.spec"
 ```
 
@@ -444,7 +444,7 @@ kiwi를 부르면 적재에 1~2분이 걸린다. **애매하면 말하지 않는
 
 ```bash
 python3 tests/run_tests.py     # 1236건 (GUI 제외)
-cmd.exe /c "..\korean-subtitle-corrector\.venv\Scripts\python.exe tests\run_tests.py"   # 1236건
+cmd.exe /c "..\..\korean-subtitle-corrector-project\korean-subtitle-corrector\.venv\Scripts\python.exe tests\run_tests.py"   # 1236건
 ```
 
 시스템 파이썬에는 PySide6가 없다. `app/`을 건드리면 venv 쪽으로도 돌린다.
