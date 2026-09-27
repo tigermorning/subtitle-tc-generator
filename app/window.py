@@ -11,7 +11,7 @@ from pathlib import Path
 from PySide6.QtCore import QObject, QThread, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QDockWidget, QFileDialog, QHBoxLayout, QLabel, QSizePolicy,
+    QAbstractItemView, QCheckBox, QComboBox, QDockWidget, QFileDialog, QHBoxLayout, QLabel, QSizePolicy,
     QMainWindow, QMessageBox, QPlainTextEdit, QProgressBar, QPushButton,
     QSplitter, QTableView, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 
@@ -387,6 +387,8 @@ class MainWindow(QMainWindow):
         self.results.horizontalHeader().setStretchLastSection(True)
         self.results.setColumnWidth(0, 60)
         self.results.setColumnWidth(1, 70)
+        # 읽기 전용이다. 더블클릭이 칸 편집을 열면 번호가 글자로 바뀌어 이동이 깨진다.
+        self.results.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.results.doubleClicked.connect(self._jump_to_violation)
 
         dock = QDockWidget("검사 결과", self)
