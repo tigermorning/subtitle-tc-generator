@@ -225,23 +225,25 @@ python tools/voice_sep_proto/check_rules.py "$W/final_sdh.srt" .work/hardsub-e01
 
 ## 11. 다른 PC에서 이어 하기 (2026-10-01)
 
-### git에 있는 것 / 없는 것
+### 데이터는 옮기지 않아도 된다
 
-- **git(브랜치 `voice-sep-tc`)**: 코드(`tools/voice_sep_proto/`, `tools/hardsub_proto/`), 이 문서, `CLAUDE.md`. 
-- **git에 없는 것 (다른 PC로 직접 옮겨야 함)**. 대사·영상·음성이 들어 있어 공개 저장소에 올리지 않는다.
-  - `[습작] SDH+번역/하드섭(자막필요)/` 폴더 전체 (영상 1.6GB 포함)
-    - 원본 영상 `…E01.260418.720p-NEXT.mp4`
-    - `E01_음성분리_테스트/` (첫 구간 02:00~04:00: `voice.wav`, `others.wav`, `mix.wav`, `final_sdh_sy.srt`(사용자 수정본), `units.json` 등)
-    - `E01_음성분리_테스트_04-06분/` (둘째 구간: `voice.wav`, `draft_0406_mine.srt`(내 초안), `user_0406_edit.srt`(사용자 수정본), `pairs_0406.json`)
-  - 저장소 안 `.work/hardsub-e01/` (gitignore): `fix7/final.srt`, `fix7_240_360.json`, `shots_e01.json`, `rerun/pixel.srt`. 다시 만들면 픽셀 단계만 10~15분이고 텍스트 읽기는 사람 눈이 필요해서, **복사하는 편이 낫다.**
-- Claude 메모리(`~/.claude/projects/…/memory/`)는 PC마다 따로다. 이 문서 8~10절이 같은 내용을 담고 있으니 새 PC에서는 이 문서를 먼저 읽게 한다.
+- 두 구간(02:00~04:00, 04:00~06:00)은 **학습용 시험**이었고 결론은 8~10절에 있다. 영상·wav·SRT는 결론을 다시 만들 때만 필요하다.
+- 결론을 재현하는 숫자 기록은 git에 있다(대사 없음, 시각만).
+  - `docs/evidence/voice_sep_user_edits_e01.csv`: 자막별 화면 글자 판·초안·사용자 수정본의 인점·아웃점(89행)
+  - `tools/voice_sep_proto/compare_edits.py`: 위 CSV로 일치율 표를 다시 낸다
+  - 확인: `python tools/voice_sep_proto/compare_edits.py docs/evidence/voice_sep_user_edits_e01.csv` 결과가 9절 표와 같아야 한다.
+- 옮기지 **않는** 것: 영상, `voice.wav`·`others.wav`·`mix.wav`, 대사가 든 SRT. 공개 저장소에 올리지 않는다.
+
+### 새 구간(세 번째)을 검증하려면 필요한 것
+
+- E01 영상(또는 다른 하드섭 영상)과 그 영상의 화면 글자 기반 초안(`fix7` 방식). 이것들은 그 PC에서 새로 만들거나 그 영상만 복사한다.
+- 화면 글자 없는 영상이라면 영상만 있으면 된다.
 
 ### 새 PC 준비
 
-1. 저장소를 받는다: `git clone git@github.com:tigermorning/subtitle-tc-generator.git` 후 `git checkout voice-sep-tc`.
-2. 위 데이터 폴더를 같은 상대 위치로 복사한다. 저장소와 `[습작] SDH+번역`이 **같은 부모 폴더**에 있어야 문서의 명령이 그대로 돈다(`../[습작] SDH+번역/…`).
-3. 환경: 파이썬 + `torch`(CUDA), `torchaudio`, `scipy`, `numpy`, `ffmpeg`, Subtitle Edit. 음성 분리는 GPU가 있어야 현실적이다(RTX 3060 Ti에서 2분 구간 1분 안팎).
-4. 훅을 켠다: `git config core.hooksPath tools/hooks`.
+1. `git clone git@github.com:tigermorning/subtitle-tc-generator.git` 후 `git checkout voice-sep-tc`
+2. `git config core.hooksPath tools/hooks`
+3. 환경: 파이썬 + `torch`(CUDA), `torchaudio`, `scipy`, `numpy`, `ffmpeg`, Subtitle Edit. 음성 분리는 GPU가 필요하다(RTX 3060 Ti에서 2분 구간 1분 안팎).
 
 ### 새 세션에서 Claude에게 줄 첫 말
 
@@ -249,6 +251,5 @@ python tools/voice_sep_proto/check_rules.py "$W/final_sdh.srt" .work/hardsub-e01
 
 ### 이어서 할 일
 
-- 10절 "남은 일"을 본다. 가장 먼저 할 것: 6:00 이후 세 번째 구간으로 인점 기준(소리 오름 −10ms 안팎)을 검증한다.
-- 절차: `separate.py`로 구간 분리 → 화면 글자 기반(`fix7`) 초안 → 인점만 소리 오름으로 보정 → SE로 파형 확인 → 사용자 수정본과 시간·텍스트로 짝지어 비교.
-- 사용자에게 파일을 보낼 때는 `_sent` 복사본을 남긴다(10절).
+- 10절 "남은 일"을 본다. 가장 먼저 할 것: 세 번째 구간에서 인점 기준(소리 오름 −10ms 안팎)을 검증한다.
+- 절차: `separate.py`로 구간 분리 → 화면 글자 기반 초안 → 인점만 소리 오름으로 보정 → SE로 파형 확인 → 사용자에게 `_sent` 복사본을 남기고 전달 → 사용자 수정본과 시간·텍스트로 짝지어 비교 → 같은 열로 CSV에 행을 덧붙이고 `compare_edits.py` 실행.
