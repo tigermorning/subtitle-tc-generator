@@ -3923,6 +3923,11 @@ else:
     ok("화면 전용 함수는 로그를 안 쓴다",
        "log(" not in _uinspect.getsource(_uw.MainWindow._note_ui))
 
+    # 검사 결과 표는 읽기 전용이다. 더블클릭이 칸 편집을 열면 `자막` 칸 번호를
+    # 글자로 고칠 수 있고, 그러면 다음 더블클릭이 `int()`에서 죽는다.
+    ok("검사 결과 표는 편집되지 않는다",
+       "NoEditTriggers" in _uinspect.getsource(_uw.MainWindow._build_results))
+
 
 # --- mpv를 UI 실에서 기다리지 않는다 ------------------------------------------
 # `command()`는 mpv의 답을 기다린다. UI 실에서 부르면 mpv가 늦는 만큼 화면이 멈춘다 —

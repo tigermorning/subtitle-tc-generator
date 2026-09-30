@@ -10,11 +10,21 @@ set "HERE=%~dp0"
 set "REPO=%HERE%.."
 cd /d "%REPO%"
 
+rem Python with PySide6: CHECKER_PYTHON, then PYSIDE_PYTHON, then the Korean corrector
+rem venv (current layout ..\..\korean-subtitle-corrector-project\korean-subtitle-corrector,
+rem then the old sibling layout ..\korean-subtitle-corrector), then PATH.
+rem The corrector folder moved once and a single hard-coded path silently fell back to
+rem a python without PySide6, so every known layout is checked.
 set "PY=%CHECKER_PYTHON%"
-if not defined PY (
-  if exist "%REPO%\..\korean-subtitle-corrector\.venv\Scripts\python.exe" (
-    set "PY=%REPO%\..\korean-subtitle-corrector\.venv\Scripts\python.exe"
-  )
+if not defined PY if defined PYSIDE_PYTHON if exist "%PYSIDE_PYTHON%" set "PY=%PYSIDE_PYTHON%"
+if defined PYSIDE_PYTHON if not exist "%PYSIDE_PYTHON%" echo   PYSIDE_PYTHON=%PYSIDE_PYTHON% does not exist - looking elsewhere.
+set "KSC_NEW=%REPO%\..\..\korean-subtitle-corrector-project\korean-subtitle-corrector"
+set "KSC_OLD=%REPO%\..\korean-subtitle-corrector"
+if not defined PY if exist "%KSC_NEW%\.venv\Scripts\python.exe" (
+  set "PY=%KSC_NEW%\.venv\Scripts\python.exe"
+)
+if not defined PY if exist "%KSC_OLD%\.venv\Scripts\python.exe" (
+  set "PY=%KSC_OLD%\.venv\Scripts\python.exe"
 )
 if not defined PY set "PY=python"
 

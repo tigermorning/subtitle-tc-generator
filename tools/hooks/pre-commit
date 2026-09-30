@@ -72,10 +72,46 @@ fi
 # venv 쪽으로도 돌려야 한다. 막지는 않는다 — 훅이 특정 venv의 존재를 강제하면
 # 다른 기계에서 커밋이 아예 안 된다. **여기에 시험 수를 적지 않는다** — 적는
 # 순간 낡는다(그 숫자는 README와 CLAUDE.md에만 두고 docs_check가 지킨다).
+#
+# venv 경로를 한 줄로 박아 두면 폴더 배치가 바뀔 때 조용히 틀린 안내가 된다(실제로
+# 그랬다). 그래서 PYSIDE_PYTHON을 먼저 보고, 없으면 후보 중 실제로 있는 것을 찾아
+# 그 경로를 알려 준다. 워크트리에서 돌면 ROOT가 깊어지므로 후보의 기준은 본 저장소
+# 루트(git common dir의 부모)로 잡는다.
 if git diff --cached --name-only | grep -q '^app/'; then
     echo ""
-    echo "pre-commit: app/ 을 건드렸다. PySide6까지 도는 시험은 훅이 못 돌린다:"
-    echo "  cmd.exe /c \"..\\korean-subtitle-corrector\\.venv\\Scripts\\python.exe tests\\run_tests.py\""
+    echo "pre-commit: app/ 을 건드렸다. PySide6까지 도는 시험은 훅이 못 돌린다."
+
+    MAIN_ROOT=$(cd "$(git rev-parse --git-common-dir)/.." 2>/dev/null && pwd) || MAIN_ROOT="$ROOT"
+    PYSIDE_PY=""
+    if [ -n "$PYSIDE_PYTHON" ] && [ -f "$PYSIDE_PYTHON" ]; then
+        PYSIDE_PY="$PYSIDE_PYTHON"
+    else
+        if [ -n "$PYSIDE_PYTHON" ]; then
+            echo "  PYSIDE_PYTHON=$PYSIDE_PYTHON 이 가리키는 파일이 없다. 후보 경로에서 찾는다."
+        fi
+        for candidate in \
+            "$MAIN_ROOT/../../korean-subtitle-corrector-project/korean-subtitle-corrector/.venv/Scripts/python.exe" \
+            "$MAIN_ROOT/../korean-subtitle-corrector/.venv/Scripts/python.exe" \
+            "$MAIN_ROOT/../../korean-subtitle-corrector/.venv/Scripts/python.exe"; do
+            if [ -f "$candidate" ]; then
+                PYSIDE_PY=$(cd "$(dirname "$candidate")" && pwd)/python.exe
+                break
+            fi
+        done
+    fi
+
+    if [ -n "$PYSIDE_PY" ]; then
+        WIN_PY="$PYSIDE_PY"
+        if command -v cygpath >/dev/null 2>&1; then
+            WIN_PY=$(cygpath -w "$PYSIDE_PY")
+        elif command -v wslpath >/dev/null 2>&1; then
+            WIN_PY=$(wslpath -w "$PYSIDE_PY")
+        fi
+        echo "  cmd.exe /c \"$WIN_PY tests\\run_tests.py\""
+    else
+        echo "  PySide6가 깔린 파이썬을 찾지 못했다. 경로를 알려 주면 다음부터 그것을 안내한다:"
+        echo "    export PYSIDE_PYTHON=/path/to/.venv/Scripts/python.exe"
+    fi
 fi
 
 exit 0
