@@ -241,9 +241,13 @@ python tools/voice_sep_proto/check_rules.py "$W/final_sdh.srt" .work/hardsub-e01
 
 ### 새 PC 준비
 
-1. `git clone git@github.com:tigermorning/subtitle-tc-generator.git` 후 `git checkout voice-sep-tc`
-2. `git config core.hooksPath tools/hooks`
-3. 환경: 파이썬 + `torch`(CUDA), `torchaudio`, `scipy`, `numpy`, `ffmpeg`, Subtitle Edit. 음성 분리는 GPU가 필요하다(RTX 3060 Ti에서 2분 구간 1분 안팎).
+단계별 명령은 `README.md`의 "새 PC에서 시작하기"에 있다. 요약:
+
+1. GitHub SSH 키 등록(`ssh -T git@github.com`으로 확인). 없으면 HTTPS 주소와 `gh auth login`.
+2. `git clone git@github.com:tigermorning/subtitle-tc-generator.git` (`master`를 받는다. 작업 브랜치 `voice-sep-tc`는 병합 후 삭제했다)
+3. `git clone git@github.com:tigermorning/subtitle-tc-rules.git rules/private` — 비공개 규정 저장소, 접근 권한 필요. 없으면 커밋 훅의 시험이 멈춘다.
+4. `git config core.hooksPath tools/hooks`
+5. 환경: 파이썬 + `torch`(CUDA), `torchaudio`, `scipy`, `numpy`, `ffmpeg`, Subtitle Edit. 음성 분리는 GPU가 필요하다(RTX 3060 Ti에서 2분 구간 1분 안팎).
 
 ### 새 세션에서 Claude에게 줄 첫 말
 

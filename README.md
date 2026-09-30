@@ -71,6 +71,51 @@
     ① 1차 번역 직후   오역 검증 층1 — 원문과 전수 대조(화자 표시·용어·부정·숫자)
     ③ 끝            역번역 — 번역을 원어로 되돌려 원문과 견준다
 
+## 새 PC에서 시작하기
+
+다른 PC에서 이 작업을 이어 받을 때 처음 한 번만 한다. 미공개 영상·음성·대사가 든 파일은
+저장소에 없으므로(`CLAUDE.md` 규칙 6), 작업할 영상은 그 PC에 따로 둔다.
+
+1. **GitHub SSH 키를 등록해 둔다.** 아래 명령이 `Hi tigermorning!`(또는 본인 계정)을 내면 된다.
+   키가 없으면 GitHub → Settings → SSH keys에 등록하거나, 아래 주소를
+   `https://github.com/…` 꼴로 바꿔 쓰고 `gh auth login`으로 로그인한다.
+
+   ```bash
+   ssh -T git@github.com
+   ```
+
+2. **저장소를 받는다.**
+
+   ```bash
+   git clone git@github.com:tigermorning/subtitle-tc-generator.git
+   cd subtitle-tc-generator
+   ```
+
+3. **비공개 규정 저장소를 받는다**(접근 권한이 있어야 한다). 없으면 커밋 훅의 시험이 멈춘다.
+   자세한 이유는 아래 "발주처 공식 규정은 별도 비공개 저장소에 있다".
+
+   ```bash
+   git clone git@github.com:tigermorning/subtitle-tc-rules.git rules/private
+   ```
+
+4. **커밋 훅을 켠다**(클론마다 한 번).
+
+   ```bash
+   git config core.hooksPath tools/hooks
+   ```
+
+5. **시험이 도는지 확인한다.** 끝에 `전부 통과`가 나와야 한다.
+
+   ```bash
+   python tests/run_tests.py
+   ```
+
+6. **Claude Code로 이어 하려면** 받은 폴더에서 세션을 열고 첫 말로 이렇게 한다.
+   음성 분리 TC 작업이면 `docs/HANDOFF_voice_sep_tc.md`(8~10절이 최신 결론),
+   하드섭 작업이면 `docs/HANDOFF_hardsub_tc.md`, 전체 지도는 `docs/HANDOFF.md`다.
+
+   > `docs/HANDOFF_voice_sep_tc.md`를 읽고 이어서 진행해 줘.
+
 ## 쓰는 법 — 화면
 
 Windows용 실행 파일이다. 파이썬이 없어도 돈다.
