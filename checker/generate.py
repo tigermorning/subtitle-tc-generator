@@ -223,13 +223,13 @@ def hallucination_suspects(events: list[Event], segments: list[Segment],
 
 
 def settle_timecodes(events: list[Event], speech: list[tuple[int, int]], fps: float,
-                     detector: str, limits: TimingLimits,
+                     detector: str, limits: TimingLimits, rule: "SpottingRule",
                      shots: list[int] | None = None,
                      no_audio: set[int] | None = None) -> tuple[TimingResult, int]:
     """스포팅(말소리·장면 전환)과 수렴. 돌려주는 `events`는 번호순이다.
 
-    **인점·아웃점을 말소리에 맞춘다.** 작업자 기준: 인점은 목소리 시작 2~3프레임
-    전, 아웃점은 끝난 뒤 6~9프레임. whisper가 찍은 경계는 이 여유를 모른다.
+    **인점·아웃점을 말소리에 맞춘다.** 여유는 발주처 규정(`rule`, 프로파일의
+    `spotting` 절)이다. whisper가 찍은 경계는 이 여유를 모른다.
 
     검사 경로에서는 이 조정을 자동으로 하지 않는다 — 사람이 잡은 타임코드를
     추정값으로 덮어쓰면 싱크가 통째로 어긋나기 때문이다. 여기서는 타임코드 자체가
@@ -248,7 +248,7 @@ def settle_timecodes(events: list[Event], speech: list[tuple[int, int]], fps: fl
     timed = [e for e in events if e.index not in no_audio]
     held = [e for e in events if e.index in no_audio]
 
-    suggestions = suggest_spotting(timed, speech, fps, detector=detector)
+    suggestions = suggest_spotting(timed, speech, fps, rule, detector=detector)
     if shots is not None:
         suggestions += suggest_shot_snap(timed, shots, fps)
     moved = apply_spotting(timed, suggestions)
@@ -613,6 +613,8 @@ def generate(video: Path, profile: dict, script: Path | None = None,
         say(f"장면 전환 {len(shots)}곳")
 
     limits = TimingLimits.from_profile(profile, fps=fps)
+    from .timing import SpottingRule
+    rule = SpottingRule.from_profile(profile)
     # 규정 하한 위의 실무 바닥(학습값, 약 1초) — **생성 경로에서만**. 짧은 말은
     # 작업자가 아웃점을 더 늘려 세우는데 규정 하한까지만 늘리고 멈춰 정답보다
     # 200~400ms 일찍 끝났다(2026-09-11, 드라마B E02·E03). 규칙 11: 규정이 비워 둔
@@ -623,7 +625,7 @@ def generate(video: Path, profile: dict, script: Path | None = None,
     if floor and floor > (limits.min_duration_ms or 0):
         limits.preferred_min_duration_ms = floor
         say(f"짧은 자막 실무 바닥(학습값) {floor}ms — 규정 하한 위에서 아웃점을 늘립니다")
-    result, moved = settle_timecodes(events, speech, fps, how, limits,
+    result, moved = settle_timecodes(events, speech, fps, how, limits, rule,
                                      shots=shots, no_audio=no_audio)
     if moved:
         say(f"인점·아웃점 {moved}곳을 말소리에 맞춤")

@@ -323,7 +323,7 @@ def merge_sound_events(dialogue_events: list[Event], dialogue_notes: list[tuple[
     OCR처럼 신뢰도로 가르지 않는다).
 
     **이웃 대사와 겹치면 밀어내고, 너무 짧아지면 버린다**(2026-08-31, 코드
-    리뷰로 발견) — 스포팅(`timing.py`의 `LEADS`)이 대사 아웃점을 말소리
+    리뷰로 발견) — 스포팅(`timing.suggest_spotting`의 규정 여유)이 대사 아웃점을 말소리
     구간 끝보다 늦게 늘릴 수 있어서, 그 자리에 얹은 소리 후보가 대사와
     겹칠 수 있다. 겹침을 없앤 뒤 `_MIN_SFX_DURATION_MS`보다 짧아지면 그
     소리 후보는 통째로 버린다 — 애매한 후보 하나보다 자막이 안 겹치는 게

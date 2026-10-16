@@ -195,86 +195,75 @@ def converge(events: list[Event], limits: TimingLimits, rounds: int = 3) -> Timi
     return result
 
 
-# 작업자 자료의 스포팅 기준:
-#   모눈 1칸 = 0.1초 = 3프레임
+# **인점·아웃점 여유는 규정이다 — 발주처 프로파일의 `spotting` 절에서 읽는다.**
+# 넷플릭스·디즈니·쿠팡 모두 작업 기본 원칙을 규정으로 고정했다(사용자 지시,
+# 2026-10-16). 근거와 원문 인용은 `rules/private/<발주처>/common.yaml`의 같은 절.
 #   인점: 보이스 시작 전 0.1초 이내(2~3프레임)
 #   아웃점: 보이스 끝난 후 0.2~0.3초 이내(6~9프레임)
-#   음성이 겹치면 다음 화자의 인점 우선
-#   아웃점 규칙보다 Minimum Duration이 우선
-# "한 칸 = 0.1초"는 SE 화면 실측으로 확인했다(2026-09-11, 배율 무관 초당 10칸).
-# "3프레임"은 30fps 환산이다 — 24fps면 2.4, 25fps면 2.5, 60fps면 6프레임. 규정은
-# **시간**이 기준이고 프레임 수는 fps에 딸린 표기다(fps별 표는
-# rules/private/sources/작업자-자료/이미지-정독.md "스포팅·장면전환").
-# **여유 값은 검출기에 딸린 값이다.** 작업자 기준(인점은 목소리 시작 2~3프레임 전,
-# 아웃점은 끝난 뒤 6~9프레임)은 *사람이 듣는 말의 경계*를 기준으로 한 것이고,
-# 검출기가 그 경계를 어디로 잡느냐는 방법마다 다르다. 같은 규정을 지키려면 검출기가
-# 어긋나는 만큼을 여유로 되돌려야 한다.
+#   음성이 겹치면 다음 화자의 인점 우선 / 아웃점 규칙보다 Minimum Duration이 우선
+# 프레임 수는 30fps 표기("모눈 1칸 = 0.1초 = 3프레임")이고 기준은 **시간**이라
+# 규정 값은 ms로 둔다 — fps가 달라도 같은 시간 여유를 쓴다.
 #
-# 정답을 아는 합성 오디오로 재 보니 VAD는 말 시작을 거의 정확히 잡았다
-# (오차 +4~+11ms, 흩어짐 ±10~19ms — 한 프레임보다 작다). 음량 검출은 숨소리에
-# 먼저 반응해 일찍 잡고, 말끝은 일찍 자른다.
-#
-# 그래서 검출기별로 값을 따로 둔다. 전문가 정답 1편과 연습 자료 2편에서 100ms 안에
-# 드는 자막 수로 골랐다(2026-08-11):
-#
-#     인점 여유   0프레임 206  1프레임 206  2프레임 204  3프레임 186  5프레임 98
-#     아웃 여유   3프레임 123  6프레임 102  9프레임  64  12프레임  57
-#
-# 음량 쪽 값은 그대로 둔다 — 그 값으로 잰 결과가 이미 있고, 검출기가 다르면 근거도
-# 다시 세워야 한다.
-#
-# **이 프레임 수는 23.976fps 기준이다**(위 스윕 커밋 77dffbf가 "한 프레임 42ms"로
-# 쟀다). 영상 fps가 다르면 프레임 수를 그대로 쓰지 않고 **ms로 환산해 적용한다**
-# (2026-09-11) — 안 그러면 25fps에서는 같은 3프레임이 120ms, 60fps에서는 50ms가
-# 돼 규정(시간 기준)에서 벗어난다. 사람이 읽는 제안 문구에는 그 영상 fps로 다시
-# 환산한 프레임 수를 적는다.
-LEADS_REF_FPS = 23.976
+# 예전에는 여기 `LEADS` 상수가 규정 여유와 검출기 오차를 한 숫자에 섞어 들고
+# 있었다(정답 자막으로 실측해 고른 값). 규정은 관측과 겨루지 않으므로(규칙 11)
+# 둘을 갈랐다: 규정은 `SpottingRule`, 검출기 오차는 `DETECTOR_TAIL_FRAMES`.
+
+
+@dataclass(frozen=True)
+class SpottingRule:
+    """발주처 규정의 인점·아웃점 여유(ms). 기준점은 사람이 듣는 말의 경계다."""
+    lead_in_ms: tuple[float, float]
+    lead_out_ms: tuple[float, float]
+
+    @classmethod
+    def from_profile(cls, profile: dict) -> "SpottingRule":
+        spot = profile.get("spotting") or {}
+        lead_in, lead_out = spot.get("lead_in_ms"), spot.get("lead_out_ms")
+        if not (lead_in and lead_out):
+            raise ValueError(
+                "프로파일에 인점·아웃점 규정(spotting)이 없습니다 — 발주처 common.yaml에 "
+                "spotting.lead_in_ms·lead_out_ms를 [하한, 상한] ms로 넣으세요"
+                "(예: rules/private/netflix/common.yaml)")
+        rule = cls((float(lead_in[0]), float(lead_in[1])),
+                   (float(lead_out[0]), float(lead_out[1])))
+        if rule.lead_in_ms[0] > rule.lead_in_ms[1] or rule.lead_out_ms[0] > rule.lead_out_ms[1]:
+            raise ValueError(f"spotting 범위는 [하한, 상한] 순서여야 합니다: {spot}")
+        return rule
+
+
+# **검출기 보정은 규정과 따로 둔다.** 검출기가 말의 경계를 어긋나게 잡는 만큼만
+# 되돌리는 값이다. 지금 있는 것은 말끝 보정(tail)뿐이다.
+#   loudness: 말 끝의 잦아드는 소리를 일찍 자른다(`media.detect_speech` 주석) —
+#     6프레임. 전문가 타임코드 대조로 고른 값이라 진짜 경계 대비로는 다시 재야 한다.
+#   vad·vad-band: 합성 오디오에서 말 시작은 +4~+11ms(1프레임 미만)로 잡았다. 말
+#     끝은 진짜 경계 대비로 잰 적이 없어 0이다. 정답 자막 대비 기록(2026-09-13,
+#     vad-band 아웃점)은 규정 여유가 섞인 값이라 여기 쓸 수 없다.
+# 프레임 수는 23.976fps로 잰 값이다 — ms로 환산해 쓴다.
+DETECTOR_REF_FPS = 23.976
+DETECTOR_TAIL_FRAMES = {"loudness": 6, "vad": 0, "vad-band": 0}
+SPEECH_TAIL_FRAMES = DETECTOR_TAIL_FRAMES["loudness"]
+
 # **앞뒤에 바로 붙는 자막이 없을 때만 여유를 둔다**(사용자 지시, 2026-09-11:
 # "앞뒤에 바로 연결되는 자막이 없다는 전제 하에, TC의 인점과 아웃점은 0.1~0.2초의
 # 여유를 두는 것이 관례"). 붙는 자막은 여유 대신 **다음 인점까지 채운다**.
-# 드라마B E02·E03 정답에서 확인(VAD 대비): 떨어진 자막은 인점 +97/+86ms·아웃점
-# +89/+126ms(≈0.1초, 지금 LEADS와 같다), 붙은 자막은 아웃점이 +214/+221ms —
-# 다음 자막 앞까지 늘린 값이다. 붙였는지의 기준은 **소리 사이 침묵**: 붙은 자막의
+# 붙였는지의 기준은 **소리 사이 침묵**: 드라마B E02·E03 정답에서 붙은 자막의
 # 95~97%가 800ms 안, 떨어진 자막은 13~14%만 그 안. 이 문턱으로 가른다.
 CHAIN_SILENCE_MS = 800
 
-LEADS = {
-    "loudness": {"in": (2, 3), "out": (6, 9), "tail": 6},
-    # vad out (3,4)는 **(6,9)로 바꿔 봤다가 되돌렸다**(2026-09-11, 사용자 확인 뒤
-    # 실측). 드라마B E02·E03 정답 대조에서 아웃점 가운데가 -115ms(≈3프레임)
-    # 일러 작업자 기준(끝난 뒤 6~9프레임)으로 올려 봤더니 가운데는 -62/-28ms로
-    # 줄었지만 |중앙|이 178→228ms·190→199ms, 100ms 안이 33→23%·37→30%로
-    # **나빠졌다.** 가운데값이 이른 것은 분포가 둘로 갈려 있어서다 — 이미 맞거나
-    # 늦은 아웃점(다음 인점에 붙은 것 등)까지 같이 밀려 절반이 넘어갔다. 값
-    # 하나로 고칠 자리가 아니다. 다음에 볼 것은 "어느 아웃점이 이른가"의 조건
-    # (정답이 다음 자막과 이어 붙은 자리인지 등)이지 프레임 수가 아니다.
-    "vad": {"in": (1, 2), "out": (3, 4), "tail": 0},
-    # `--speech vad-band`(검출은 문턱 0.5, 경계는 낮은 문턱까지 확장)용. 경계
-    # 정의가 달라지면 여유도 다시 재야 한다 — 위 "여유 값은 검출기에 딸린
-    # 값이다"와 같은 이유. 드라마B E02·E03 정답으로 실측(2026-09-13, 떨어진
-    # 자막): 정답 인점은 band 온셋보다 83/70ms 이르고(≈2프레임), 정답 아웃점은
-    # band 오프셋보다 52/92ms 늦다(≈1~2프레임). vad보다 아웃 여유가 작은 것은
-    # band가 이미 낮은 문턱까지 끝을 늘려 잡기 때문이다.
-    "vad-band": {"in": (1, 2), "out": (1, 2), "tail": 0},
-}
 
-LEAD_IN_FRAMES = LEADS["loudness"]["in"]
-LEAD_OUT_FRAMES = LEADS["loudness"]["out"]
-SPEECH_TAIL_FRAMES = LEADS["loudness"]["tail"]
+def leads_ms(rule: SpottingRule, detector: str = "loudness") -> dict:
+    """규정 여유와 검출기 말끝 보정을 ms로 돌려준다.
 
-
-def leads_ms(detector: str = "loudness") -> dict:
-    """LEADS의 프레임 값을 기준 fps(23.976)로 ms 환산해 돌려준다.
-
-    영상 fps와 무관하게 같은 시간 여유를 쓰기 위한 것이다. 반환:
-    ``{"in": (lo_ms, hi_ms), "out": (lo_ms, hi_ms), "tail": ms}``.
+    반환: ``{"in": (lo_ms, hi_ms), "out": (lo_ms, hi_ms), "tail": ms}``.
+    모르는 검출기 이름은 오류다 — 조용히 다른 검출기 보정이 걸리면 안 된다.
     """
-    leads = LEADS.get(detector, LEADS["loudness"])
-    f = 1000.0 / LEADS_REF_FPS
+    if detector not in DETECTOR_TAIL_FRAMES:
+        raise ValueError(f"검출기 보정이 없는 이름입니다: {detector!r} "
+                         f"(있는 것: {sorted(DETECTOR_TAIL_FRAMES)})")
     return {
-        "in": (leads["in"][0] * f, leads["in"][1] * f),
-        "out": (leads["out"][0] * f, leads["out"][1] * f),
-        "tail": leads["tail"] * f,
+        "in": rule.lead_in_ms,
+        "out": rule.lead_out_ms,
+        "tail": DETECTOR_TAIL_FRAMES[detector] * 1000.0 / DETECTOR_REF_FPS,
     }
 
 
@@ -341,6 +330,7 @@ def apply_spotting(events: list[Event], suggestions: list) -> int:
 
 
 def suggest_spotting(events: list[Event], speech: list[tuple[int, int]], fps: float,
+                     rule: SpottingRule,
                      tolerance_frames: int = 4,
                      detector: str = "loudness",
                      max_shift_ms: int = 2000) -> list[SpotSuggestion]:
@@ -362,13 +352,16 @@ def suggest_spotting(events: list[Event], speech: list[tuple[int, int]], fps: fl
     이런 자리는 근거가 이 자막 하나를 가리키는 게 아니라 넓은 구간을 가리키는
     것이므로, **크게 옮기는 대신 아무 말도 하지 않는다** — 전사·재분할이 만든
     원래 값을 그대로 두고 검사(C01·S02)가 사람에게 맡긴다. 규칙 4와 같은 논리:
-    여유(LEADS)는 몇 프레임 다듬는 값이지, 몇 초를 새로 정하는 값이 아니다.
+    여유는 몇 프레임 다듬는 값이지, 몇 초를 새로 정하는 값이 아니다.
+
+    `rule`은 발주처 규정(`SpottingRule.from_profile`)이다 — 기본값이 없다.
+    규정 없이 여유를 지어내지 않는다.
     """
     if not speech:
         return []
-    # 여유는 ms로 쓴다(23.976fps 실측값을 시간으로 고정) — 영상 fps가 달라도
-    # 같은 시간만큼 두기 위해서다. 문구에 적는 프레임 수만 이 영상 fps로 환산한다.
-    leads = leads_ms(detector)
+    # 여유는 ms로 쓴다 — 영상 fps가 달라도 같은 시간만큼 두기 위해서다. 문구에
+    # 적는 프레임 수만 이 영상 fps로 환산한다.
+    leads = leads_ms(rule, detector)
     lead_in, lead_out, tail = leads["in"], leads["out"], leads["tail"]
     frame = 1000.0 / fps
     tolerance = tolerance_frames * frame

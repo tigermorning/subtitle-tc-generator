@@ -944,94 +944,118 @@ ok("규정까지도 자리가 없으면 예전처럼 남긴다",
 
 # --- 스포팅 제안 (영상 없이 합성 구간으로 검증) -------------------------------
 
-from checker.timing import suggest_spotting  # noqa: E402
+from checker.timing import SpottingRule, suggest_spotting  # noqa: E402
+
+# 작업 기본 원칙 규정값(발주처 common.yaml과 같은 값) — 인점 67~100ms 앞, 아웃점 200~300ms 뒤.
+_rule = SpottingRule((67, 100), (200, 300))
 
 fps = 23.976
 frame = 1000 / fps
 speech = [(3667, 4594), (5112, 7667)]
 
-sug = suggest_spotting([Event(1, 3000, 5000, "첫 대사")], speech, fps)
+sug = suggest_spotting([Event(1, 3000, 5000, "첫 대사")], speech, fps, _rule)
 by_field = {s.field_name: s for s in sug}
 ok("인점을 말소리 앞으로 제안한다", "start_ms" in by_field)
 ok("제안값이 말소리 시작보다 앞이다", by_field["start_ms"].suggested < 3667)
-# 아웃점 5000ms는 말소리 끝(4594) + 6프레임(4844)에서 156ms 차이라 허용 범위(4프레임=167ms)
-# 안이다. 규정 안인 것은 말하지 않는 것이 맞다.
+# 아웃점 5000ms는 말소리 끝(4594) + 검출 보정(250ms) + 규정 200ms(5044)에서 44ms 차이라
+# 허용 범위(4프레임=167ms) 안이다. 규정 안인 것은 말하지 않는 것이 맞다.
 ok("허용 범위 안의 아웃점은 말하지 않는다", "end_ms" not in by_field)
 
 sug = suggest_spotting([Event(1, 3000, 6000, "첫 대사"), Event(2, 6500, 9000, "둘째")],
-                       speech, fps)
+                       speech, fps, _rule)
 by_field = {s.field_name: s for s in sug if s.event_index == 1}
 ok("다음 자막 인점을 넘어서까지 늘리지 않는다",
    "end_ms" not in by_field or by_field["end_ms"].suggested <= 6500, str(sug))
 
 # 이미 규정 안이면 말하지 않는다.
 # 아웃점 기준에는 검출 보정(SPEECH_TAIL_FRAMES)이 함께 들어간다 — 말소리 검출이
-# 말 끝을 일찍 자르는 만큼을 되돌리는 값이라, 규정(6~9프레임)과 다른 자리를 잰다.
+# 말 끝을 일찍 자르는 만큼을 되돌리는 값이라, 규정 여유(200~300ms)와 따로 더한다.
 from checker.timing import SPEECH_TAIL_FRAMES  # noqa: E402
 
-good_start = int(3667 - 3 * frame)
-good_end = int(4594 + (6 + SPEECH_TAIL_FRAMES) * frame)
+good_start = int(3667 - 100)
+good_end = int(4594 + SPEECH_TAIL_FRAMES * frame + 200)
 ok("규정 안이면 조용하다",
-   not suggest_spotting([Event(1, good_start, good_end, "대사")], speech, fps),
-   str(suggest_spotting([Event(1, good_start, good_end, "대사")], speech, fps)))
+   not suggest_spotting([Event(1, good_start, good_end, "대사")], speech, fps, _rule),
+   str(suggest_spotting([Event(1, good_start, good_end, "대사")], speech, fps, _rule)))
 
-sug = suggest_spotting([Event(1, 100000, 102000, "효과음뿐")], speech, fps)
+sug = suggest_spotting([Event(1, 100000, 102000, "효과음뿐")], speech, fps, _rule)
 ok("말소리가 없으면 그렇다고 알린다",
    sug and "말소리를 찾지 못했습니다" in sug[0].reason, str(sug))
 
 ok("말소리 구간이 없으면 아무 말도 하지 않는다",
-   suggest_spotting([Event(1, 0, 2000, "대사")], [], fps) == [])
+   suggest_spotting([Event(1, 0, 2000, "대사")], [], fps, _rule) == [])
 
 # whisper 세그먼트가 직전 말의 꼬리에 걸쳐 일찍 시작했을 때 — 앞자락 구간(자막
 # 밖으로 더 많이 뻗은 것)은 이웃 말로 보고 빼야 이 자막의 진짜 온셋(두 번째
 # 구간)으로 인점을 낸다(2026-09-11, 드라마B E02·E03 정답 대조).
 _tail_speech = [(1000, 3200), (4400, 6000)]          # 앞 말 1.0~3.2s, 이 말 4.4~6.0s
 _tail_sug = {s.field_name: s for s in
-             suggest_spotting([Event(1, 3000, 6000, "이 대사")], _tail_speech, fps)}
+             suggest_spotting([Event(1, 3000, 6000, "이 대사")], _tail_speech, fps, _rule)}
 ok("앞 말의 꼬리에 걸친 인점은 그 앞 구간이 아니라 진짜 온셋으로 낸다",
-   "start_ms" in _tail_sug and abs(_tail_sug["start_ms"].suggested - (4400 - 3 * frame)) < 2,
+   "start_ms" in _tail_sug and abs(_tail_sug["start_ms"].suggested - (4400 - 100)) < 2,
    str(_tail_sug))
 # 앞뒤에 바로 붙는 자막이 없을 때만 여유(사용자 지시 2026-09-11). 다음 말이 800ms 안에
 # 이어지면 아웃점은 여유 대신 다음 인점 자리(다음 온셋 - 인점 여유)까지 채운다.
 _chain_speech = [(1000, 3000), (3400, 5000)]        # 침묵 400ms
 _chain_sug = {s.field_name: s for s in
               suggest_spotting([Event(1, 900, 3100, "앞"), Event(2, 3300, 5100, "뒤")],
-                               _chain_speech, fps, detector="vad") if s.event_index == 1}
+                               _chain_speech, fps, _rule, detector="vad") if s.event_index == 1}
 ok("다음 말이 800ms 안이면 아웃점을 다음 인점 자리까지 채운다",
-   "end_ms" in _chain_sug and abs(_chain_sug["end_ms"].suggested - (3400 - 2 * frame)) < 2,
+   "end_ms" in _chain_sug and abs(_chain_sug["end_ms"].suggested - (3400 - 100)) < 2,
    str(_chain_sug))
 _far_speech = [(1000, 3000), (5000, 7000)]          # 침묵 2000ms
 _far_sug = {s.field_name: s for s in
             suggest_spotting([Event(1, 900, 3100, "앞"), Event(2, 4900, 7100, "뒤")],
-                             _far_speech, fps, detector="vad") if s.event_index == 1}
-ok("다음 말이 멀면 아웃점은 여유(3프레임)만 둔다",
-   "end_ms" not in _far_sug or abs(_far_sug["end_ms"].suggested - (3000 + 3 * frame)) < 2,
+                             _far_speech, fps, _rule, detector="vad") if s.event_index == 1}
+ok("다음 말이 멀면 아웃점은 규정 여유(200ms)만 둔다",
+   "end_ms" not in _far_sug or abs(_far_sug["end_ms"].suggested - (3000 + 200)) < 2,
    str(_far_sug))
 _only_sug = {s.field_name: s for s in
-             suggest_spotting([Event(1, 3000, 3500, "짧은 대사")], [(1000, 3200)], fps)}
+             suggest_spotting([Event(1, 3000, 3400, "짧은 대사")], [(1000, 3200)], fps, _rule)}
 ok("겹치는 구간이 하나뿐이면 밖으로 뻗어 있어도 안 뺀다(그 구간 끝 3200 기준으로 아웃점을 낸다)",
    "end_ms" in _only_sug and "3200ms" in _only_sug["end_ms"].reason, str(_only_sug))
 
 original = Event(1, 3000, 5000, "대사")
-suggest_spotting([original], speech, fps)
+suggest_spotting([original], speech, fps, _rule)
 ok("제안은 원본을 바꾸지 않는다", original.start_ms == 3000 and original.end_ms == 5000)
 
-# **여유는 시간 기준이다 — fps가 달라도 같은 ms를 둔다**(2026-09-11). LEADS의
-# 프레임 수는 23.976fps로 잰 값이라, 60fps 영상에 프레임 그대로 적용하면 여유가
-# 절반 아래(3프레임=50ms)로 줄어 규정(인점 0.1초 이내·아웃점 0.2~0.3초)에서
-# 벗어난다. 작업자 자료의 "3프레임"도 30fps 환산일 뿐 기준은 0.1초다.
+# **여유는 시간 기준이다 — fps가 달라도 같은 ms를 둔다**(2026-09-11). 규정의
+# "3프레임"은 30fps 표기일 뿐 기준은 0.1초다 — 60fps에 프레임 그대로 쓰면 여유가
+# 50ms로 줄어 규정에서 벗어난다.
 from checker.timing import leads_ms  # noqa: E402
 
-_ref = suggest_spotting([Event(1, 3000, 5500, "대사")], speech, 23.976)
-_hi = suggest_spotting([Event(1, 3000, 5500, "대사")], speech, 60.0)
+_ref = suggest_spotting([Event(1, 3000, 5500, "대사")], speech, 23.976, _rule)
+_hi = suggest_spotting([Event(1, 3000, 5500, "대사")], speech, 60.0, _rule)
 _ref_by = {s.field_name: s.suggested for s in _ref}
 _hi_by = {s.field_name: s.suggested for s in _hi}
 ok("60fps에서도 인점 제안값이 23.976fps와 같다(ms 기준)",
    _ref_by.get("start_ms") == _hi_by.get("start_ms"), f"{_ref_by} vs {_hi_by}")
 ok("60fps에서도 아웃점 제안값이 23.976fps와 같다(ms 기준)",
    _ref_by.get("end_ms") == _hi_by.get("end_ms"), f"{_ref_by} vs {_hi_by}")
-ok("leads_ms는 23.976fps 프레임값을 ms로 환산한다(인점 상한 3프레임 ≈ 125ms)",
-   abs(leads_ms()["in"][1] - 3 * 1000 / 23.976) < 0.01)
+ok("leads_ms의 인점·아웃점 여유는 규정 값(ms) 그대로다",
+   leads_ms(_rule)["in"] == (67, 100) and leads_ms(_rule)["out"] == (200, 300))
+
+# **규정은 프로파일에서만 온다**(사용자 지시 2026-10-16 — 발주처 규정은 강한 규칙).
+# 규정이 없으면 여유를 지어내지 않고 멈춘다. 모르는 검출기 이름도 멈춘다 — 예전에는
+# 조용히 loudness 보정으로 되돌아가 한 판을 버린 적이 있다(2026-09-13).
+try:
+    SpottingRule.from_profile({"limits": {}})
+    _no_rule_raised = False
+except ValueError as _e:
+    _no_rule_raised = "spotting" in str(_e)
+ok("프로파일에 spotting 규정이 없으면 고칠 곳을 말하며 멈춘다", _no_rule_raised)
+try:
+    leads_ms(_rule, "없는검출기")
+    _bad_det_raised = False
+except ValueError:
+    _bad_det_raised = True
+ok("모르는 검출기 이름이면 멈춘다", _bad_det_raised)
+from checker.profile import load_profile  # noqa: E402
+for _plat in ("netflix", "disney", "coupang"):
+    for _kind in ("sdh", "translation"):
+        _r = SpottingRule.from_profile(load_profile(_plat, "ko", _kind))
+        ok(f"{_plat} ko-{_kind} 규정: 인점 67~100ms 앞, 아웃점 200~300ms 뒤(작업 기본 원칙)",
+           _r.lead_in_ms == (67, 100) and _r.lead_out_ms == (200, 300), str(_r))
 
 # **인점이 이전 자막 끝보다 앞으로 끌려가지 않는다.** 대칭인 상한(다음 인점을
 # 안 넘는 것)은 있었는데 하한이 없었다 — 예능처럼 끊김 없이 오래 이어지는
@@ -1041,7 +1065,7 @@ ok("leads_ms는 23.976fps 프레임값을 ms로 환산한다(인점 상한 3프�
 # 자막과 거의 붙어 있는 자리였다).
 long_blob = [(1000, 30000)]   # 29초짜리 하나로 묶인 말소리 구간
 two_cues = [Event(1, 1000, 5000, "첫 자막"), Event(2, 5050, 9000, "둘째 자막")]
-sug = suggest_spotting(two_cues, long_blob, fps)
+sug = suggest_spotting(two_cues, long_blob, fps, _rule)
 second_start = next((s for s in sug if s.event_index == 2 and s.field_name == "start_ms"), None)
 ok("긴 말소리 구간이라도 이전 자막 끝보다 훨씬 전으로는 안 당긴다"
    "(2~3프레임 여유는 남는다)",
@@ -1365,7 +1389,7 @@ def _marker_run(no_audio_on: bool):
     events = _to_events(cues, [])
     markers = {e.index for e in events if e.start_ms == e.end_ms}
     limits = TimingLimits(min_duration_ms=833, max_duration_ms=7000, min_gap_ms=83, max_cps=15)
-    result, _moved = settle_timecodes(events, [(50, 950), (1200, 2400)], 23.976, "vad", limits,
+    result, _moved = settle_timecodes(events, [(50, 950), (1200, 2400)], 23.976, "vad", limits, _rule,
                                       no_audio=markers if no_audio_on else None)
     return markers, {e.index: (e.start_ms, e.end_ms) for e in result.events}, result.events
 
@@ -1431,7 +1455,8 @@ with _tf3.TemporaryDirectory() as _d:
         _draft = _gen_mod.generate(Path(_d) / "fake.mkv",
                                    {"kind": "sdh", "language": "ko",
                                     "limits": {"chars_per_line": 16, "max_lines": 2,
-                                               "duration_ms": {"min": 833, "max": 7000}}},
+                                               "duration_ms": {"min": 833, "max": 7000}},
+                                    "spotting": {"lead_in_ms": [67, 100], "lead_out_ms": [200, 300]}},
                                    transcript_cache=Path(_d) / "cache.json")
     finally:
         _gen_mod.probe, _gen_mod.find_speech, _tr_mod.transcribe, _paths_mod.user_data = _saved
@@ -1497,7 +1522,8 @@ with _tf3.TemporaryDirectory() as _d:
         _rdraft = _gen_mod.generate(Path(_d) / "fake.mkv",
                                     {"kind": "translation", "language": "ko",
                                      "limits": {"chars_per_line": 16, "max_lines": 2,
-                                                "duration_ms": {"min": 833, "max": 7000}}},
+                                                "duration_ms": {"min": 833, "max": 7000}},
+                                    "spotting": {"lead_in_ms": [67, 100], "lead_out_ms": [200, 300]}},
                                     translator=object(), passes=2,
                                     transcript_cache=Path(_d) / "cache.json")
     finally:
@@ -4819,12 +4845,10 @@ if len(_two_bands) == 2:
     ok("앞 말의 아웃점 구간이 뒤 말의 시작을 넘지 않는다",
        _two_bands[0]["end_high"] <= _two_bands[1]["core_start"])
 
-# 검출기 이름마다 여유가 따로 있어야 한다 — 모르는 이름이면 loudness로 되돌아가
-# 엉뚱한 여유가 걸린다(2026-09-13에 실제로 그렇게 재서 한 판을 버렸다).
-from checker.timing import LEADS as _band_leads  # noqa: E402
-ok("vad-band 여유가 따로 있다", "vad-band" in _band_leads)
-ok("vad-band 아웃 여유가 vad보다 작다",
-   _band_leads["vad-band"]["out"] < _band_leads["vad"]["out"])
+# 검출기 이름마다 보정이 따로 있어야 한다 — 모르는 이름이면 loudness로 되돌아가
+# 엉뚱한 보정이 걸린다(2026-09-13에 실제로 그렇게 재서 한 판을 버렸다).
+from checker.timing import DETECTOR_TAIL_FRAMES as _det_tail  # noqa: E402
+ok("vad-band 검출기 보정이 따로 있다", "vad-band" in _det_tail)
 
 # --- VAD 입력 오디오: 5.1이면 센터(대사) 채널만 듣는다 ----------------------
 # 근거는 `checker/vad.py`의 주석(합성 시험 + 실사 2편). 여기서는 **어느 오디오를

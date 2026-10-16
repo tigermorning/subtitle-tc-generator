@@ -308,13 +308,14 @@ def _run_one(path: Path, profile: dict, args, backend) -> dict | None:
     spot_suggestions = spotting_applied = None
     if getattr(args, "spot", False) and getattr(args, "_media", None):
         from .media import MediaToolUnavailable, detect_speech
-        from .timing import suggest_spotting
+        from .timing import SpottingRule, suggest_spotting
         try:
             speech = detect_speech(args.video, duration_ms=args._media.duration_ms)
         except MediaToolUnavailable as e:
             print(f"말소리 검출을 건너뜁니다: {e}", file=sys.stderr)
         else:
-            suggestions = suggest_spotting(events, speech, args._media.fps)
+            suggestions = suggest_spotting(events, speech, args._media.fps,
+                                           SpottingRule.from_profile(profile))
 
             # 장면 전환은 플랫폼이 적용할 때(쿠팡은 비적용)이면서 SDH일 때만 본다.
             # 넷플릭스 공식 문서 자체는 "applicable to all timed text files"라

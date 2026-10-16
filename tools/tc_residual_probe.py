@@ -23,7 +23,7 @@ from pathlib import Path
 ROOT = Path("C:/Users/user/Documents/subtitle-tc-generator"); os.chdir(ROOT); sys.path.insert(0, str(ROOT))
 from checker.parsers import parse
 from checker.vad import detect_speech
-from checker.timing import CHAIN_SILENCE_MS, leads_ms
+from checker.timing import CHAIN_SILENCE_MS, DETECTOR_TAIL_FRAMES
 
 SFX = re.compile(r"^\s*(\[[^\]]*\]|\([^)]*\)|♪[^♪]*♪?)\s*$")
 OUT = ROOT / ".tmp" / "tc_probe"; OUT.mkdir(parents=True, exist_ok=True)
@@ -65,7 +65,7 @@ def part_a(ep, truth, speech):
     vad_on = sorted(s for s, _ in speech); vad_off = sorted(e for _, e in speech)
     speak = [e for e in truth if not is_sfx(e)]
     print(f"\n== A. E{ep}: 정답 말 자막 {len(speak)}개, VAD 구간 {len(vad_on)}개, "
-          f"CHAIN_SILENCE_MS={CHAIN_SILENCE_MS}, vad lead out={leads_ms('vad')['out']}")
+          f"CHAIN_SILENCE_MS={CHAIN_SILENCE_MS}, vad tail={DETECTOR_TAIL_FRAMES['vad']}f")
     rows = []
     for k, e in enumerate(speak):
         off = nearest(vad_off, e.end_ms); on = nearest(vad_on, e.start_ms)
