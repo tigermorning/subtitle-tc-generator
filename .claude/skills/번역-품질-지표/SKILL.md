@@ -77,10 +77,23 @@ rubric(채점 항목·기준) 든 심사위원으로 세울 수 있다 — 다�
     함정   답이 놓인 순서에 흔들림, 장황한 답 선호, 자기 모델 계열 선호
     원칙   심사 모델의 한 점수를 사람 정답처럼 취급하지 않는다 — 최종 기준은 사람
 
-(출처: Zheng et al., NeurIPS 2023) 이 프로젝트에서는 아직 자동화된 LLM-judge
-파이프라인을 두지 않았다 — 필요해지면 `checker/backtranslate.py`처럼 **판정이
-아니라 순위**로만 쓰는 설계를 따른다(임계값을 두지 않고, 점수 낮은 순으로 사람에게
-보이는 방식).
+(출처: Zheng et al., NeurIPS 2023) **2026-11-09 갱신 — 플리토 벤치마크 도입.**
+이 프로젝트는 자동화된 LLM-judge 파이프라인이 없었다(필요해지면
+`checker/backtranslate.py`처럼 판정이 아니라 순위로만 쓰자는 방침이었다).
+플리토의 EMNLP 2026 Industry Track 재현 패키지
+(`flitto/speech-to-sft-ablation-paper`)과 실시간 번역 SDK(`flitto/rtt_sdk`)를
+벤치마크 분석한 뒤, **4차원 LLM-Judge 루브릭과 Refine(자가교정) 루프를 자막
+생성기의 표준 실전 가이드로 정식 도입했다** — `플리토-자가교정-파이프라인`
+스킬과 `docs/BENCHMARK_FLITTO_PIPELINE.md`가 그 본체다. 자막 생성 작업은
+[Generate ➔ Judge(faithfulness·tc_sync·readability_cps·naturalness 4차원
+검수) ➔ Refine(피드백 기반 최대 2회 자가교정)]을 거치며, 임계치는 pass(전 차원
+≥ 7.0)·fail(하나라도 < 4.0, Refine)·human_review(그 외 및 2회 실패)다.
+
+위의 원칙은 그대로다. Judge의 `pass`는 자동 납품이 아니라 **사람 최종 검수로 가는
+신호**이고, 사람은 Judge의 reasoning 기록을 보고 검증한다. `checker/backtranslate.py`의
+순위 방식(임계값 없이 사람에게 보이기)은 정답지 대조 리포트에서 계속 쓰며, 이
+파이프라인(임계치 기반 판정)은 자막 생성·교정 작업 워크플로 쪽이다 — 둘은 역할이
+다른 도구다.
 
 ## 코드가 어디 있나
 
