@@ -106,6 +106,8 @@
 
 ### [2:00 ~ 3:30] Slide 3. Architecture: End-to-End 멀티 에이전트 파이프라인
 
+> [그림 자리] 생성기 화면 — `docs/screenshots/generator/01_main.png`, `02_result.png` (다른 PC에서 채움, `docs/screenshots/SLOTS.md`)
+
 "그래서 저희 시스템은 다음과 같은 에이전트 아키텍처를 가집니다.
 
 첫째, 영상에서 음성을 추출하고 음소 단위로 강제 정렬(Alignment)하여 물리적 타임코드를 고정합니다.  
@@ -144,6 +146,8 @@ PySide6 GUI 데스크톱 앱과 글로벌 1위 오픈소스 SubtitleEdit 플러�
 ---
 
 ### [7:00 ~ 8:00] Slide 5. Our Unfair Advantage: '진짜 데이터'와 1,240개 테스트 베이스
+
+> [그림 자리] TC 오차 — `docs/screenshots/tc-error/01.png` ~ `05.png`, SE 파형의 초록 선(우리 인점)과 파란 선(정답). 옆에 붙일 수치는 `docs/screenshots/SLOTS.md` (다른 PC에서 채움)
 
 "많은 부트캠프 프로젝트가 실패하는 결정적인 이유가 무엇일까요?  
 기술이 부족해서가 아닙니다. **실제 현업 데이터가 없고, 무엇이 맞고 틀린지 판단해 줄 도메인 전문가(Ground Truth)가 없어서 '그럴듯한 장난감(Toy Project)'에 그치기 때문입니다.**

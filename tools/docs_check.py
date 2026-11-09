@@ -71,8 +71,8 @@ GREP_CLAIM = re.compile(
 #   system : 시스템 파이썬으로 도는 시험 수(훅이 도는 수). --test-count로 받는다
 #   gui    : PySide6까지 도는 수. 훅은 못 세므로 system보다 큰지만 본다
 LIVE_COUNTS = [
-    ("CLAUDE.md", r"훅이 도는 것은 (\d+)건", "system"),
-    ("CLAUDE.md", r"PySide6까지 도는\s*\n?\s*(\d+)건", "gui"),
+    ("docs/RULES_ORIGINAL_HISTORY.md", r"훅이 도는 것은 (\d+)건", "system"),
+    ("docs/RULES_ORIGINAL_HISTORY.md", r"PySide6까지 도는\s*\n?\s*(\d+)건", "gui"),
     ("README.md", r"tests/run_tests\.py\s*#\s*(\d+)건", "system"),
     ("README.md", r"tests\\run_tests\.py\"\s*#\s*(\d+)건", "gui"),
 ]
