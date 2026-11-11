@@ -1,26 +1,39 @@
 """소리로 TC 잡는 단계를 하나씩 더하며 작업자 교정본과 인점·아웃점을 견준다(2026-11-12, 발표용 예외 — 사용자 허락).
 
-사용: python tc_ablation.py            (세 구간 전부)
-      python tc_ablation.py 0406       (한 구간만: 0204 / 0406 / 0608)
+자료(영상·소리·정답 srt, fix7 초안, 장면전환 목록)는 DESKTOP-T8TGMOP에만 있다. 저작권 자료라 다른 PC로 옮기지 않는다.
+다른 PC에서는 옵션으로 자료 위치를 주거나, 그 PC에서 돌린다. 필요한 파일이 없으면 무엇이 없는지 알리고 종료 코드 2로 멈춘다.
+
+사용(저장소 루트에서):
+  python tools/voice_sep_proto/ablation/tc_ablation.py              세 구간 전부, 기본 위치
+  python tools/voice_sep_proto/ablation/tc_ablation.py 0406         한 구간만(0204 / 0406 / 0608)
+  python tools/voice_sep_proto/ablation/tc_ablation.py --data-root "D:/자료/하드섭(자막필요)" --work-root "D:/repo/subtitle-tc-generator"
+  python tools/voice_sep_proto/ablation/make_table.py               표(md 조각) 출력
+위치 정하는 순서: 옵션 > 환경 변수(TC_ABLATION_DATA, TC_ABLATION_WORK, TC_ABLATION_OUT) > 기본값
+  --data-root  구간 폴더(E01_음성분리_테스트*)가 든 폴더. 기본 ~/Documents/subtitle-tc-generator-project/[습작] SDH+번역/하드섭(자막필요)
+  --work-root  .work/hardsub-e01/(fix7/final.srt, shots_e01.json)이 든 저장소. 기본 ~/Documents/subtitle-tc-generator-project/subtitle-tc-generator
+  --out        summary_all.json 쓸 폴더. 기본 <data-root>/_ablation_20261112. 저장소 안이면 멈춘다(결과에 시각이 들어 있어 공개 저장소에 쌓지 않는다)
 
 - 탐색 기준과 자막 나누기는 fix7 하드섭 초안(.work/hardsub-e01/fix7/final.srt)에서 빌린다. 소리만으로 낸 일치율이 아니다.
 - 정답(작업자 교정본)은 평가에만 쓴다. fix7 자막과 정답 자막을 시간 겹침으로 1:1 짝지은 뒤(단계와 무관하게 고정), 단계마다 같은 짝을 잰다.
 - 기존 도구 파일은 고치지 않는다. 함수는 원본에서 옮겨 적었고(출처 표시), rules_frames.py는 원본 소스를 읽어 LEAD만 바꿔 실행한다.
-- 결과는 각 구간 폴더의 _ablation_20261112/ 에만 쓴다(시각만, 대사 없음).
+- 구간별 결과는 각 구간 폴더의 _ablation_20261112/ 에 쓴다(시각만, 대사 없음).
 """
-import csv, json, math, os, sys
+import argparse, csv, json, math, os, sys
 import numpy as np
 from scipy.io import wavfile
 from scipy.signal import resample_poly
-from faster_whisper.vad import VadOptions, get_speech_timestamps
 
 sys.stdout.reconfigure(encoding="utf-8")
+sys.stderr.reconfigure(encoding="utf-8")         # 자료 없음 안내가 한글이라 cp949 콘솔에서 깨지지 않게
+HERE = os.path.dirname(os.path.abspath(__file__))
+REPO_SELF = os.path.dirname(os.path.dirname(os.path.dirname(HERE)))       # 이 스크립트가 든 저장소
 ROOT = os.path.expanduser(r"~\Documents\subtitle-tc-generator-project")
-H = os.path.join(ROOT, "[습작] SDH+번역", "하드섭(자막필요)")
-REPO = os.path.join(ROOT, "subtitle-tc-generator")
-FIX7 = os.path.join(REPO, ".work", "hardsub-e01", "fix7", "final.srt")
-SHOTS = os.path.join(REPO, ".work", "hardsub-e01", "shots_e01.json")
-RULES_SRC = os.path.join(REPO, "tools", "voice_sep_proto", "rules_frames.py")
+DEFAULT_DATA = os.path.join(ROOT, "[습작] SDH+번역", "하드섭(자막필요)")
+DEFAULT_WORK = os.path.join(ROOT, "subtitle-tc-generator")
+RULES_SRC = os.path.join(os.path.dirname(HERE), "rules_frames.py")      # 같은 저장소의 원본
+DATA_HOST = "DESKTOP-T8TGMOP"
+# configure()가 채운다
+H = FIX7 = SHOTS = None
 SEGS = {
     "0204": ("E01_음성분리_테스트", 120.0, "final_sdh_sy.srt"),
     "0406": ("E01_음성분리_테스트_04-06분", 240.0, "user_0406_edit.srt"),
@@ -63,7 +76,8 @@ def load(wav):
 
 
 def vad(a):
-    # voice_tc.py 33~35행 그대로
+    # voice_tc.py 33~35행 그대로. 자료 확인보다 먼저 죽지 않게 여기서 불러온다
+    from faster_whisper.vad import VadOptions, get_speech_timestamps
     v = get_speech_timestamps(a, VadOptions(threshold=0.5, min_speech_duration_ms=120,
                                             min_silence_duration_ms=200, speech_pad_ms=0))
     return [(x["start"] / SR, x["end"] / SR) for x in v]
@@ -335,8 +349,60 @@ def segment(key):
     return result
 
 
+def inside(path, root):
+    p, r = os.path.normcase(os.path.realpath(path)), os.path.normcase(os.path.realpath(root))
+    return p == r or p.startswith(r + os.sep)
+
+
+def resolve(opt, env, default):
+    return os.path.abspath(opt or os.environ.get(env) or default)
+
+
+def configure(argv=None):
+    """옵션·환경 변수로 위치를 정하고, 필요한 파일이 다 있는지 먼저 본다. 없으면 종료 코드 2"""
+    global H, FIX7, SHOTS
+    ap = argparse.ArgumentParser(description="소리 TC 단계별 비교(자료는 %s에만 있음)" % DATA_HOST)
+    ap.add_argument("keys", nargs="*", help="구간 키: " + " / ".join(SEGS))
+    ap.add_argument("--data-root", help="구간 폴더가 든 폴더(환경 변수 TC_ABLATION_DATA)")
+    ap.add_argument("--work-root", help=".work/hardsub-e01 이 든 저장소(환경 변수 TC_ABLATION_WORK)")
+    ap.add_argument("--out", help="summary_all.json 폴더(환경 변수 TC_ABLATION_OUT)")
+    a = ap.parse_args(argv)
+    bad = [k for k in a.keys if k not in SEGS]
+    if bad:
+        ap.error(f"모르는 구간 키 {bad}. 쓸 수 있는 키: {list(SEGS)}")
+    keys = a.keys or list(SEGS)
+    H = resolve(a.data_root, "TC_ABLATION_DATA", DEFAULT_DATA)
+    work = resolve(a.work_root, "TC_ABLATION_WORK", DEFAULT_WORK)
+    out = resolve(a.out, "TC_ABLATION_OUT", os.path.join(H, "_ablation_20261112"))
+    FIX7 = os.path.join(work, ".work", "hardsub-e01", "fix7", "final.srt")
+    SHOTS = os.path.join(work, ".work", "hardsub-e01", "shots_e01.json")
+    need = [("fix7 하드섭 초안", FIX7), ("장면전환 목록", SHOTS), ("rules_frames.py", RULES_SRC)]
+    for k in keys:
+        folder, _, truth = SEGS[k]
+        for label, name in (("정답 srt", truth), ("분리 음성", "voice.wav"), ("원음", "mix.wav")):
+            need.append((f"{k} {label}", os.path.join(H, folder, name)))
+    missing = [(label, p) for label, p in need if not os.path.isfile(p)]
+    if missing:
+        print("필요한 자료가 없어 멈춘다:", file=sys.stderr)
+        for label, p in missing:
+            print(f"  - {label}: {p} 에 없음", file=sys.stderr)
+        print(f"이 자료(영상·소리·정답 srt, .work/hardsub-e01)는 {DATA_HOST}에만 있다. 저작권 자료라 옮기지 않는다.\n"
+              f"그 PC에서 돌리거나, 자료가 있는 위치를 --data-root / --work-root(또는 환경 변수 "
+              f"TC_ABLATION_DATA / TC_ABLATION_WORK)로 준다.", file=sys.stderr)
+        sys.exit(2)
+    # 결과(시각 기록)가 이 저장소 안에 쌓이지 않게 코드로 막는다. 구간 폴더(data-root)가 저장소 안인 경우도 같다
+    for label, p in (("--out", out), ("--data-root", H)):
+        if inside(p, REPO_SELF):
+            print(f"{label} 위치가 저장소 안이다({p}). 결과 파일이 저장소에 쌓이므로 멈춘다. 저장소 밖 폴더를 준다.",
+                  file=sys.stderr)
+            sys.exit(2)
+    os.makedirs(out, exist_ok=True)
+    return keys, out
+
+
 if __name__ == "__main__":
-    keys = sys.argv[1:] or list(SEGS)
+    keys, out = configure()
     allres = [segment(k) for k in keys]
-    json.dump(allres, open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "summary_all.json"), "w",
-                          encoding="utf-8"), ensure_ascii=False, indent=1)
+    p = os.path.join(out, "summary_all.json")
+    json.dump(allres, open(p, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+    print("요약:", p)
