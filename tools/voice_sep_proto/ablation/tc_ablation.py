@@ -209,10 +209,17 @@ def metrics(stage, truth, pr):
     di = np.array([(stage[i][0] - truth[j][0]) * 1000 for i, j in pr.items()])
     do = np.array([(stage[i][1] - truth[j][1]) * 1000 for i, j in pr.items()])
     t1 = TOL1F * 1000
+    # 같은 프레임(사용자 TC 목표 기준): 정답과 단계 시각을 각각 0초 기준 30000/1001fps의 가장 가까운 프레임 번호로 반올림해
+    # 번호가 같으면 맞음. 1~5단계 값은 프레임에 맞추지 않았으므로 여기서 반올림한다
+    fno = lambda t: int(round(t * FPS))
+    si = np.array([fno(stage[i][0]) == fno(truth[j][0]) for i, j in pr.items()])
+    so = np.array([fno(stage[i][1]) == fno(truth[j][1]) for i, j in pr.items()])
     return {"pairs": len(pr), "in1f": int((abs(di) <= t1).sum()), "in100": int((abs(di) <= 100).sum()),
             "out1f": int((abs(do) <= t1).sum()), "out100": int((abs(do) <= 100).sum()),
             "in_med": float(np.median(abs(di))), "out_med": float(np.median(abs(do))),
-            "out_max": float(abs(do).max()), "_di": di, "_do": do}
+            "out_max": float(abs(do).max()),
+            "in_sf": int(si.sum()), "out_sf": int(so.sum()), "both_sf": int((si & so).sum()),
+            "in40": int((abs(di) < 40).sum()), "out40": int((abs(do) < 40).sum()), "_di": di, "_do": do}
 
 
 def segment(key):

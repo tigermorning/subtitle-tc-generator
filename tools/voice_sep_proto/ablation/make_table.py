@@ -36,4 +36,20 @@ out.append("|---|---|---|---|---|")
 for k, s0 in enumerate(res[0]["stages"]):
     v = [sum(r["stages"][k][m] for r in res) for m in ("in1f", "in100", "out1f", "out100")]
     out.append(f"| {s0['stage']} | {v[0]} | {v[1]} | {v[2]} | {v[3]} |")
+# 같은 프레임 기준(사용자 TC 목표: 100개 중 97개가 정답과 같은 프레임). 옛 요약에는 이 값이 없을 수 있다
+if all("in_sf" in s for r in res for s in r["stages"]):
+    cols = [("in_sf", "인점 같은 프레임"), ("out_sf", "아웃 같은 프레임"), ("both_sf", "둘 다 같은 프레임"),
+            ("in40", "인점 <0.04초"), ("out40", "아웃 <0.04초")]
+    pct = lambda v, n: f"{v} ({100 * v / n:.0f}%)"
+    out.append(f"\n### 같은 프레임 기준 — 세 구간 합계 (짝 {tot}쌍)\n")
+    out.append("| 단계 | " + " | ".join(c[1] for c in cols) + " |")
+    out.append("|---" * (len(cols) + 1) + "|")
+    for k, s0 in enumerate(res[0]["stages"]):
+        out.append(f"| {s0['stage']} | " + " | ".join(pct(sum(r["stages"][k][c] for r in res), tot) for c, _ in cols) + " |")
+    for r in res:
+        out.append(f"\n### 같은 프레임 기준 — {NAMES[r['key']]} (짝 {r['pairs']}쌍)\n")
+        out.append("| 단계 | " + " | ".join(c[1] for c in cols) + " |")
+        out.append("|---" * (len(cols) + 1) + "|")
+        for s in r["stages"]:
+            out.append(f"| {s['stage']} | " + " | ".join(str(s[c]) for c, _ in cols) + " |")
 print("\n".join(out))
