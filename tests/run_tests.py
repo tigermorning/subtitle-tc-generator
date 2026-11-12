@@ -16,7 +16,7 @@ from checker.profile import _merge, _validate, speaker_enclosure  # noqa: E402
 from checker.text import count_chars  # noqa: E402
 from checker.ocr import (  # noqa: E402
     OcrCaption, _checkpoint_fingerprint, _cleanup_checkpoint, _crop_filter,
-    _enforce_no_overlap, _prepare_checkpoint, captions_to_draft_srt_events,
+    _enforce_no_overlap, _prepare_checkpoint,
     captions_to_events, merge_captions, merge_frames,
 )
 from checker.position import JobRules, apply_marker, is_forced_narrative  # noqa: E402
@@ -4387,24 +4387,6 @@ ok("T10/T11이 미구현 목록에서 빠졌다(마커가 정해진 넷플릭스
    and "T11" not in _r_merged["unimplemented_checks"])
 
 
-# --- 하드섭 OCR 초안(captions_to_draft_srt_events) -------------------------
-# corpus_build.py:90-91과 같은 원칙 — OCR은 정답지가 아니다. 카드 하나 = 자막
-# 하나로 그대로 옮기고(마커로 안 감싼다), 신뢰도 낮은 카드만 노트로 남긴다.
-
-_hard_caps = [OcrCaption(0, 2000, "그럼에도 말하고 싶다", 0.82, frame_count=4),
-             OcrCaption(3000, 5000, "흐릿하게 읽힘", 0.35, frame_count=2)]
-_hard_events, _hard_notes = captions_to_draft_srt_events(_hard_caps)
-
-ok("카드 하나가 자막 하나로 그대로 옮겨진다(마커로 안 감싼다)",
-   [e.text for e in _hard_events] == ["그럼에도 말하고 싶다", "흐릿하게 읽힘"])
-ok("하드섭 초안 이벤트는 kind=caption이다",
-   all(e.kind == "caption" for e in _hard_events))
-ok("인덱스가 1..N으로 매겨진다", [e.index for e in _hard_events] == [1, 2])
-ok("신뢰도 낮은 카드만 노트가 붙는다",
-   [i for i, _ in _hard_notes] == [2] and "0.35" in _hard_notes[0][1])
-ok("신뢰도 높은 카드는 노트가 안 붙는다", 1 not in dict(_hard_notes))
-
-
 # --- SFX 1단계: speech_gaps(대사 없는 구간만 뽑기) -------------------------
 # 대사 위에 깔린 배경음은 여기서 안 다룬다 — 화면까지 봐야 판단할 자리라
 # 대사 없는 자리만 돌려준다(checker/sfx.py 독스트링).
@@ -4543,7 +4525,7 @@ ok("시간순으로 정렬해서 돌려준다",
 
 
 # --- OCR 이어하기(체크포인트) ------------------------------------------------
-# `--ocr-hardsub`는 71분 영상 기준 7~8시간짜리 스캔이다(`checker/ocr.py` 모듈
+# 긴 OCR 스캔(옛 `--ocr-hardsub`는 71분 영상 기준 7~8시간)이다(`checker/ocr.py` 모듈
 # 독스트링) — 절전·재부팅으로 끊기면 처음부터 다시 도는 비용을 감당하기
 # 어렵다는 게 코드 동작 분석으로 드러났다(2026-08-31, 실제 재현은 아직 못
 # 했다 — 몇 시간대 작업이라). 실제 EasyOCR 워커(`_ocr_worker.py`)의 프레임별

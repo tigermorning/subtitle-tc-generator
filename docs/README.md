@@ -18,8 +18,7 @@
 | `docs/PRD.md` | 제품 요구사항(문제·대상·설계 순서·자동 확정 기준) | 2026-11-11 고침 | 현재 |
 | `docs/MVP.md` | 지금 실제로 되는 것 | 2026-11-11 고침 | 현재(시험은 안 돌림) |
 | `docs/HANDOFF.md` | 왜 이렇게 만들었나, 무엇이 비었나. **7절 우선 과제가 최신 결정의 원본** | 2026-11-11 고침 | 2절은 코드 순서(머리에 표시). 7·8절 2026-09-13 수치·결론은 옛 값(표시) |
-| `docs/HANDOFF_hardsub_tc.md` | 하드섭 TC 갈래 현황·결정 | 2026-10-01 | 2절 실험 범위가 사용자 기억과 다름 — 확인 필요(표시) |
-| `docs/HANDOFF_voice_sep_tc.md` | 음성 분리 TC 갈래(8~10절이 최신 결론) | 2026-10-01 | 현재(10월 1일 이후 기록 없음) |
+| `.claude/skills/TC-파형-인아웃/SKILL.md` | TC 인점·아웃점 절차(사람 음성 파형만으로, 도구 `tools/waveform_tc/`) | 2026-11-12 | 현재 |
 | `docs/BACKLOG.md` | 날짜순 작업 기록·남은 일 | 2026-09-27 | 낡음: 머리 «마지막 갱신 2026-09-17». 2026-10 이후 결정은 HANDOFF 7절에만 있다 |
 | `docs/STAGE_CONTRACTS.md` | 단계별 입출력 약속 | 2026-09-24 | 확인 안 함(2026-11-11) |
 | `docs/BENCHMARK_FLITTO_PIPELINE.md` | Judge·Refine 설계 근거 | 2026-11-09 | 현재. 코드 없음 — 절차·프롬프트만(`docs/MVP.md`) |
@@ -42,10 +41,6 @@
 
 | 자료 | 문서 근거 | 이 PC | git | 비고 |
 |---|---|---|---|---|
-| `.work/hardsub-e01/`(fix2~fix7, `read.tsv`, `shots_e01.json` 등) | HANDOFF_hardsub_tc 5절 | 없음 | git 밖(`.work/` 무시) | 방송 자막 텍스트가 든 SRT. 올리면 안 됨 |
-| 하드섭 영상 폴더 `[습작] SDH+번역/하드섭(자막필요)/` | HANDOFF_hardsub_tc 5절(다른 PC 경로) | 없음 | git 밖 | 영상. 올리면 안 됨 |
-| 음성 분리 작업 폴더 `…/E01_음성분리_테스트/`(wav·SRT·`units.json`) | HANDOFF_voice_sep_tc 0·6절 | 없음 | git 밖 | 대사·음성. 다른 PC(GPU)에서 작업 |
-| 음성 분리 결론 숫자 `docs/evidence/voice_sep_user_edits_e01.csv` | HANDOFF_voice_sep_tc 11절 | 있음 | 저장소 | 시각만, 대사 없음 |
 | 번역 심판 시험 목록 `docs/evidence/judge_injection_set_v2.csv` | `tools/judge_injection/build_set.py` | 있음 | 저장소 | 셀 번호·유형만 |
 | 번역 심판 대사 산출물 `.work/judge_injection/` | 같은 파일 머리 주석 | 없음 | git 밖 | 대사. 올리면 안 됨 |
 | 번역 심판 설계 `TRANSLATION_CONSTRUCT_DESIGN.md` | 같은 파일 머리 주석(«프로젝트 루트») | 없음(문서 폴더 4단계까지 찾음) | 확인 못 함 | 다른 PC에 있을 수 있음 |
@@ -54,7 +49,7 @@
 | 학습 짝 `corpus/pairs/` | `.gitignore` | 없음 | git 밖 | 정답 텍스트. 올리면 안 됨 |
 | 드라마B 초안 `.tmp/tc_probe/`, `.tmp/최종초안/` | HANDOFF 7절, 코퍼스 원장 | 없음 | git 밖(`.tmp/` 무시) | 9/13 수치를 다시 낼 재료 |
 | 발표 그림 `docs/screenshots/tc-error/`, `generator/` | SLOTS.md | 빈 자리(`.gitkeep`만) | 저장소 | 다른 PC에 있을 것으로 본 기록(SLOTS.md) |
-| SubtitleEdit 소스 `subtitleedit-src/` | HANDOFF_hardsub_tc 3절 | 없음 | git 밖 | 외부 오픈소스 |
+| SubtitleEdit 소스 `subtitleedit-src/` | — | 없음 | git 밖 | 외부 오픈소스 |
 | 실행 파일 `dist/자막생성기/` | MVP «GUI 앱» | 있음 | git 밖(`dist/` 무시) | 빌드 결과 |
 | VAD 모델 `models/silero_vad.onnx` | `.gitignore` | 있음 | git 밖 | 용량 |
 | `../experiments/`(분리 클립 wav·mp4, VAD 검수 묶음) | 저장소 문서에서 언급 못 찾음 | 있음 | 저장소 밖 | 영상·음성. 무엇인지 확인 안 함 |
