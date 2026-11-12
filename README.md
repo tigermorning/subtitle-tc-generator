@@ -111,10 +111,9 @@
    ```
 
 6. **Claude Code로 이어 하려면** 받은 폴더에서 세션을 열고 첫 말로 이렇게 한다.
-   음성 분리 TC 작업이면 `docs/HANDOFF_voice_sep_tc.md`(8~10절이 최신 결론),
-   하드섭 작업이면 `docs/HANDOFF_hardsub_tc.md`, 전체 지도는 `docs/HANDOFF.md`다.
+   TC 작업이면 `.claude/skills/TC-파형-인아웃/SKILL.md`, 전체 지도는 `docs/HANDOFF.md`다.
 
-   > `docs/HANDOFF_voice_sep_tc.md`를 읽고 이어서 진행해 줘.
+   > `docs/HANDOFF.md`를 읽고 이어서 진행해 줘.
 
 ## 쓰는 법 — 화면
 
@@ -183,14 +182,11 @@ whisper는 말소리만 받아 적는다 — 화면에 타 있는 글자, 대사
 python -m checker --ocr-scan --video ep01.mkv --ocr-lang ko          # 화면 캡션 목록만
 python -m checker --generate --video ep01.mkv -l ko -k sdh \
                   --ocr --fn-marker bracket                          # 실제로 얹기(마커 필수)
-python -m checker --ocr-hardsub --video ep01.mkv                     # 하드섭 -> 초안 srt
 python -m checker --sfx-scan --video ep01.mkv                        # 소리 후보 목록만
 ```
 
 - **화면 캡션**은 EasyOCR을 격리 venv(`.venv-ocr/`)에서 서브프로세스로 돌려 읽는다.
-  `--ocr-hardsub`(임베디드 트랙이 없는 하드섭 영상, 71분 기준 최대 7~8시간짜리 스캔)는
-  프레임마다 결과를 디스크에 남겨 절전·재부팅으로 끊겨도 이어서 돈다 — 결과는
-  정답지가 아니다, 사람이 영상과 대조해 고친 뒤에만 학습 자료가 된다.
+  TC(인점·아웃점) 작업은 이 기능이 아니라 `.claude/skills/TC-파형-인아웃/SKILL.md`를 본다.
 - **비대사 소리**는 AudioSet 오디오 분류(`MIT/ast-finetuned-audioset`)로 VAD가 이미
   "대사 없음"으로 확정한 구간이 무슨 소리 계열인지 짐작한다(`-l ko -k sdh` 전용).
   얹은 자리는 신뢰도와 무관하게 예외 없이 "확인 필요"로 표시된다 — 분위기·구체
@@ -488,7 +484,7 @@ kiwi를 부르면 적재에 1~2분이 걸린다. **애매하면 말하지 않는
 ## 개발
 
 ```bash
-python3 tests/run_tests.py     # 1243건 (GUI 제외)
+python3 tests/run_tests.py     # 1238건 (GUI 제외)
 cmd.exe /c "..\..\korean-subtitle-corrector-project\korean-subtitle-corrector\.venv\Scripts\python.exe tests\run_tests.py"   # 1244건
 ```
 

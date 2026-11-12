@@ -60,14 +60,8 @@ Tomy / Scarlet" **이름 캡션이 25초 넘게 픽셀 단위로 그대로**였�
 바꾸는" 부작용이 없다(같은 텍스트가 반복되면 anchor와도 계속 비슷해 정상
 병합된다 — 확인함).
 
-**3단계(2026-08-31): `captions_to_draft_srt_events()`를 추가했다.**
-`--ocr-hardsub`에서만 쓰인다 — 하드섭(화면 전체에 자막이 계속 타 있는 영상,
-임베디드 자막 트랙이 아예 없는 경우) 전용. 2단계의 `captions_to_events`/
-`merge_captions`과 달리 마커로 안 감싸고 카드 하나를 자막 하나로 그대로
-옮긴다 — OCR 텍스트가 부가 캡션이 아니라 대사 그 자체이기 때문이다. 결과는
-`tools/corpus_build.py:90-91`과 같은 이유로 **정답지가 아니다** — 사람이
-영상과 대조해 고친 뒤에만 `학습한 TC 및 자막 모음/`에 들어간다
-(`.claude/skills/정답지-학습/SKILL.md` 참고).
+**3단계(하드섭 초안 `captions_to_draft_srt_events`)는 2026-11-12에 지웠다** — 사용자가
+화면 글자로 TC를 잡는 방식을 모두 버리고 파형 방식(`tools/waveform_tc/`)으로 바꿨다.
 
 **4단계(2026-08-31) — "경계만 따로 정밀화"를 세 번 고치다가 결국 통째로
 걷어냈다. 순서대로 남긴다(다음에 같은 길을 또 걷지 않도록):**
@@ -100,7 +94,7 @@ Tomy / Scarlet" **이름 캡션이 25초 넘게 픽셀 단위로 그대로**였�
 **최종 해법**: 애초에 seek를 안 하는 연속 디코딩(`full_scan`의 굵은 패스가
 이미 하던 방식, 이미 정확하다고 실측으로 확인됨)을 **그대로 촘촘한 fps로**
 돌린다. 새 방법을 시도하는 게 아니라 이미 검증된 방법의 해상도만 올린 것 —
-`--ocr-hardsub`의 `sample_fps` 기본값을 12(83ms 간격)로 올렸다. 6배 느리지만
+옛 `--ocr-hardsub`(2026-11-12 삭제)의 `sample_fps` 기본값을 12(83ms 간격)로 올렸다. 6배 느리지만
 (71분 영상 기준 75분 -> 대략 7~8시간), 시간보다 TC 정확도가 중요하다는
 사용자 결정에 따른 것이다. `_enforce_no_overlap()`만 남겨서 항상 적용한다.
 """
@@ -406,7 +400,7 @@ def detect_onscreen_captions(video: Path, lang: str = "en", sample_fps: float = 
 
     `band`(0~1)를 주면 화면 아래 그 비율만 잘라서 읽는다(`_extract_frames`
     참고) — `full_scan`과는 다른 축이다: `full_scan`은 **언제**(시간대) 볼지,
-    `band`는 **어디**(화면 안 위치)를 볼지 정한다. 대사 하드섭(`--ocr-hardsub`)
+    `band`는 **어디**(화면 안 위치)를 볼지 정한다. 대사 하드섭(옛 `--ocr-hardsub`, 삭제됨)
     전용 — 좌상단 워터마크·배경 간판 글자가 안 섞인다. 위치가 안 정해진 예능
     화면 캡션(`--ocr-scan`/`--ocr`)에는 기본으로 안 쓴다(`band=None`, 전체 프레임).
 
@@ -422,7 +416,7 @@ def detect_onscreen_captions(video: Path, lang: str = "en", sample_fps: float = 
     — ffmpeg이 짧은 구간을 독립적으로 seek하면 실제 내용과 다른 프레임을
     준다는 게 실측으로 드러났다(같은 시각인데 연속 디코딩 프레임엔 자막이
     보이고 독립 seek 프레임엔 안 보임, 3초 웜업을 줘도 마찬가지). seek 없이
-    연속으로 디코딩하는 것만 믿을 수 있어서, `--ocr-hardsub`는 `sample_fps`
+    연속으로 디코딩하는 것만 믿을 수 있어서, 옛 `--ocr-hardsub`는 `sample_fps`
     기본값을 12로 올려 이 함수를 그대로(더 촘촘하게) 쓴다.
 
     결과는 항상 인접 캡션끼리 겹치지 않게 정리한다(`_enforce_no_overlap`).
@@ -432,7 +426,7 @@ def detect_onscreen_captions(video: Path, lang: str = "en", sample_fps: float = 
 
     **이어하기(2026-08-31)**: `checkpoint_path`를 주면 워커가 프레임마다
     결과를 그 경로에 바로 남긴다(`_run_worker`·`_ocr_worker.py` 참고) —
-    `--ocr-hardsub`(71분 영상 기준 7~8시간짜리 스캔)처럼 오래 걸리는 호출이
+    긴 스캔(옛 `--ocr-hardsub`는 71분 7~8시간)처럼 오래 걸리는 호출이
     중간에 끊겨도(절전·재부팅·강제 종료) 같은 인자로 다시 부르면 이미 된
     프레임은 다시 안 돌고 이어서 돈다. 지금 (영상·언어·fps·band·full_scan)
     조합과 다른 체크포인트는 지우고 새로 시작한다(`_prepare_checkpoint`) —
@@ -522,29 +516,3 @@ def merge_captions(dialogue_events: list[Event], dialogue_notes: list[tuple[int,
     merged_notes = [(remap.get(i, i), msg) for i, msg in dialogue_notes] + caption_notes
     merged_sources = {remap.get(i, i): text for i, text in (dialogue_sources or {}).items()}
     return combined, merged_notes, merged_sources
-
-
-def captions_to_draft_srt_events(captions: list[OcrCaption], min_confidence_note: float = 0.6,
-                                 ) -> tuple[list[Event], list[tuple[int, str]]]:
-    """OCR로 읽은 화면 캡션(카드 단위)을 자막 **초안** `Event`로 바꾼다.
-
-    **정답지가 아니다.** `tools/corpus_build.py`의 원칙과 같다 — "OCR을 거친
-    것은 타임코드도 글자도 근사값이 되므로 정답 자료로 쓰지 않는다"
-    (`tools/corpus_build.py:90-91`). 하드섭(화면 전체에 자막이 타 있는 영상)처럼
-    임베디드 자막 트랙이 아예 없어 `corpus_build.py`로 못 뽑을 때만 쓴다 — 사람이
-    영상과 대조해 고친 뒤에야 `.claude/skills/정답지-학습/`의 §4 이후(원본 그대로
-    `학습한 TC 및 자막 모음/`에 복사)를 밟을 수 있다.
-
-    `captions_to_events()`/`merge_captions()`(2단계 — whisper 대사 위에 얹는
-    부가 캡션용, 마커로 감싸고 다른 draft와 병합함)와는 **다른 함수**다. 여기선
-    OCR 텍스트가 대사 그 자체이므로 마커를 안 감싸고 카드 하나 = 자막 하나로
-    그대로 옮긴다.
-
-    신뢰도가 `min_confidence_note` 미만인 카드는 노트로 남긴다(규칙4 — 알리기만
-    하고 자동으로 고치지 않는다).
-    """
-    events = [Event(i, c.start_ms, c.end_ms, c.text, kind="caption")
-             for i, c in enumerate(captions, 1)]
-    notes = [(i, f"OCR 신뢰도 {c.confidence:.2f} — 영상과 대조해 확인")
-            for i, c in enumerate(captions, 1) if c.confidence < min_confidence_note]
-    return events, notes

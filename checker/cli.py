@@ -944,83 +944,6 @@ def _sfx_scan_mode(args, ap) -> int:
     return 0
 
 
-def _ocr_hardsub_mode(args, ap) -> int:
-    """하드섭(화면 전체에 자막이 타 있는 영상)을 카드 단위 초안 srt로 뽑는다.
-
-    **정답지가 아니다.** `tools/corpus_build.py`와 같은 원칙 — OCR은 타임코드도
-    글자도 근사값이다. 임베디드 자막 트랙이 없어 `corpus_build.py`로 못 뽑을
-    때만 쓴다. 사람이 영상과 대조해 고친 뒤에야 `학습한 TC 및 자막 모음/`에
-    들어간다(`.claude/skills/정답지-학습/SKILL.md` 참고) — 여기서 만든 파일을
-    그대로 옮기지 않는다.
-
-    **TC는 경계를 따로 재확인하지 않는다.** 처음엔 굵게(2fps) 훑고 경계 근처만
-    촘촘히 다시 seek해서 정밀화하려 했는데, ffmpeg이 짧은 구간을 독립적으로
-    seek하면 틀린 프레임을 준다는 게 실측으로 드러났다(2026-08-31 — 같은
-    시각인데 연속 디코딩 프레임엔 자막이 보이고 독립 seek 프레임엔 안 보임).
-    그래서 **처음부터 끝까지 안 끊고(seek 없이) 촘촘한 fps로 바로 읽는다** —
-    이미 정확하다고 확인된 방식(연속 디코딩)을 그대로 촘촘하게만 쓴다. 기본
-    12fps(83ms 간격) — 2fps(500ms 간격)보다 6배 느리지만, 시간보다 TC 정확도가
-    중요하다는 사용자 결정에 따른 것이다.
-    """
-    from .media import MediaToolUnavailable
-    from .ocr import OcrUnavailable, captions_to_draft_srt_events, detect_onscreen_captions
-    from .writers import to_srt, write_srt
-
-    if not args.video:
-        ap.error("--ocr-hardsub에는 --video가 필요합니다")
-    if not args.video.is_file():
-        ap.error(f"영상을 찾지 못했습니다: {args.video}")
-
-    # 대사 자막은 항상 화면 아래 중앙에 뜬다 — 전체를 읽으면 좌상단 작품명
-    # 워터마크·배경 간판 글자까지 섞인다(실측, 2026-08-31). 기본 0.25.
-    band = args.ocr_band if args.ocr_band is not None else 0.25
-    sample_fps = args.ocr_sample_fps if args.ocr_sample_fps is not None else 12.0
-
-    # **이어하기(2026-08-31).** 71분 영상 기준 7~8시간짜리 스캔이다(위
-    # 독스트링) — 절전·재부팅·강제 종료로 끊기면 처음부터 다시 도는 비용을
-    # 감당하기 어렵다. `checker/ocr.py`의 `detect_onscreen_captions`가
-    # 프레임마다 이 경로에 진행 상황을 남기고, 다음에 같은 영상·설정으로
-    # 다시 부르면 이어서 돈다(설정이 달라졌으면 자동으로 새로 시작한다).
-    checkpoint = (args.out or args.video).with_suffix(".ocr-checkpoint.json")
-    if checkpoint.is_file():
-        print(f"이전에 끊긴 스캔을 이어갑니다: {checkpoint}", file=sys.stderr)
-    try:
-        captions = detect_onscreen_captions(
-            args.video, lang=args.ocr_lang, sample_fps=sample_fps,
-            min_confidence=args.ocr_min_confidence,
-            min_similarity=args.ocr_min_similarity,
-            max_duration_ms=args.ocr_max_duration, full_scan=not args.ocr_fast,
-            band=band, checkpoint_path=checkpoint)
-    except (MediaToolUnavailable, OcrUnavailable) as exc:
-        print(f"[오류] {exc}")
-        print(f"진행 상황은 저장돼 있습니다 — 같은 명령을 다시 돌리면 "
-              f"이어서 합니다: {checkpoint}", file=sys.stderr)
-        return 2
-
-    if not captions:
-        print("화면에서 자막을 찾지 못했습니다.")
-        return 1
-
-    events, notes = captions_to_draft_srt_events(captions)
-    out = args.out or args.video.with_suffix(".ocr-draft.srt")
-    write_srt(events, out)
-    print(f"OCR 초안 {len(events)}개를 저장했습니다: {out}")
-    print("이 파일은 정답지가 아닙니다 — 영상과 대조해 확인·수정한 뒤에만 "
-          "학습 자료로 씁니다(정답지-학습 스킬 참고).")
-
-    if notes:
-        from .model import Event
-
-        by_index = dict(notes)
-        notes_path = out.with_suffix(".notes.srt")
-        notes_path.write_text(
-            to_srt([Event(ev.index, ev.start_ms, ev.end_ms, by_index.get(ev.index, "·"))
-                   for ev in events]),
-            encoding="utf-8")
-        print(f"신뢰도 낮아 봐야 할 자리 {len(notes)}곳: {notes_path}")
-    return 0
-
-
 def _generate_mode(args, ap) -> int:
     """영상 -> 자막 초안. 검사 경로와 섞지 않는다 — 입력도 출력도 다르다."""
     from .generate import generate, notes_srt
@@ -1360,7 +1283,7 @@ def main(argv: list[str] | None = None) -> int:
                     help="캡션 언어(easyocr 언어 코드, 기본 en)")
     ap.add_argument("--ocr-sample-fps", type=float, default=None,
                     help="초당 몇 프레임을 뽑아 인식할지. --ocr-scan/--ocr은 기본 "
-                         "2.0. --ocr-hardsub는 기본 12.0 — TC 정밀도가 중요한데, "
+                         "2.0. 화면 글자 TC가 중요하면 촘촘히 — "
                          "경계만 따로 촘촘히 다시 보는 방식은 ffmpeg이 짧은 구간을 "
                          "독립적으로 seek할 때 틀린 프레임을 주는 문제가 실측에서"
                          "나왔다(2026-08-31 — 같은 시각인데 연속 디코딩 프레임엔 "
@@ -1389,17 +1312,9 @@ def main(argv: list[str] | None = None) -> int:
                          "때만 켠다")
     ap.add_argument("--ocr-json", type=Path,
                     help="--ocr-scan 결과를 JSON으로도 남긴다")
-    ap.add_argument("--ocr-hardsub", action="store_true",
-                    help="화면 전체에 타 있는 자막(하드섭)을 OCR로 카드 단위 "
-                         "초안(srt)으로 뽑는다(--video 필요). **정답지가 아니다** "
-                         "— corpus_build.py와 같은 원칙, OCR은 타임코드도 글자도 "
-                         "근사값이다. 영상과 대조해 사람이 고친 뒤에만 "
-                         "학습한 TC 및 자막 모음/에 넣는다(정답지-학습 스킬)")
     ap.add_argument("--ocr-band", type=float, default=None,
-                    help="화면 아래 이 비율만 잘라서 읽는다(0~1). --ocr-hardsub는 "
-                         "기본 0.25 — 대사 자막은 항상 아래 중앙에 뜨는데 전체를 "
-                         "읽으면 좌상단 작품명 워터마크·배경 간판 글자까지 섞인다"
-                         "(실측). --ocr-scan/--ocr은 기본 None(전체 프레임) — "
+                    help="화면 아래 이 비율만 잘라서 읽는다(0~1). "
+                         "--ocr-scan/--ocr은 기본 None(전체 프레임) — "
                          "예능 화면 캡션은 위치가 안 정해져 있다")
     ap.add_argument("--ocr-exclude-top", type=float, default=None,
                     help="화면 위 이 비율만 빼고 나머지는 그대로 읽는다(0~1). "
@@ -1620,9 +1535,6 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.ocr_scan:
         return _ocr_scan_mode(args, ap)
-
-    if args.ocr_hardsub:
-        return _ocr_hardsub_mode(args, ap)
 
     if args.sfx_scan:
         return _sfx_scan_mode(args, ap)
