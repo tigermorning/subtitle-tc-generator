@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QThread, Signal
+from PySide6.QtCore import QObject, QThread, Signal, Slot
 
 from .log import write as log
 
@@ -422,7 +422,31 @@ class TermsJob(Job):
 
 
 # 돌고 있는 실과 **일 객체**를 여기서 붙잡는다. 아래 이유로 둘 다 필요하다.
-_ALIVE: list[tuple[QThread, "Job"]] = []
+_ALIVE: list[tuple] = []
+
+
+class _Relay(QObject):
+    """끝·실패 콜백을 **부른 쪽 실(화면 실)** 에서 돌린다.
+
+    `job.finished`에 일반 함수(클로저)를 바로 붙이면, 받는 QObject가 없어서 Qt가
+    신호를 보낸 실 — 일하는 실 — 에서 그 함수를 곧바로 부른다. 그러면 화면을
+    고치는 코드가 일하는 실에서 돌아 창이 멈춘다. 2026-11-12 [② 한국어 교정]이
+    "CheckJob 끝" 뒤에 `_show_violations`에서 멈춘 것을 faulthandler로 확인했다.
+    이 객체는 부른 쪽 실에 살고 슬롯을 가지므로 연결이 큐 방식이 된다.
+    """
+
+    def __init__(self, on_done, on_failed) -> None:
+        super().__init__()
+        self._on_done = on_done
+        self._on_failed = on_failed
+
+    @Slot(object)
+    def done(self, result) -> None:
+        self._on_done(result)
+
+    @Slot(str)
+    def fail(self, why: str) -> None:
+        self._on_failed(why)
 
 
 def start(job: Job, on_done, on_message, on_failed) -> QThread:
@@ -442,13 +466,14 @@ def start(job: Job, on_done, on_message, on_failed) -> QThread:
     thread = QThread()
     job.moveToThread(thread)
     thread.started.connect(job.run)
-    job.finished.connect(on_done)
+    relay = _Relay(on_done, on_failed)          # 부른 쪽(화면) 실에 산다
+    job.finished.connect(relay.done)
     job.message.connect(on_message)
-    job.failed.connect(on_failed)
+    job.failed.connect(relay.fail)
     job.finished.connect(thread.quit)
     job.failed.connect(thread.quit)
 
-    held = (thread, job)
+    held = (thread, job, relay)
     _ALIVE.append(held)
 
     def _release() -> None:
