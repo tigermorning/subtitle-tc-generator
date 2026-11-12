@@ -270,9 +270,18 @@ def load_backend(corrector_path: str | None = None):
         entries = [
             SubtitleEntry(index=i + 1, start="", end="", text=t) for i, t in enumerate(texts)
         ]
+        # 언어 모델 패스(되/돼·로서/로써 등 문맥 판단 제안)를 켠다(사용자 2026-11-13).
+        # 설정은 교정기 쪽 .env(LLM_MODEL·LLM_BASE_URL)가 정하고, 없으면 교정기가 꺼진
+        # 설정으로 떨어뜨린다. 자막을 고치지 않고 flags(제안)만 더한다.
+        llm_opt = {}
+        try:
+            from subtitle_corrector.engine import normalize_llm_settings  # type: ignore
+            llm_opt = {"llm": normalize_llm_settings(enabled=True)}
+        except ImportError:
+            pass
         fixed, flags, _notes = correct_entries(
             entries, doc_type="subtitle", spacing_mode=spacing_mode,
-            **_corrector_options(root_path, profile)
+            **_corrector_options(root_path, profile), **llm_opt
         )
         return (
             [e.text for e in fixed],
