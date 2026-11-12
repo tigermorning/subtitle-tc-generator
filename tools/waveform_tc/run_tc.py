@@ -1,6 +1,6 @@
 """영상 한 구간의 TC를 처음부터 끝까지 만든다(사람 음성만, SE 파형 기준).
 
-사용: python run_tc.py VIDEO START_SEC DUR_SEC OUTDIR FPS GAP_FRAMES KIND [SCRIPT.txt REF.srt MAX_CHARS]
+사용: python run_tc.py VIDEO START_SEC DUR_SEC OUTDIR FPS GAP_FRAMES KIND [SCRIPT.txt REF.srt MAX_CHARS [SDH_REF.srt]]
   KIND = sdh(장면전환 앞뒤 0.5초 적용) | translation(장면전환 안 씀)
   REF.srt 는 영상 시각 기준(예: ffmpeg -i 영상 -map 0:s:0 ref.srt 로 뽑은 영상 안 자막 트랙)
 순서(사용자 지정 2026-11-12):
@@ -16,6 +16,8 @@ if len(sys.argv) < 8 or sys.argv[7] not in ("sdh", "translation"):
 video, start, dur, out, fps, gap, kind = sys.argv[1], sys.argv[2], sys.argv[3], Path(sys.argv[4]), sys.argv[5], sys.argv[6], sys.argv[7]
 # 선택: 대본이 있으면 SCRIPT.txt REF.srt(시각 있는 참고 자막) MAX_CHARS(한 자막 최대 글자: 영어 84, 한국어 32)
 script, ref, max_chars = (sys.argv[8], sys.argv[9], sys.argv[10]) if len(sys.argv) > 10 else (None, None, None)
+# 선택: SDH 참고 자막(대괄호 소리 표기 시각) — 그 자리의 소리 조각은 비음성으로 버린다(ffmpeg -i 영상 -map 0:s:1 ref_sdh.srt)
+sdh_ref = [sys.argv[11]] if len(sys.argv) > 11 else []
 HERE = Path(__file__).resolve().parent
 SE_DIR = Path(os.environ["LOCALAPPDATA"]) / "Programs" / "Subtitle Edit 4"
 MODEL = Path.home() / "models" / "Kim_Vocal_2.onnx"
@@ -75,7 +77,22 @@ def se_waveform():
                 except Exception:
                     pass
             if cands:
-                wf = max(cands, key=os.path.getmtime)
+                # 길이만 같은 다른 파형(이전 패스의 소리)을 집지 않도록, voice_only.wav 꼭짓값과 가장 닮은 것을 고른다
+                import numpy as _np
+                with _w.open(str(out / "voice_only.wav")) as w:
+                    v = _np.frombuffer(w.readframes(w.getnframes()), _np.int16).reshape(-1, w.getnchannels())
+                    hop = w.getframerate() // 150
+                ref_env = _np.abs(v[:len(v) // hop * hop].astype(float)).max(1).reshape(-1, hop).max(1)
+                def _score(f):
+                    with _w.open(f) as w:
+                        e = _np.abs(_np.frombuffer(w.readframes(w.getnframes()), _np.int16).reshape(-1, w.getnchannels()).astype(float)).max(1)
+                    m = min(len(e), len(ref_env))
+                    return _np.corrcoef(e[:m], ref_env[:m])[0, 1]
+                scored = sorted(((_score(f), f) for f in cands), reverse=True)
+                print("저장된 파형 닮은 정도", [(round(a, 3), os.path.basename(f)) for a, f in scored[:3]])
+                if scored[0][0] < 0.9:
+                    sys.exit("SE 파형이 지금 소리와 맞지 않습니다 — SE에서 파형을 다시 받아 주세요")
+                wf = scored[0][1]
                 shutil.copyfile(wf, out / "se_waveform.wav"); print("SE 파형(저장된 것 재사용)", wf); return
     sys.exit("SE가 파형을 만들지 않았습니다(설정 WaveformAutoGenWhenOpeningVideo 확인)")
 
@@ -97,7 +114,7 @@ for pass_no in (1, 2):
         shutil.copyfile(out / "wave_only.srt", srt); break
     # 대본 넣기: 대본 줄 시각은 시각 있는 참고 자막(영상 안 자막 트랙 등)에서 얻는다. 글자 수가 넘치면 쉼에서 나눈다
     run(PY, HERE / "fill_script.py", out / "wave_only.srt.json", out / "se_waveform.wav", script, ref,
-        start, fps, gap, max_chars, srt)
+        start, fps, gap, max_chars, srt, *sdh_ref)
     missing = json.load(open(str(srt) + ".unplaced.json", encoding="utf-8"))
     if pass_no == 2 or not missing:
         break

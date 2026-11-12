@@ -12,7 +12,7 @@
 파형 판정(내가 정한 값): 10ms 창 RMS, 문턱 = max(하위 20% + 20dB, 상위 1% - 35dB),
   0.2초 이상 조용하면 말소리를 끊고, 0.12초보다 짧은 소리는 버린다.
 """
-import sys, wave, json
+import sys, wave, json, os
 import numpy as np
 
 src, dst = sys.argv[1], sys.argv[2]
@@ -20,7 +20,7 @@ offset = float(sys.argv[3]) if len(sys.argv) > 3 else 0.0
 FPS = eval(sys.argv[4]) if len(sys.argv) > 4 else 30000 / 1001  # 예: 24, 30000/1001
 IN_F = round(0.1 * FPS)  # 0.1초
 OUT_F = round(0.267 * FPS)  # 0.2~0.3초 가운데(29.97fps에서 8프레임)
-MIN_DUR = 1.0
+MIN_DUR = float(os.environ.get('WAVE_TC_MIN_DUR', '0.834'))  # 넷플릭스 규정 0.833초(5/6초). 발주처마다 다름
 if len(sys.argv) <= 5:
     sys.exit("자막 사이 간격(GAP_FRAMES)을 정해 주세요 — 발주처 요청에 따라 0 또는 2")
 GAP_F = int(sys.argv[5])
@@ -79,24 +79,47 @@ if os.environ.get("WAVE_TC_VAD_SRC"):
     t16 = np.arange(0, len(m2) / sr2, 1 / SAMPLE_RATE)
     prob = np.asarray(_probabilities(np.interp(t16, np.arange(len(m2)) / sr2, m2).astype(np.float32), find_model()))
     step = WINDOW / SAMPLE_RATE
-    keep = []
     keep_win = []
     if os.environ.get("WAVE_TC_KEEP"):
         keep_win = [tuple(x[:2]) for x in json.load(open(os.environ["WAVE_TC_KEEP"], encoding="utf-8"))]
-    for s in voice:
-        i0 = int(s[0] / step)
-        p = prob[i0:max(i0 + 1, int(s[1] / step))]
-        if p.mean() >= 0.5 or any(a - 0.3 <= s[1] and b + 0.3 >= s[0] for a, b in keep_win):
-            keep.append(s); continue
-        # 평균이 낮아도 통째로 버리지 않는다: 한 조각에 소음(덜컥)과 말소리(«S-»)가 함께 있을 수 있다
-        # (2026-11-12 사용자 지적 — 통째로 버렸더니 «S-»가 잘리고 «-tar»만 남았다).
-        # 조각 안에서 확률 0.5 이상인 부분만 남기고, 그 부분의 평균도 0.5 이상일 때 살린다.
-        hi = np.flatnonzero(p >= 0.5)
-        if len(hi) and (hi[-1] - hi[0] + 1) * step >= MIN_SND and p[hi[0]:hi[-1] + 1].mean() >= 0.5:
-            keep.append([max(s[0], (i0 + hi[0]) * step), min(s[1], (i0 + hi[-1] + 1) * step)])
-            dropped_vad.append([s[0], keep[-1][0]])  # 앞쪽 소음만 버림(기록용)
-        else:
-            dropped_vad.append(s)
+    # **VAD는 «이 덩어리가 말인가»를 가리는 데만 쓴다. 경계 자리는 파형으로만 정한다**(사용자 2026-11-12:
+    # VAD로 경계를 옮겼더니 VAD가 늦게 올라가 인점이 음성 시작보다 뒤로 갔다).
+    # 한 덩어리 안에 말과 비음성이 붙어 있으면(앞뒤 끝에 VAD 0.5 미만이 0.2초 넘게 이어짐),
+    # 바뀌는 지점 ±0.15초 안에서 파형이 가장 낮게 꺼지는 자리로 나누고, 나눈 조각마다 다시 가린다.
+    def vad_mean(a, b):
+        q = prob[int(a / step):max(int(a / step) + 1, int(b / step))]
+        return float(q.mean())
+
+    def dip(t):  # t 근처에서 파형이 가장 낮은 자리(초)
+        lo, hi = max(0, int((t - 0.15) / WIN)), min(n - 1, int((t + 0.15) / WIN))
+        return (lo + int(np.argmin(db[lo:hi + 1]))) * WIN if hi > lo else t
+
+    def split_edges(a, b):
+        i0, i1 = int(a / step), max(int(a / step) + 1, int(b / step))
+        hi = np.flatnonzero(prob[i0:i1] >= 0.5)
+        if not len(hi):
+            return [(a, b, False)]
+        s0, s1 = (i0 + hi[0]) * step, (i0 + hi[-1] + 1) * step
+        parts = []
+        # 실제 대사도 시작 0.2초 안팎은 VAD가 낮다 → 확률 낮은 끝 구간이 0.3초 이상이고 그 평균이 0.3 미만일 때만 나눈다
+        # (헉·덜컥 같은 비음성은 0.1 안팎, 말의 첫소리는 0.4 안팎이었다)
+        cut0 = dip(s0) if s0 - a >= 0.3 and vad_mean(a, s0) < 0.3 else a
+        cut1 = dip(s1) if b - s1 >= 0.3 and vad_mean(s1, b) < 0.3 else b
+        if cut0 > a:
+            parts.append((a, cut0, False))
+        parts.append((cut0, cut1, True))
+        if cut1 < b:
+            parts.append((cut1, b, False))
+        return parts
+
+    keep = []
+    for s0, s1 in voice:
+        if any(a - 0.3 <= s1 and b + 0.3 >= s0 for a, b in keep_win):
+            keep.append([s0, s1]); continue
+        for a, b, is_core in split_edges(s0, s1):
+            if b - a < MIN_SND:
+                continue
+            (keep if is_core and vad_mean(a, b) >= 0.5 else dropped_vad).append([a, b])
     voice = keep
 
 # 시작·끝을 «눈에 보이는 크기»로 좁힌다(사용자 2026-11-12: «인점·아웃점 둘 다 여유가 너무 많다»).
@@ -111,6 +134,18 @@ def _trim(a, b):
         return a, b
     return (i0 + big[0]) * WIN, (i0 + big[-1] + 1) * WIN
 voice = [list(_trim(a, b)) for a, b in voice]
+# 끝 꼬리: 말소리 확률 0.2 미만이고 진폭도 작은(가장 큰 소리 −15dB 아래) 꼬리는 잘라낸다
+# (대사 뒤 작은 입맞춤·숨소리가 이어져 아웃점이 늦었다). 끝에서는 VAD가 바로 떨어지므로 끝에만 쓴다.
+if os.environ.get("WAVE_TC_VAD_SRC"):
+    small = np.percentile(db, 99) - 15
+    for v in voice:
+        if any(a - 0.3 <= v[1] and b + 0.3 >= v[0] for a, b in keep_win):
+            continue
+        e = v[1]
+        while e - v[0] > 0.2 and prob[min(len(prob) - 1, int((e - step) / step))] < 0.2 and db[int((e - WIN) / WIN)] < small:
+            e -= WIN
+        if e < v[1]:
+            v[1] = list(_trim(v[0], e))[1]
 
 fr = lambda t: round(t * FPS)  # 초 -> 프레임 번호
 cues = []
