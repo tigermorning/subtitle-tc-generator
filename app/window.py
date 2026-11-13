@@ -64,6 +64,9 @@ class MainWindow(QMainWindow):
         self._preview_loaded = False
         self.player: Player | None = None
         self.subtitle_path: Path | None = None
+        # 한국어 교정 설정 가운데 사용자가 바꾼 칸(작품 단위, `checker/korean_settings.py`).
+        # 자막을 열면 그 작업 폴더에서 읽고, 설정 창에서 OK를 누르면 거기에 쓴다.
+        self.korean_overrides: dict = {}
         self.model = SubtitleModel()
         # 편집 중인 내용을 영상에 얹기 위한 임시 파일. **원본과 따로 둔다** —
         # 미리 보기 때문에 원본이 바뀌면 안 된다.
@@ -287,6 +290,14 @@ class MainWindow(QMainWindow):
                         "감수를 몇 회까지 돌지. 잠잠해지면 상한 전에 멈추고, "
                         "왜 멈췄는지 진행 기록에 남습니다.")
                     line.addWidget(self.rounds_box)
+                # 교정기 웹앱 «2단계 · 교정 옵션»을 이 단추 옆에서 연다.
+                if stage.id == "korean":
+                    self.korean_settings_button = QPushButton("교정 설정...")
+                    self.korean_settings_button.setToolTip(
+                        "한국어 교정 설정 — 사용 목적·구두점 표기·자막 편집 표지·"
+                        "띄어쓰기 기준·고유명사·사투리 (작품마다 저장)")
+                    self.korean_settings_button.clicked.connect(self.open_korean_settings)
+                    line.addWidget(self.korean_settings_button)
             line.addStretch(1)
             rows.addLayout(line)
             # **직전 단계 결과를 버튼 옆에 남긴다.** 단계 사이에 사람이 검토해야 하고,
@@ -317,6 +328,10 @@ class MainWindow(QMainWindow):
                 action = self.stage_actions.get(stage.id)
                 if action is not None:
                     stage_menu.addAction(action)
+                if stage.id == "korean":
+                    settings_item = QAction("한국어 교정 설정...", self)
+                    settings_item.triggered.connect(self.open_korean_settings)
+                    stage_menu.addAction(settings_item)
 
         # 옛 이름을 쓰던 자리가 남아 있어도 깨지지 않게 한다.
         self.pipeline_buttons = list(self.stage_actions.values())
@@ -382,30 +397,136 @@ class MainWindow(QMainWindow):
     def _build_results(self) -> None:
         """지적 목록. **두 번 누르면 그 자막으로 간다** — 목록과 영상이 이어져야
         사람이 확인할 수 있다."""
-        self.results = QTableWidget(0, 3)
-        self.results.setHorizontalHeaderLabels(["자막", "규칙", "내용"])
+        # 넷째 칸 «반영»: 한국어 교정 지적에만 체크칸이 생긴다 — 자동 교정(K01)은
+        # «되돌리기», 확인 필요(K02) 가운데 제안이 있는 것은 «채택». 교정기 웹앱의
+        # 결과 화면과 같은 조작이다(사용자 2026-11-13: 웹앱을 따로 열지 않게).
+        self.results = QTableWidget(0, 4)
+        self.results.setHorizontalHeaderLabels(["자막", "규칙", "반영", "내용"])
         self.results.horizontalHeader().setStretchLastSection(True)
         self.results.setColumnWidth(0, 60)
         self.results.setColumnWidth(1, 70)
+        self.results.setColumnWidth(2, 90)
         # 읽기 전용이다. 더블클릭이 칸 편집을 열면 번호가 글자로 바뀌어 이동이 깨진다.
         self.results.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.results.doubleClicked.connect(self._jump_to_violation)
+        self._violations: list = []
+
+        self.apply_choices_button = QPushButton(
+            "선택 반영하기 (제안 채택 + 자동 교정 되돌리기)")
+        self.apply_choices_button.clicked.connect(self.apply_korean_choices)
+        self.apply_choices_button.setEnabled(False)
+        self.apply_choices_note = QLabel("")
+        self.apply_choices_note.setStyleSheet("color: #777;")
+        holder = QWidget()
+        column = QVBoxLayout(holder)
+        column.setContentsMargins(0, 0, 0, 0)
+        column.addWidget(self.results)
+        bottom = QHBoxLayout()
+        bottom.addWidget(self.apply_choices_button)
+        bottom.addWidget(self.apply_choices_note, 1)
+        column.addLayout(bottom)
 
         dock = QDockWidget("검사 결과", self)
-        dock.setWidget(self.results)
+        dock.setWidget(holder)
         self.addDockWidget(Qt.BottomDockWidgetArea, dock)
         dock.hide()
         self.results_dock = dock
 
     def _show_violations(self, violations) -> None:
+        self._violations = list(violations)
         self.results.setRowCount(len(violations))
+        choosable = 0
         for row, violation in enumerate(violations):
             mark = "자동" if violation.get("auto_fixable") else "확인"
             self.results.setItem(row, 0, QTableWidgetItem(str(violation["event_index"])))
             self.results.setItem(row, 1, QTableWidgetItem(f"{violation['rule_id']} {mark}"))
+            choice = violation.get("choice")
+            pick = QTableWidgetItem("")
+            if choice:
+                pick = QTableWidgetItem("되돌리기" if choice["action"] == "revert" else "채택")
+                pick.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+                pick.setCheckState(Qt.Unchecked)
+                choosable += 1
+            self.results.setItem(row, 2, pick)
             detail = violation.get("detail") or violation.get("message") or ""
-            self.results.setItem(row, 2, QTableWidgetItem(str(detail)[:120]))
+            self.results.setItem(row, 3, QTableWidgetItem(str(detail)[:200]))
+        self.apply_choices_button.setEnabled(bool(choosable))
+        self.apply_choices_note.setText("")
         self.results_dock.setVisible(bool(violations))
+
+    def _checked_choices(self) -> list[dict]:
+        picked = []
+        for row, violation in enumerate(self._violations):
+            item = self.results.item(row, 2)
+            if violation.get("choice") and item is not None \
+                    and item.checkState() == Qt.Checked:
+                picked.append(violation["choice"])
+        return picked
+
+    def apply_korean_choices(self) -> None:
+        """«선택 반영하기». 고른 자동 교정은 원문으로, 고른 제안은 제안대로 바꾼다.
+        규칙은 `checker.korean.apply_korean_choices`(웹앱과 같은 순서·건너뛰기)."""
+        from checker.korean import apply_korean_choices
+
+        picked = self._checked_choices()
+        if not picked:
+            self.apply_choices_note.setText(
+                "반영할 항목을 먼저 체크하세요 (제안 채택 또는 자동 교정 되돌리기).")
+            return
+        events, reverted, adopted, missed = apply_korean_choices(self.model.events, picked)
+        self.model.replace(events)
+        self.waveform.set_events(self.model.events)
+        self._preview_timer.start()
+        done = {id(c) for c in picked}
+        remaining = [v for v in self._violations if id(v.get("choice")) not in done]
+        self._show_violations(remaining)
+        text = f"제안 {adopted}건 반영, 자동 교정 {reverted}건 되돌림."
+        if missed:
+            text += f" {missed}건은 그 자리가 이미 바뀌어 건너뛰었습니다."
+        self.apply_choices_note.setText(text)
+        self._note(f"[선택 반영] {text}")
+        self.statusBar().showMessage(text)
+
+    # --- 한국어 교정 설정 -------------------------------------------------
+    def _korean_settings(self):
+        """지금 적용될 설정 = 발주처 프로파일 기본값 + 이 작품에서 바꾼 칸."""
+        from checker.korean_settings import effective
+        try:
+            profile = self._profile()
+        except Exception:  # noqa: BLE001 — 프로파일이 깨져도 설정 창은 열려야 한다
+            profile = None
+        return effective(self.korean_overrides, profile)
+
+    def open_korean_settings(self) -> None:
+        from checker.korean import dialect_regions
+        from checker.korean_settings import diff_from_defaults, save_overrides, settings_file
+
+        from PySide6.QtWidgets import QDialog
+
+        from .korean_settings import KoreanSettingsDialog
+
+        if self.subtitle_path:
+            where = f"이 작품 설정은 {settings_file(self.subtitle_path)}에 저장됩니다."
+        else:
+            where = ("자막 파일을 아직 열지 않아 이 설정은 프로그램을 닫을 때까지만 "
+                     "유지됩니다.")
+        dialog = KoreanSettingsDialog(self._korean_settings(), dialect_regions(), where, self)
+        self._korean_dialog = dialog   # 시험이 들여다볼 수 있게 붙잡아 둔다
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        try:
+            profile = self._profile()
+        except Exception:  # noqa: BLE001
+            profile = None
+        self.korean_overrides = diff_from_defaults(dialog.result_settings(), profile)
+        if self.subtitle_path:
+            try:
+                path = save_overrides(self.subtitle_path, self.korean_overrides)
+                self._note(f"한국어 교정 설정을 저장했습니다: {path}")
+            except OSError as exc:
+                self._refuse("한국어 교정 설정을 저장하지 못했습니다", str(exc))
+        else:
+            self._note("한국어 교정 설정을 바꿨습니다(자막 파일이 없어 저장하지 않음)")
 
     def _jump_to_violation(self, index) -> None:
         item = self.results.item(index.row(), 0)
@@ -726,7 +847,8 @@ class MainWindow(QMainWindow):
             return
         job = jobs.CheckJob(self.model.events, self._profile(), fix=False,
                             korean=True, corrector_path=path,
-                            job_rules=self._job_rules())
+                            job_rules=self._job_rules(),
+                            korean_settings=self._korean_settings())
         self._start(job,
                     lambda r: self._apply_stage_result(r[0], r[1], "② 한국어 교정 완료",
                                                       track="korean"),
@@ -996,6 +1118,8 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "자막을 읽지 못했습니다", path)
             return
         self.subtitle_path = Path(path)
+        from checker.korean_settings import load_overrides
+        self.korean_overrides = load_overrides(self.subtitle_path)
         self.model.replace(events)
         self._refresh_stages()
         self.waveform.set_events(self.model.events)

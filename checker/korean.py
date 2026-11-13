@@ -126,6 +126,134 @@ def _corrector_options(root_path, profile: dict | None) -> dict:
     return options
 
 
+def _settings_kwargs(settings) -> dict:
+    """`KoreanSettings`를 `correct_entries` 인자로 옮긴다 — 웹앱 `api.py::correct_subtitle`과
+    같은 정규화를 교정기 함수로 한다(규칙을 두 벌 두지 않는다).
+
+    일반 글이면 웹앱처럼 구두점·표지를 넘기지 않는다(자막 모드에만 쓰이는 값이다).
+    """
+    _corrector_on_path()
+    from subtitle_corrector.engine.options import (  # type: ignore
+        normalize_dialect_mode, normalize_punctuation_style, normalize_spacing_mode,
+        normalize_subtitle_markers)
+
+    kwargs: dict = {
+        "doc_type": "prose" if settings.doc_type == "prose" else "subtitle",
+        "spacing_mode": normalize_spacing_mode(settings.spacing_mode),
+    }
+    if kwargs["doc_type"] == "subtitle":
+        kwargs["style"] = normalize_punctuation_style(settings.ellipsis, settings.quotes)
+        kwargs["markers"] = normalize_subtitle_markers(
+            settings.screen_text_marker, settings.line_break_marker,
+            settings.position_marker, settings.speaker_bracket, settings.tone_bracket)
+    region = settings.dialect_region or None
+    if region and region not in dialect_regions():
+        region = None
+    if region:
+        kwargs["dialect_region"] = region
+        kwargs["dialect_mode"] = normalize_dialect_mode(settings.dialect_mode)
+    dialect_map = settings.dialect_map()
+    modes = {s: normalize_dialect_mode(m) for s, m in settings.dialect_modes().items()}
+    if dialect_map:
+        kwargs["dialect_map"] = dialect_map
+    if modes:
+        kwargs["dialect_modes"] = modes
+    return kwargs
+
+
+def _corrector_on_path() -> None:
+    """교정기 폴더를 불러올 수 있게 한다(`load_backend`와 같은 자리 찾기)."""
+    found = find_corrector()
+    if found:
+        root = str(found.expanduser().resolve())
+        if root not in sys.path:
+            sys.path.insert(0, root)
+
+
+def dialect_regions() -> list[str]:
+    """교정기가 아는 사투리 지역(웹앱 `/api/dialect-regions`와 같은 출처). 못 읽으면 빈 목록."""
+    _corrector_on_path()
+    try:
+        from subtitle_corrector.dictionary import DIALECT_MARKERS  # type: ignore
+    except Exception:  # noqa: BLE001 — 교정기가 없거나 의존성이 없을 때
+        return []
+    return list(DIALECT_MARKERS.keys())
+
+
+def speaker_of(line: str, chunk_no: int, enclosure: str = "[]") -> str | None:
+    """이 대사 조각 앞에 붙은 화자 표시의 이름. 화자별 사투리 지정을 교정기에 넘길 때 쓴다.
+
+    같은 줄에서 이 조각 바로 앞에 오는 표지 조각이 화자 부호(`[진수]`)면 그 안의
+    이름을 돌려준다. 효과음 `[문 닫는 소리]`도 같은 모양이라 이름으로 나오지만,
+    부르는 쪽은 사용자가 적은 화자 이름과 맞을 때만 쓰므로 해가 없다.
+    """
+    pair = enclosure or "[]"
+    if len(pair) < 2:
+        return None
+    chunks = split_chunks(line)
+    for kind, text in reversed(chunks[:chunk_no]):
+        if kind == "dialogue":
+            if text.strip():
+                return None
+            continue
+        text = text.strip()
+        if text.startswith(pair[0]) and text.endswith(pair[-1]) and len(text) > 2:
+            return text[1:-1].strip() or None
+        if text.startswith("-"):
+            continue
+        return None
+    # 소괄호 화자명(`(철수) 안녕`)은 MARKUP_RE가 떼지 않아 대사 조각 안에 있다.
+    if chunk_no < len(chunks) and pair != "[]":
+        m = re.match(r"\s*" + re.escape(pair[0]) + "([^" + re.escape(pair[-1]) + "]+)"
+                     + re.escape(pair[-1]), chunks[chunk_no][1])
+        if m:
+            return m.group(1).strip() or None
+    return None
+
+
+def apply_korean_choices(events: list[Event],
+                         choices: list[dict]) -> tuple[list[Event], int, int, int]:
+    """결과 목록에서 고른 것을 자막에 반영한다 — 웹앱 «선택 반영하기»와 같은 규칙.
+
+    choices 한 건: {"action": "revert"|"adopt", "event_index", "line_no", "chunk_no",
+    "from": 지금 있어야 할 글, "to": 바꿀 글}.
+
+    1) 자동 교정 되돌리기를 먼저, 2) 확인 항목 제안 채택을 다음에 한다. 그 자리가 이미
+    바뀌었으면(되돌렸거나 다른 제안이 얹혔으면) 건너뛰고 센다 — 웹앱과 같다.
+    조각 앞뒤 공백은 지금 자막 쪽을 지킨다. 타임코드는 건드리지 않는다.
+
+    반환: (새 자막, 되돌린 수, 채택한 수, 건너뛴 수)
+    """
+    by_index = {ev.index: [list(split_chunks(line)) for line in ev.lines] for ev in events}
+    reverted = adopted = missed = 0
+    ordered = ([c for c in choices if c and c.get("action") == "revert"]
+               + [c for c in choices if c and c.get("action") == "adopt"])
+    for choice in ordered:
+        lines = by_index.get(choice.get("event_index"))
+        try:
+            chunks = lines[int(choice["line_no"]) - 1]
+            chunk_no = int(choice["chunk_no"])
+            kind, text = chunks[chunk_no]
+        except (TypeError, KeyError, IndexError, ValueError):
+            missed += 1
+            continue
+        if kind != "dialogue" or text.strip() != str(choice.get("from", "")).strip():
+            missed += 1
+            continue
+        lead = text[: len(text) - len(text.lstrip())]
+        tail = text[len(text.rstrip()):]
+        chunks[chunk_no] = (kind, lead + str(choice.get("to", "")).strip() + tail)
+        if choice["action"] == "revert":
+            reverted += 1
+        else:
+            adopted += 1
+    out = [Event(ev.index, ev.start_ms, ev.end_ms,
+                 "\n".join("".join(t for _, t in chunks) for chunks in by_index[ev.index]),
+                 kind=ev.kind)
+           for ev in events]
+    return out, reverted, adopted, missed
+
+
 def find_corrector(explicit: str | None = None) -> Path | None:
     """한국어 교정기를 찾는다.
 
@@ -265,11 +393,38 @@ def load_backend(corrector_path: str | None = None):
     except ImportError as e:  # kiwipiepy 등 의존성이 없을 때
         raise CorrectorUnavailable(f"교정기를 불러오지 못했습니다: {e}") from e
 
-    def backend(texts: list[str], spacing_mode: str = "principle", profile: dict | None = None):
+    def backend(texts: list[str], spacing_mode: str = "principle", profile: dict | None = None,
+                settings=None, speakers: list | None = None):
+        """반환: (교정문 목록, 확인 항목 목록, 자동 교정 로그 목록).
+
+        `settings`(`korean_settings.KoreanSettings`)가 있으면 웹앱 «2단계 · 교정 옵션»과
+        같은 값을 모두 넘긴다. 없으면 발주처 프로파일 기본값만 넘긴다(전과 같다).
+        """
+        from .korean_settings import KoreanSettings, effective
+
+        if settings is None:
+            settings = effective({}, profile)
+        elif isinstance(settings, dict):
+            settings = KoreanSettings.from_dict(settings)
+        if spacing_mode and spacing_mode != "principle" and settings.spacing_mode == "principle":
+            settings.spacing_mode = spacing_mode
+
+        # 고유명사·요리·음료 이름. 웹앱(`api.py`)·CLI(`--names`)와 같은 길이다 —
+        # `correct_entries`는 이름 목록을 받지 않고, kiwi 사용자 사전에 미리 올려 둔다.
+        if settings.names:
+            try:
+                from subtitle_corrector.engine import register_custom_words  # type: ignore
+                register_custom_words(list(settings.names), tag="NNP")
+            except ImportError:
+                pass
+
         # 문서 전체를 한 번에 넘긴다 — 용어 일관성·존댓말 검사가 문서 단위이기 때문이다.
         entries = [
             SubtitleEntry(index=i + 1, start="", end="", text=t) for i, t in enumerate(texts)
         ]
+        for entry, speaker in zip(entries, speakers or []):
+            if speaker:
+                entry.speaker = speaker
         # 언어 모델 패스(되/돼·로서/로써 등 문맥 판단 제안)를 켠다(사용자 2026-11-13).
         # 설정은 교정기 쪽 .env(LLM_MODEL·LLM_BASE_URL)가 정하고, 없으면 교정기가 꺼진
         # 설정으로 떨어뜨린다. 자막을 고치지 않고 flags(제안)만 더한다.
@@ -279,9 +434,8 @@ def load_backend(corrector_path: str | None = None):
             llm_opt = {"llm": normalize_llm_settings(enabled=True)}
         except ImportError:
             pass
-        fixed, flags, _notes = correct_entries(
-            entries, doc_type="subtitle", spacing_mode=spacing_mode,
-            **_corrector_options(root_path, profile), **llm_opt
+        fixed, flags, notes = correct_entries(
+            entries, **_settings_kwargs(settings), **llm_opt
         )
         return (
             [e.text for e in fixed],
@@ -294,6 +448,12 @@ def load_backend(corrector_path: str | None = None):
                 }
                 for f in flags
             ],
+            [
+                {"line_index": getattr(n, "line_index", None),
+                 "message": getattr(n, "message", str(n)),
+                 "is_edit": bool(getattr(n, "is_edit", False))}
+                for n in notes
+            ],
         )
 
     return backend
@@ -304,6 +464,8 @@ def run_korean_pass(
     backend,
     spacing_mode: str = "principle",
     profile: dict | None = None,
+    settings=None,
+    choices: list | None = None,
 ) -> tuple[list[Event], list[Violation]]:
     """대사만 교정기에 넘기고, 바뀐 것과 플래그를 위반으로 돌려준다.
 
@@ -314,18 +476,49 @@ def run_korean_pass(
     if not texts:
         return events, []
 
-    try:
-        corrected, flags = backend(texts, spacing_mode, profile)
-    except TypeError:
-        # 오래된 백엔드(프로파일을 모르는 것)와도 계속 돌아간다.
-        corrected, flags = backend(texts, spacing_mode)
+    if settings is not None:
+        # 화자별 사투리를 쓰려면 교정기가 줄마다 화자를 알아야 한다. 화자 표시는
+        # 교정기에 넘기지 않으므로(경계) 이름만 따로 알려 준다.
+        from .korean_settings import KoreanSettings
+        if isinstance(settings, dict):
+            settings = KoreanSettings.from_dict(settings)
+        # **모든 화자 이름을 넘긴다**(지정한 화자만이 아니라). 교정기는 화자 없는 줄에
+        # 앞 줄 화자를 이어 붙이므로, 다른 화자 이름을 빼면 사투리 화자 뒤의 표준어
+        # 화자 대사까지 «사투리 보호»로 묶여 교정이 빠진다(실제 엔진으로 확인 2026-11-13).
+        wanted = bool(settings.speaker_dialects)
+        by_event = {ev.index: ev for ev in events}
+        speakers = []
+        for event_index, line_no, chunk_no in slots:
+            speakers.append(speaker_of(by_event[event_index].lines[line_no - 1], chunk_no,
+                                       settings.speaker_bracket or "[]") if wanted else None)
+        result = backend(texts, settings.spacing_mode, profile,
+                         settings=settings, speakers=speakers)
+    else:
+        try:
+            result = backend(texts, spacing_mode, profile)
+        except TypeError:
+            # 오래된 백엔드(프로파일을 모르는 것)와도 계속 돌아간다.
+            result = backend(texts, spacing_mode)
+    corrected, flags = result[0], result[1]
+    notes = result[2] if len(result) > 2 else []
+    # 자동 교정 로그를 조각별로 모은다 — 무엇을 왜 고쳤는지 보여야 되돌릴지 정한다.
+    note_by_line: dict[int, list[str]] = {}
+    for note in notes or []:
+        if note.get("line_index") is not None and note.get("is_edit", True):
+            note_by_line.setdefault(int(note["line_index"]), []).append(str(note["message"]))
     if len(corrected) != len(texts):
         raise CorrectorUnavailable("교정기가 돌려준 줄 수가 입력과 다릅니다")
 
     violations: list[Violation] = []
 
-    for (event_index, line_no, _chunk), before, after in zip(slots, texts, corrected):
+    for slot_no, ((event_index, line_no, chunk_no), before, after) in enumerate(
+            zip(slots, texts, corrected)):
         if before != after:
+            why = note_by_line.get(slot_no + 1)
+            if choices is not None:
+                choices.append({"action": "revert", "event_index": event_index,
+                                "line_no": line_no, "chunk_no": chunk_no,
+                                "from": after.strip(), "to": before.strip()})
             violations.append(
                 Violation(
                     rule_id="K01",
@@ -333,7 +526,8 @@ def run_korean_pass(
                     event_index=event_index,
                     line_no=line_no,
                     message="한국어 교정 제안",
-                    detail=f"-> {after.strip()}",
+                    detail=(f"-> {after.strip()}"
+                            + (f"  ({' / '.join(why)})" if why else "")),
                     auto_fixable=True,
                     source="corrector",
                     text=before.strip(),
@@ -344,7 +538,13 @@ def run_korean_pass(
         slot_no = flag["line_index"] - 1
         if not 0 <= slot_no < len(slots):
             continue
-        event_index, line_no, _chunk = slots[slot_no]
+        event_index, line_no, chunk_no = slots[slot_no]
+        if choices is not None:
+            fix = (flag.get("suggested_fix") or "").strip()
+            choices.append({"action": "adopt", "event_index": event_index,
+                            "line_no": line_no, "chunk_no": chunk_no,
+                            "from": (flag.get("original_text") or "").strip(), "to": fix}
+                           if fix else None)
         detail = flag["reason"]
         if flag.get("suggested_fix"):
             detail = f"{flag['suggested_fix']!r} — {detail}"

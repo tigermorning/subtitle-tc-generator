@@ -5526,6 +5526,175 @@ _abc_shutil.rmtree(_abc_tmp.parent, ignore_errors=True)
 
 # --- 결과 ---------------------------------------------------------------
 
+# --- 한국어 교정 설정 · 선택 반영 (교정기 웹앱 2단계 옵션과 결과 조작을 앱 안으로) ----
+# 웹앱(`static/index.html`)과 같은 이름·같은 기본값이어야 한다. 사용 목적만 `자막`이
+# 기본이다(편집기가 다루는 것은 언제나 자막이고, 지금까지도 `subtitle`로 불렀다).
+
+import tempfile as _kstmp  # noqa: E402
+
+from checker.korean import apply_korean_choices as _kapply  # noqa: E402
+from checker.korean import speaker_of as _kspeaker  # noqa: E402
+from checker.korean_settings import (  # noqa: E402
+    KoreanSettings as _KS, diff_from_defaults as _kdiff, effective as _keff,
+    load_overrides as _kload, parse_names as _knames, profile_defaults as _kpdef,
+    save_overrides as _ksave, settings_file as _kfile)
+from checker.pipeline import stage_korean as _kstage  # noqa: E402
+
+_kdef = _KS()
+ok("교정 설정 기본값: 구두점은 원문 유지", (_kdef.ellipsis, _kdef.quotes) == ("keep", "keep"))
+ok("교정 설정 기본값: 띄어쓰기 원칙", _kdef.spacing_mode == "principle")
+ok("교정 설정 기본값: 표지·사투리 비움",
+   not any((_kdef.screen_text_marker, _kdef.line_break_marker, _kdef.position_marker,
+            _kdef.dialect_region, _kdef.names, _kdef.speaker_dialects)))
+ok("교정 설정 기본값: 사용 목적은 자막", _kdef.doc_type == "subtitle")
+ok("모르는 선택값은 기본값으로", _KS.from_dict({"ellipsis": "이상한", "quotes": "full"}).ellipsis
+   == "keep" and _KS.from_dict({"quotes": "full"}).quotes == "full")
+ok("고유명사는 한 줄에 하나, 빈 줄·중복 버림",
+   _knames("연실\n\n철수\n연실 \n") == ["연실", "철수"])
+
+# 발주처 기본값: 쿠팡은 화자명 소괄호, 어조 대괄호(기존 `_corrector_options`와 같다).
+_kcoupang = _kpdef(load_profile("coupang", "ko", "sdh"))
+ok("쿠팡 기본 화자명은 소괄호", _kcoupang.speaker_bracket == "()", _kcoupang.speaker_bracket)
+ok("쿠팡 기본 어조는 대괄호", _kcoupang.tone_bracket == "[]", _kcoupang.tone_bracket)
+ok("프로파일 없으면 웹앱 기본값", _kpdef(None) == _KS())
+
+# 바꾼 칸만 저장하고, 다시 얹으면 같은 설정이 된다.
+_kprof = load_profile("netflix", "ko", "sdh")
+_kmine = _keff({}, _kprof)
+_kmine.quotes = "full"
+_kmine.names = ["연실"]
+_kmine.speaker_dialects = {"말순": {"region": "경상도", "mode": "assist"}}
+_kover = _kdiff(_kmine, _kprof)
+ok("바꾼 칸만 저장한다", set(_kover) == {"quotes", "names", "speaker_dialects"}, str(_kover))
+ok("저장한 칸을 얹으면 같은 설정", _keff(_kover, _kprof) == _kmine.normalized())
+ok("화자별 사투리는 웹앱처럼 지역이 있는 화자만 map",
+   _kmine.dialect_map() == {"말순": "경상도"} and _kmine.dialect_modes() == {"말순": "assist"})
+
+with _kstmp.TemporaryDirectory() as _kd:
+    _ksrt = Path(_kd) / "작품.srt"
+    _ksrt.write_text("1\n00:00:01,000 --> 00:00:02,000\n안녕\n", encoding="utf-8")
+    _kbefore = _ksrt.read_bytes()
+    _kpath = _ksave(_ksrt, _kover)
+    ok("설정은 작품 작업 폴더에 저장된다",
+       _kpath == _kfile(_ksrt) and _kpath.parent.name == "작품.work", str(_kpath))
+    ok("저장한 설정을 다시 읽는다", _kload(_ksrt) == _kover)
+    ok("원본 자막은 건드리지 않는다", _ksrt.read_bytes() == _kbefore)
+    _kpath.write_text("{깨짐", encoding="utf-8")
+    ok("깨진 설정 파일은 빈 값", _kload(_ksrt) == {})
+ok("자막 경로가 없으면 빈 값", _kload(None) == {})
+
+# 화자 이름 — 화자별 사투리를 교정기에 넘기려면 조각마다 화자를 알아야 한다.
+ok("대괄호 화자를 읽는다", _kspeaker("[말순] 밥 묵었나", 1) == "말순")
+ok("하이픈 뒤 화자도 읽는다", _kspeaker("- [말순] 밥 묵었나", 2) == "말순")
+ok("화자가 없으면 None", _kspeaker("밥 묵었나", 0) is None)
+ok("소괄호 화자는 대사 조각 안에서 읽는다", _kspeaker("(말순) 밥 묵었나", 0, "()") == "말순")
+
+# 설정을 받는 백엔드: 받은 값을 기록하고, 로그(자동 교정 이유)도 돌려준다.
+_kcalls = {}
+
+
+def _kbackend(texts, spacing_mode="principle", profile=None, settings=None, speakers=None):
+    _kcalls.update(spacing=spacing_mode, settings=settings, speakers=list(speakers or []))
+    fixed = [t.replace("할수", "할 수") for t in texts]
+    flags = [{"line_index": i + 1, "original_text": t.replace("할수", "할 수"),
+              "suggested_fix": t.replace("되요", "돼요"), "reason": "되/돼"}
+             for i, t in enumerate(texts) if "되요" in t]
+    notes = [{"line_index": i + 1, "message": "'할수' -> '할 수' (의존 명사)", "is_edit": True}
+             for i, t in enumerate(texts) if "할수" in t]
+    return fixed, flags, notes
+
+
+_kevents = [Event(1, 1000, 2500, "[말순] 나도 할수 있다"),
+            Event(2, 3000, 4500, "- 그건 안 되요\n- [철수] 왜?")]
+_ksettings = _KS(spacing_mode="allowance",
+                 speaker_dialects={"말순": {"region": "경상도", "mode": "protect"}})
+_kres = _kstage(_kevents, _kprof, backend=_kbackend, settings=_ksettings)
+ok("설정의 띄어쓰기 기준이 교정기로 간다", _kcalls["spacing"] == "allowance")
+ok("설정이 교정기로 간다", _kcalls["settings"] is not None
+   and _kcalls["settings"].speaker_dialects == _ksettings.speaker_dialects)
+ok("조각마다 화자 이름이 간다", _kcalls["speakers"] == ["말순", None, "철수"], str(_kcalls["speakers"]))
+_krevert = [v for v in _kres.violations if v["rule_id"] == "K01"]
+_kadopt = [v for v in _kres.violations if v["rule_id"] == "K02"]
+ok("자동 교정 지적에 되돌리기가 붙는다",
+   len(_krevert) == 1 and _krevert[0]["choice"]["action"] == "revert", str(_krevert))
+ok("자동 교정 이유가 지적에 보인다", "의존 명사" in _krevert[0]["detail"], _krevert[0]["detail"])
+ok("제안 있는 확인 항목에 채택이 붙는다",
+   len(_kadopt) == 1 and _kadopt[0]["choice"]["to"] == "그건 안 돼요", str(_kadopt))
+ok("자동 교정은 얹혀 있다", "할 수" in _kres.events[0].text)
+
+# 선택 반영: 되돌리기 → 원문, 채택 → 제안. 타임코드·자막 문법은 그대로.
+_kchosen, _kr, _ka, _km = _kapply(_kres.events,
+                                  [_krevert[0]["choice"], _kadopt[0]["choice"]])
+ok("되돌리면 원문으로", _kchosen[0].text == "[말순] 나도 할수 있다", _kchosen[0].text)
+ok("채택하면 제안으로", _kchosen[1].text == "- 그건 안 돼요\n- [철수] 왜?", _kchosen[1].text)
+ok("반영 건수를 센다", (_kr, _ka, _km) == (1, 1, 0), str((_kr, _ka, _km)))
+ok("선택 반영은 타임코드를 안 바꾼다",
+   [(e.start_ms, e.end_ms) for e in _kchosen] == [(e.start_ms, e.end_ms) for e in _kevents])
+_, _kr2, _ka2, _km2 = _kapply(_kchosen, [_kadopt[0]["choice"]])
+ok("이미 바뀐 자리는 건너뛴다", (_kr2, _ka2, _km2) == (0, 0, 1))
+
+# 옛 백엔드(설정을 모르는 2인자)는 설정이 없을 때 전과 같이 돈다.
+_kold, _ = run_korean_pass([Event(1, 0, 1000, "[진수] 어디 갔었어")], fake_backend)
+ok("옛 백엔드도 계속 돈다", "갔었어요" in _kold[0].text)
+
+# 교정기가 있으면 웹앱 api.py와 같은 인자로 옮겨지는지 본다.
+try:
+    from checker.korean import _settings_kwargs as _kkw
+    _kargs = _kkw(_KS(quotes="full", line_break_marker="|", speaker_bracket="()",
+                      spacing_mode="allowance", names=["연실"],
+                      speaker_dialects={"말순": {"region": "", "mode": "assist"}}))
+except ImportError:
+    _kargs = None
+if _kargs is not None:
+    ok("구두점 표기가 간다", _kargs["style"].quotes == "full" and _kargs["style"].ellipsis == "keep")
+    ok("표지가 간다", _kargs["markers"].line_break == "|" and _kargs["markers"].speaker == "()")
+    ok("사용 목적·띄어쓰기가 간다",
+       _kargs["doc_type"] == "subtitle" and _kargs["spacing_mode"] == "allowance")
+    ok("지역 없는 화자는 모드만 간다",
+       "dialect_map" not in _kargs and _kargs["dialect_modes"] == {"말순": "assist"})
+    ok("일반 글은 표지·구두점을 넘기지 않는다",
+       "markers" not in _kkw(_KS(doc_type="prose")) and "style" not in _kkw(_KS(doc_type="prose")))
+
+# 화면: 설정 창과 결과 표의 «선택 반영하기».
+try:
+    from PySide6.QtCore import Qt as _kQt
+    from PySide6.QtWidgets import QApplication as _kQApp
+except ImportError:
+    _kQApp = None
+if _kQApp is not None:
+    _kqt = _kQApp.instance() or _kQApp([])
+    from app.korean_settings import KoreanSettingsDialog as _KDlg
+    _kdlg = _KDlg(_kmine, ["경상도", "전라도"], "시험")
+    ok("설정 창은 받은 값으로 열리고 그대로 돌려준다",
+       _kdlg.result_settings() == _kmine.normalized(), str(_kdlg.result_settings()))
+    _kdlg.doc_buttons["prose"].setChecked(True)
+    ok("일반 글이면 자막 전용 칸을 감춘다", _kdlg.marker_group.isHidden())
+    _kdlg.new_speaker.setText("철수")
+    _kdlg._add_clicked()
+    ok("화자를 더한다", "철수" in _kdlg.result_settings().speaker_dialects)
+
+    from app.window import MainWindow as _KWin
+    _kwin = _KWin(restore=False)
+    _kwin.model.replace(list(_kres.events))
+    _kwin._show_violations(_kres.violations)
+    _krows = {_kwin.results.item(r, 2).text(): r for r in range(_kwin.results.rowCount())
+              if _kwin.results.item(r, 2).text()}
+    ok("결과 표에 되돌리기·채택 칸이 선다", set(_krows) == {"되돌리기", "채택"}, str(_krows))
+    ok("반영할 것이 있으면 단추가 켜진다", _kwin.apply_choices_button.isEnabled())
+    _kwin.apply_korean_choices()
+    ok("아무것도 안 고르면 안내만", "체크하세요" in _kwin.apply_choices_note.text()
+       and _kwin.model.events[1].text == _kres.events[1].text)
+    _kwin.results.item(_krows["채택"], 2).setCheckState(_kQt.Checked)
+    _kwin.apply_korean_choices()
+    ok("채택하면 자막 표가 바뀐다", "안 돼요" in _kwin.model.events[1].text,
+       _kwin.model.events[1].text)
+    ok("반영한 줄은 목록에서 빠진다",
+       all((v.get("choice") or {}).get("action") != "adopt" for v in _kwin._violations))
+    ok("교정 설정 단추가 ② 옆에 있다", hasattr(_kwin, "korean_settings_button"))
+    ok("작품을 안 열었으면 바꾼 칸이 없다", _kwin.korean_overrides == {})
+    _kwin.close()
+
+
 print(f"통과 {PASSED}건")
 if FAILED:
     print(f"실패 {len(FAILED)}건")

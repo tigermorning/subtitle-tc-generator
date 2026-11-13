@@ -421,6 +421,7 @@ def stage_terms(events: list[Event], profile: dict | None = None, *,
 def stage_korean(events: list[Event], profile: dict | None = None, *,
                  corrector_path: str | None = None, backend=None,
                  spacing_mode: str = "principle",
+                 settings=None,
                  progress: Progress | None = None) -> StageResult:
     """한국어 교정기를 붙인다. 자막 문법은 교정기에 넘기지 않는다(`korean.py`).
 
@@ -440,12 +441,20 @@ def stage_korean(events: list[Event], profile: dict | None = None, *,
             return StageResult(events=list(events),
                                notes=[f"한국어 교정 레인 건너뜀: {exc}"])
 
+    # `settings`(한국어 교정 설정, `korean_settings.py`)가 있으면 웹앱 옵션을 모두 넘긴다.
+    # `choices`는 지적마다 «되돌리기»(K01)·«제안 채택»(K02) 정보를 같은 순서로 받는다 —
+    # 화면이 고른 것을 `korean.apply_korean_choices`로 반영한다.
+    choices: list = []
     fixed, violations = run_korean_pass(events, backend, spacing_mode=spacing_mode,
-                                       profile=profile)
+                                       profile=profile, settings=settings,
+                                       choices=choices)
+    rows = [v.to_dict() for v in violations]
+    for row, choice in zip(rows, choices):
+        if choice:
+            row["choice"] = choice
     edits = _edits(events, fixed)
     return StageResult(events=list(fixed), changed=len(edits),
-                       violations=[v.to_dict() for v in violations],
-                       extra={"edits": edits})
+                       violations=rows, extra={"edits": edits})
 
 
 # ---------------------------------------------------------------- 단계 ③ 규정 자동교정
@@ -493,6 +502,9 @@ class CorrectOptions:
     # 아니라 "고쳤다면 됐을 것"을 설명하게 된다.
     apply_korean: bool = True
     spacing_mode: str = "principle"
+    # 한국어 교정 설정(`korean_settings.KoreanSettings` 또는 그 dict). 없으면 발주처
+    # 프로파일 기본값만 넘긴다 — 설정 창이 생기기 전과 같은 결과다.
+    korean_settings: object | None = None
     apply_fixes: bool = True
     children: bool = False
     fps: float | None = None
@@ -525,7 +537,8 @@ def correct_and_check(events: list[Event], profile: dict, options: CorrectOption
     if options.korean:
         result = stage_korean(current, profile, corrector_path=options.corrector_path,
                               backend=options.backend,
-                              spacing_mode=options.spacing_mode, progress=say)
+                              spacing_mode=options.spacing_mode,
+                              settings=options.korean_settings, progress=say)
         korean_violations = result.violations
         notes += result.notes
         if options.apply_korean:

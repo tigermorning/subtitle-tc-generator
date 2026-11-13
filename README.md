@@ -58,7 +58,7 @@
 ```
 소재     [자막 만들기]                     영상 -> 전사 -> 재분할 -> 스포팅
 번역     [① 1차 번역] [② 번역 감수 (회차)] [③ 자막 윤문·QA]
-한국어   [② 한국어 교정] [③ 자막 QA]
+한국어   [② 한국어 교정] [교정 설정...] [③ 자막 QA]
 조사     [용어표] [캐릭터 문서]
 ```
 
@@ -223,6 +223,17 @@ python -m checker file.srt -l ko -k sdh --korean --ksc-path /path/to/korean-subt
 교정기 결과는 `source: corrector`로 표시되고 `K01`(교정 제안)·`K02`(확인 필요)로
 갈린다. 교정기는 kiwipiepy(약 310MB)와 국립국어원 API 키가 필요하다 — 없으면 그
 레인만 건너뛰고 규정 검사는 계속한다.
+
+**화면에서는 교정기 웹앱과 같은 옵션을 쓴다**(웹앱을 따로 열지 않아도 된다).
+`② 한국어 교정` 옆 `교정 설정...`(또는 메뉴 `단계 → 한국어 교정 설정...`)에서 웹앱
+«2단계 · 교정 옵션»과 같은 이름·기본값으로 고른다: 사용 목적(자막/일반 글), 구두점
+표기(말줄임표·따옴표, 기본 원문 유지), 자막 편집 표지(화면자막·줄바꿈·위치·화자명·
+어조), 띄어쓰기 기준(원칙/허용), 고유명사·요리·음료 이름, 사투리(문서 전체·화자별).
+사용 목적만 웹앱과 달리 `자막`이 기본이다. 발주처 기준이 정한 화자명·어조 부호와
+말줄임표는 미리 채워지고, 바꾼 칸만 작품 작업 폴더 `<자막이름>.work/korean-settings.json`
+에 저장된다(`checker/korean_settings.py`). 결과는 `검사 결과` 독의 `반영` 칸에서 자동
+교정(K01)은 `되돌리기`, 제안이 있는 확인 항목(K02)은 `채택`으로 골라 `선택 반영하기`를
+누른다 — 웹앱처럼 되돌리기 먼저, 이미 바뀐 자리는 건너뛴다(`korean.apply_korean_choices`).
 
 ### 자동 교정 (`--fix`)
 
@@ -484,8 +495,8 @@ kiwi를 부르면 적재에 1~2분이 걸린다. **애매하면 말하지 않는
 ## 개발
 
 ```bash
-python3 tests/run_tests.py     # 1238건 (GUI 제외)
-cmd.exe /c "..\..\korean-subtitle-corrector-project\korean-subtitle-corrector\.venv\Scripts\python.exe tests\run_tests.py"   # 1244건
+python3 tests/run_tests.py     # 1272건 (GUI 제외)
+cmd.exe /c "..\..\korean-subtitle-corrector-project\korean-subtitle-corrector\.venv\Scripts\python.exe tests\run_tests.py"   # 1288건
 ```
 
 시스템 파이썬에는 PySide6가 없다. `app/`을 건드리면 venv 쪽으로도 돌린다.

@@ -139,10 +139,12 @@ class CheckJob(Job):
     """규정·한국어 검사. 결과는 (교정된 자막, 위반 목록)."""
 
     def __init__(self, events, profile: dict, fix: bool, korean: bool,
-                 corrector_path: str | None, job_rules=None):
+                 corrector_path: str | None, job_rules=None, korean_settings=None):
         super().__init__()
         self.events, self.profile, self.fix = events, profile, fix
         self.korean, self.corrector_path, self.job_rules = korean, corrector_path, job_rules
+        # 한국어 교정 설정(작품 단위, `checker/korean_settings.py`). 없으면 프로파일 기본값.
+        self.korean_settings = korean_settings
 
     def run(self) -> None:
         def work():
@@ -162,6 +164,7 @@ class CheckJob(Job):
                     corrector_path=self.corrector_path,
                     apply_fixes=bool(self.fix),
                     job_rules=self.job_rules,
+                    korean_settings=self.korean_settings,
                 ),
                 progress=self.say,
             )
