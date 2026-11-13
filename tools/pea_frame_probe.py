@@ -107,21 +107,27 @@ def main():
     ap.add_argument("--text", default="a person speaking")
     ap.add_argument("--chunk", type=float, default=60.0, help="초. GPU 메모리가 모자라면 30")
     ap.add_argument("--out", default="pea_out")
+    ap.add_argument("--scores", help="이미 저장한 scores.npz로 채점만 다시 한다(모델을 돌리지 않음)")
     a = ap.parse_args()
-    import torch
-    dev ="cuda" if torch.cuda.is_available() else "cpu"
-    print("장치:", dev, torch.cuda.get_device_name(0) if dev == "cuda" else "")
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
 
-    scores, times, fd = frame_scores(a.wav, a.model, a.text, a.chunk, dev)
-    np.savez(out / "scores.npz", scores=scores, times=times)
+    if a.scores:
+        z = np.load(a.scores)
+        scores, times = z["scores"], z["times"]
+        fd = float(times[1] - times[0])
+    else:
+        import torch
+        dev = "cuda" if torch.cuda.is_available() else "cpu"
+        print("장치:", dev, torch.cuda.get_device_name(0) if dev == "cuda" else "")
+        scores, times, fd = frame_scores(a.wav, a.model, a.text, a.chunk, dev)
+        np.savez(out / "scores.npz", scores=scores, times=times)
     ref = parse_srt(a.srt)
     d0 = compare(ref, [[0, 1]])
     print(f"비교 자막 {len(ref)}개, 붙은 경계라 뺀 수 {int(np.isnan(d0).sum())}/{d0.size}")
     print("임계값  구간수  인 중앙값ms  아웃 중앙값ms  ±42ms  ±125ms")
     rows, best = [], None
-    for th in [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7]:
+    for th in [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]:
         sg = segments(scores, times, fd, th)
         d = compare(ref, sg)
         r = dict(th=th, n=len(sg), in_med=float(np.nanmedian(d[:, 0])), out_med=float(np.nanmedian(d[:, 1])),
